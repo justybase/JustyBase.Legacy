@@ -154,7 +154,7 @@ namespace JustyBaseLegacy.UI
         {
             CurrentTB.DecreaseIndent();
         }
-        private void ShowLoginForm()
+        private async void ShowLoginForm()
         {
             using LoginForm loginForm = _loginFormFactory.Create();
             loginForm.SetRememberAsDefaultToFalse();
@@ -164,18 +164,60 @@ namespace JustyBaseLegacy.UI
                 return;
             }
             var selection = loginForm.Result ?? throw new InvalidOperationException("A login selection is required.");
+            string previousConnectionName = SelectedConnectionName;
+            string newConnectionName = selection.Profile.Name;
+
             _applicationSession.SetLogin(selection, loginForm.Profiles);
             _sessionAdapter.Apply(_applicationSession);
 
-            SelectedConnectionName = selection.Profile.Name;
-            SelectedDatabase = selection.Profile.Database;
-            if (!SQLUpperPanel.ConnectionsList.Contains(selection.Profile.Name))
+            // Credentials live in LoginDataDic, but live sessions freeze ConnectionString at creation.
+            // Evict so CbConnectionsSelectedIndexChanged rebuilds the provider and re-downloads schema.
+            // Only treat as rename when the previous name is gone from profiles (not add/switch).
+            bool previousRenamedAway = !string.IsNullOrEmpty(previousConnectionName)
+                && !string.Equals(previousConnectionName, newConnectionName, StringComparison.OrdinalIgnoreCase)
+                && !_generalDbService.LoginDataDic.ContainsKey(previousConnectionName);
+
+            if (previousRenamedAway)
             {
-                SQLUpperPanel.ConnectionsList.Add(selection.Profile.Name);
+                IGeneralDbService.ConnectionSessions.Remove(previousConnectionName);
+            }
+            IGeneralDbService.ConnectionSessions.Remove(newConnectionName);
+
+            if (previousRenamedAway)
+            {
+                foreach (TabPage tab in EditorTabPages)
+                {
+                    (_tabManager.GetEditorPanel(tab) as SQLUpperPanel)?.RemoveConnection(previousConnectionName);
+                }
+                if (SQLUpperPanel.ConnectionsList.Contains(previousConnectionName))
+                {
+                    SQLUpperPanel.ConnectionsList.Remove(previousConnectionName);
+                }
+            }
+
+            SelectedConnectionName = newConnectionName;
+            SelectedDatabase = selection.Profile.Database;
+            if (!SQLUpperPanel.ConnectionsList.Contains(newConnectionName))
+            {
+                SQLUpperPanel.ConnectionsList.Add(newConnectionName);
             }
 
             _applicationSettingsContext.Config.FastLogin = selection.FastLogin;
-            this.Text = "JustyBaseLegacy - " + selection.Profile.Name;
+            this.Text = "JustyBaseLegacy - " + newConnectionName;
+
+            try
+            {
+                await CbConnectionsSelectedIndexChanged(enabled => CurrentUpper?.SetEnabledConnectionsDatabases(enabled));
+            }
+            catch (OperationCanceledException)
+            {
+                // Superseded by shutdown or a later connection switch.
+            }
+            catch (Exception ex)
+            {
+                _loggerLoud.LogError("Schema refresh after connection edit failed", ex);
+                SchemaRefreshOptionEnable(true);
+            }
         }
         private History _history;
         private void HistoryToolStripMenuItem_Click(object sender, EventArgs e)

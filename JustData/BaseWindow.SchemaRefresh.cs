@@ -148,6 +148,9 @@ namespace JustyBaseLegacy.UI
                     if (!schemaDownloadSucceeded)
                     {
                         NetezzaSchemaRefreshErrorInfo();
+                        // Drop the session so a later edit/save can recreate it with a fresh ConnectionString
+                        // (same pattern as the non-Netezza InitDb failure path below).
+                        IGeneralDbService.ConnectionSessions.Remove(selConnName);
                     }
 
                     if (schemaDownloadSucceeded)
@@ -163,13 +166,11 @@ namespace JustyBaseLegacy.UI
                     SchemaRefreshOptionEnable(true);
                     chageEnableStateOfNotAddedTab(true);
 
-                    NetezzaRefreshMode netezzaRefresh = _applicationSettingsContext.Config.RefreshMode switch
+                    if (schemaDownloadSucceeded)
                     {
-                        1 => NetezzaRefreshMode.full,
-                        _ => NetezzaRefreshMode.partial
-                    };
-                    await RefreshTableListInternalAsync(selConnName, false);
-                    statusTextBox.Text = $"Schema downloaded";
+                        await RefreshTableListInternalAsync(selConnName, false);
+                        statusTextBox.Text = $"Schema downloaded";
+                    }
                    
                 }
 
