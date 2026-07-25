@@ -96,13 +96,15 @@ public sealed class LegacySchemaSyncTests
         Assert.Equal("JUST_DATA", employees.Database);
         Assert.False(employees.IsView);
         Assert.Equal("Employee roster", employees.Description);
+        Assert.NotNull(employees.Columns);
         Assert.Equal(2, employees.Columns.Count);
-        Assert.Equal("ID", employees.Columns![0].Name);
+        Assert.Equal("ID", employees.Columns[0].Name);
         Assert.Equal("INTEGER", employees.Columns[0].DataType);
 
         var view = Assert.Single(snapshot.Tables, t => t.Name == "V_EMP");
         Assert.True(view.IsView);
-        Assert.Empty(view.Columns!);
+        Assert.NotNull(view.Columns);
+        Assert.Empty(view.Columns);
         Assert.True(provider.HasTables());
     }
 
