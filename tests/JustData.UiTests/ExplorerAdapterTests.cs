@@ -125,17 +125,20 @@ public sealed class ExplorerAdapterTests
         {
             [connectionName] = []
         });
-        NetezzaHelpers.baseTableDictionary[connectionName] = new Dictionary<int, NetezzaTableInfo>
+        var tables = new Dictionary<string, Dictionary<int, NetezzaTableInfo>>
         {
-            [42] = new()
+            [connectionName] = new()
             {
-                DATABASE_ID = 7,
-                TABLE_NAME = "DIMDATE",
-                TABLE_DESC = string.Empty,
-                TABLE_OWNER = "ADMIN",
-                TABLE_SCHEMA = "ADMIN",
-                TABLE_OBJECT_OWNER = "ADMIN",
-                TABLE_KIND = TypeInDatabase.table
+                [42] = new()
+                {
+                    DATABASE_ID = 7,
+                    TABLE_NAME = "DIMDATE",
+                    TABLE_DESC = string.Empty,
+                    TABLE_OWNER = "ADMIN",
+                    TABLE_SCHEMA = "ADMIN",
+                    TABLE_OBJECT_OWNER = "ADMIN",
+                    TABLE_KIND = TypeInDatabase.table
+                }
             }
         };
         var generated = new NzGetTableCodeResult(new StringBuilder("CREATE TABLE JUST_DATA.ADMIN.DIMDATE"));
@@ -143,34 +146,34 @@ public sealed class ExplorerAdapterTests
                 Arg.Any<StringBuilder>(), helpers, connectionName, 42,
                 Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<List<string>?>(), Arg.Any<bool>())
             .Returns(new ValueTask<NzGetTableCodeResult>(generated));
-        IGeneralDbService.ConnectionSessions.Set(connectionName, database);
+        var sessions = new ConnectionSessionRegistry();
+        sessions.Set(connectionName, database);
 
-        try
-        {
-            var service = new LegacySchemaDdlService(netezzaDdl, helpers);
-            var node = new SchemaNode(
-                "ddl-test/JUST_DATA/Tables/42",
-                "DIMDATE",
-                SchemaNodeKind.Table,
-                new(connectionName, "JUST_DATA", "Tables", "DIMDATE"),
-                true,
-                LegacyObjectId: 42,
-                ProviderKind: TypeInDatabase.table.ToString());
+        var schemaTables = Substitute.For<INetezzaSchemaTableCatalog>();
+        schemaTables.TablesByConnection.Returns(tables);
 
-            string ddl = await service.GetDdlAsync(new(node, SchemaDdlKind.Create));
-            string select = await service.GetDdlAsync(new(node, SchemaDdlKind.SelectTop));
+        var service = new LegacySchemaDdlService(
+            netezzaDdl,
+            helpers,
+            sessions,
+            schemaTables);
+        var node = new SchemaNode(
+            "ddl-test/JUST_DATA/Tables/42",
+            "DIMDATE",
+            SchemaNodeKind.Table,
+            new(connectionName, "JUST_DATA", "Tables", "DIMDATE"),
+            true,
+            LegacyObjectId: 42,
+            ProviderKind: TypeInDatabase.table.ToString());
 
-            Assert.Equal("CREATE TABLE JUST_DATA.ADMIN.DIMDATE", ddl);
-            Assert.Contains("FROM\r\n    JUST_DATA.ADMIN.DIMDATE", select);
-            await netezzaDdl.Received(1).GetTableCodeById(
-                Arg.Any<StringBuilder>(), helpers, connectionName, 42,
-                Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<List<string>?>(), Arg.Any<bool>());
-        }
-        finally
-        {
-            IGeneralDbService.ConnectionSessions.Remove(connectionName);
-            NetezzaHelpers.baseTableDictionary.Remove(connectionName);
-        }
+        string ddl = await service.GetDdlAsync(new(node, SchemaDdlKind.Create));
+        string select = await service.GetDdlAsync(new(node, SchemaDdlKind.SelectTop));
+
+        Assert.Equal("CREATE TABLE JUST_DATA.ADMIN.DIMDATE", ddl);
+        Assert.Contains("FROM\r\n    JUST_DATA.ADMIN.DIMDATE", select);
+        await netezzaDdl.Received(1).GetTableCodeById(
+            Arg.Any<StringBuilder>(), helpers, connectionName, 42,
+            Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<List<string>?>(), Arg.Any<bool>());
     }
 
     [Fact]

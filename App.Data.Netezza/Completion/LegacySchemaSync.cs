@@ -1,6 +1,7 @@
 using AppBase.Common;
-using AppBase.Common.Interfaces;
 using AppBase.Common.Enums;
+using AppBase.Common.Interfaces;
+using AppBase.Data.Core.Interfaces;
 using AppBase.Data.Core.Models;
 using JustyBase.Netezza.Models;
 using JustyBase.Netezza.Schema;
@@ -20,12 +21,13 @@ public static class LegacySchemaSync
     public static NetezzaSchemaSnapshot SyncConnection(
         InMemorySchemaProvider schemaProvider,
         INetezzaCompletionContext completionContext,
+        INetezzaSchemaTableCatalog schemaTables,
         string connectionName)
     {
-        if (schemaProvider is null || completionContext is null || string.IsNullOrEmpty(connectionName))
+        if (schemaProvider is null || completionContext is null || schemaTables is null || string.IsNullOrEmpty(connectionName))
             return NetezzaSchemaSnapshot.Empty;
 
-        var snapshot = BuildSnapshot(completionContext, [connectionName]);
+        var snapshot = BuildSnapshot(completionContext, schemaTables, [connectionName]);
         NetezzaSchemaProviderAdapter.Apply(schemaProvider, snapshot);
         return snapshot;
     }
@@ -35,28 +37,31 @@ public static class LegacySchemaSync
     /// </summary>
     public static void SyncAllLoadedConnections(
         InMemorySchemaProvider schemaProvider,
-        INetezzaCompletionContext completionContext)
+        INetezzaCompletionContext completionContext,
+        INetezzaSchemaTableCatalog schemaTables)
     {
-        if (schemaProvider is null || completionContext?.DatabaseSchemaLookup is null)
+        if (schemaProvider is null || completionContext?.DatabaseSchemaLookup is null || schemaTables is null)
             return;
 
         NetezzaSchemaProviderAdapter.Apply(
             schemaProvider,
-            BuildSnapshot(completionContext, completionContext.DatabaseSchemaLookup.Keys));
+            BuildSnapshot(completionContext, schemaTables, completionContext.DatabaseSchemaLookup.Keys));
     }
 
     public static void SyncSelectedConnection(
         InMemorySchemaProvider schemaProvider,
-        INetezzaCompletionContext completionContext)
+        INetezzaCompletionContext completionContext,
+        INetezzaSchemaTableCatalog schemaTables)
     {
-        if (string.IsNullOrEmpty(completionContext?.SelectedConnectionName))
+        if (string.IsNullOrEmpty(completionContext?.SelectedConnectionName) || schemaTables is null)
             return;
 
-        SyncConnection(schemaProvider, completionContext, completionContext.SelectedConnectionName);
+        SyncConnection(schemaProvider, completionContext, schemaTables, completionContext.SelectedConnectionName);
     }
 
     private static NetezzaSchemaSnapshot BuildSnapshot(
         INetezzaCompletionContext completionContext,
+        INetezzaSchemaTableCatalog schemaTables,
         IEnumerable<string> connectionNames)
     {
         var tables = new List<NetezzaSchemaTable>();
@@ -64,7 +69,7 @@ public static class LegacySchemaSync
         foreach (var connectionName in connectionNames)
         {
             if (!completionContext.DatabaseSchemaLookup.TryGetValue(connectionName, out var databases)
-                || !NetezzaHelpers.baseTableDictionary.TryGetValue(connectionName, out var tablesById))
+                || !schemaTables.TablesByConnection.TryGetValue(connectionName, out var tablesById))
                 continue;
 
             completionContext.ColumnTablesDictionary.TryGetValue(connectionName, out var columnsByIndex);

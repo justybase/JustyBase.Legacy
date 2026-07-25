@@ -1,6 +1,7 @@
 ﻿using AppBase.Common;
 using AppBase.Common.Enums;
 using AppBase.Data;
+using AppBase.Data.Core.Core;
 using AppBase.Data.Core.Interfaces;
 using AppBase.Data.Core.Models;
 using AppBase.Data.Ddl;
@@ -17,8 +18,18 @@ namespace AppBase.Services;
 public sealed class NetezzaHelperService : INetezzaHelperService
 {
     private readonly NetezzaDdlTextBuilder _ddlBuilder = new();
+    private readonly IConnectionSessionRegistry _connectionSessions;
+    private readonly INetezzaSchemaTableCatalog _schemaTables;
 
     private INetezzaSchemaRefreshHost _schemaRefreshHost;
+
+    public NetezzaHelperService(
+        IConnectionSessionRegistry connectionSessions,
+        INetezzaSchemaTableCatalog schemaTables)
+    {
+        _connectionSessions = connectionSessions ?? throw new ArgumentNullException(nameof(connectionSessions));
+        _schemaTables = schemaTables ?? throw new ArgumentNullException(nameof(schemaTables));
+    }
 
     public void Initialize(INetezzaSchemaRefreshHost schemaRefreshHost)
     {
@@ -38,7 +49,7 @@ public sealed class NetezzaHelperService : INetezzaHelperService
     public const string SEARCH_PROCEDURE_SQL = NetezzaHelpers.SEARCH_PROCEDURE_SQL;
     public readonly string USER_GROUPS = NetezzaHelpers.USER_GROUPS;
 
-    private Dictionary<string, Dictionary<int, NetezzaTableInfo>> BaseTableDictionary => NetezzaHelpers.baseTableDictionary;
+    private Dictionary<string, Dictionary<int, NetezzaTableInfo>> BaseTableDictionary => _schemaTables.TablesByConnection;
 
     public string ServerVersion = "";
     public bool SqliteInProgress = false;
@@ -70,7 +81,7 @@ public sealed class NetezzaHelperService : INetezzaHelperService
         string connectionName, int objectID, string overrideTableName = null, string middleCode = null, string endingCode = null, List<string> distOverride = null
         ,bool forceNotOnline = false)
     {
-        if (!IGeneralDbService.GeneralDic.TryGetValue(connectionName, out var gdb) || gdb is not INetezza)
+        if (!_connectionSessions.TryGetValue(connectionName, out var gdb) || gdb is not INetezza)
         {
             throw new Exception("actual connection is not netezza");
         }
@@ -82,6 +93,8 @@ public sealed class NetezzaHelperService : INetezzaHelperService
 
         var input = LegacyDdlSchemaAdapter.BuildTableInput(
             databaseRuntimeContext,
+            _schemaTables,
+            _connectionSessions,
             connectionName,
             objectID,
             overrideTableName,
@@ -108,7 +121,12 @@ public sealed class NetezzaHelperService : INetezzaHelperService
             await _schemaRefreshHost?.RefreshTableListInternalAsync(connectionName, false);
         }
 
-        var input = LegacyDdlSchemaAdapter.BuildTableInput(databaseRuntimeContext, connectionName, objectID);
+        var input = LegacyDdlSchemaAdapter.BuildTableInput(
+            databaseRuntimeContext,
+            _schemaTables,
+            _connectionSessions,
+            connectionName,
+            objectID);
         StringBuilder sb = new();
         var result = _ddlBuilder.AppendRecreateTable(sb, input);
 
@@ -121,7 +139,7 @@ public sealed class NetezzaHelperService : INetezzaHelperService
 
     public async Task<string> GetViewCodeById(AppBase.Common.Interfaces.IDatabaseRuntimeContext databaseRuntimeContext, int objectId, string connectionName)
     {
-        if (!NetezzaHelpers.baseTableDictionary.TryGetValue(connectionName, out var baseTables)
+        if (!BaseTableDictionary.TryGetValue(connectionName, out var baseTables)
             || !baseTables.TryGetValue(objectId, out var tableInfo))
         {
             return $"-- object {objectId} not found in schema";
@@ -135,7 +153,7 @@ public sealed class NetezzaHelperService : INetezzaHelperService
 
         string definition = await Task.Run(() =>
         {
-            if (!IGeneralDbService.GeneralDic.TryGetValue(connectionName, out var gdb))
+            if (!_connectionSessions.TryGetValue(connectionName, out var gdb))
                 return "-- connection not available";
             using DbConnection connection = gdb.GetConnection(databaseName);
             connection.Open();
@@ -150,7 +168,12 @@ public sealed class NetezzaHelperService : INetezzaHelperService
             return cmd2.ExecuteScalar() as string ?? string.Empty;
         });
 
-        var input = LegacyDdlSchemaAdapter.BuildViewInput(databaseRuntimeContext, connectionName, objectId, definition);
+        var input = LegacyDdlSchemaAdapter.BuildViewInput(
+            databaseRuntimeContext,
+            _schemaTables,
+            connectionName,
+            objectId,
+            definition);
         var sb = new StringBuilder();
         _ddlBuilder.AppendCreateView(sb, input);
         return sb.ToString();
@@ -158,7 +181,7 @@ public sealed class NetezzaHelperService : INetezzaHelperService
 
     public async Task<string> GetExternaTableCode(AppBase.Common.Interfaces.IDatabaseRuntimeContext databaseRuntimeContext, int OBJECT_ID, string connectionName, bool force = false)
     {
-        if (!NetezzaHelpers.baseTableDictionary.TryGetValue(connectionName, out var baseTables)
+        if (!BaseTableDictionary.TryGetValue(connectionName, out var baseTables)
             || !baseTables.TryGetValue(OBJECT_ID, out var tableInfo))
         {
             return "-- object not found in schema";
@@ -169,7 +192,7 @@ public sealed class NetezzaHelperService : INetezzaHelperService
             return "-- database not found in schema";
         }
         string databaseName = dbInfo.DatabaseName;
-        if (!IGeneralDbService.GeneralDic.TryGetValue(connectionName, out var generalDb))
+        if (!_connectionSessions.TryGetValue(connectionName, out var generalDb))
         {
             return "-- connection not available";
         }
@@ -185,7 +208,12 @@ public sealed class NetezzaHelperService : INetezzaHelperService
             options = new NetezzaExternalTableOptions();
         }
 
-        var input = LegacyDdlSchemaAdapter.BuildExternalInput(databaseRuntimeContext, connectionName, OBJECT_ID, options);
+        var input = LegacyDdlSchemaAdapter.BuildExternalInput(
+            databaseRuntimeContext,
+            _schemaTables,
+            connectionName,
+            OBJECT_ID,
+            options);
         var sb = new StringBuilder();
         _ddlBuilder.AppendCreateExternal(sb, input);
         return sb.ToString();

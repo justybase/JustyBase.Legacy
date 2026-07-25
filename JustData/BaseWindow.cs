@@ -260,6 +260,8 @@ namespace JustyBaseLegacy.UI
         private readonly ILogger _loggerLoud;
         private readonly IImportExportTasks _importExportTasks;
         private readonly IGeneralDbService _generalDbService;
+        private readonly IConnectionSessionRegistry _connectionSessions;
+        private readonly INetezzaSchemaTableCatalog _schemaTables;
         private readonly JustData.Application.Login.IApplicationSession _applicationSession;
         private readonly GeneralDbSessionAdapter _sessionAdapter;
         private readonly IFormatterService _formatter;
@@ -379,6 +381,8 @@ namespace JustyBaseLegacy.UI
             ITextFileContentReader textFileContentReader,
             IInlineCommandRunner inlineCommandRunner,
             IGeneralDbService generalDbService,
+            IConnectionSessionRegistry connectionSessions,
+            INetezzaSchemaTableCatalog schemaTables,
             IUiHelperService uiHelperService,
             INetezzaHelperService netezzaHelperService,
             IWindowManagementService windowManagementService,
@@ -437,6 +441,8 @@ namespace JustyBaseLegacy.UI
             _recentFileRuntimeContext = recentFileRuntimeContext ?? throw new ArgumentNullException(nameof(recentFileRuntimeContext));
             _snippetInitializationContext = snippetInitializationContext ?? throw new ArgumentNullException(nameof(snippetInitializationContext));
             _generalDbService = generalDbService ?? throw new ArgumentNullException(nameof(generalDbService));
+            _connectionSessions = connectionSessions ?? throw new ArgumentNullException(nameof(connectionSessions));
+            _schemaTables = schemaTables ?? throw new ArgumentNullException(nameof(schemaTables));
             _uiHelperService = uiHelperService ?? throw new ArgumentNullException(nameof(uiHelperService));
             _netezzaHelperService = netezzaHelperService ?? throw new ArgumentNullException(nameof(netezzaHelperService));
             _windowManagementService = windowManagementService;
@@ -509,6 +515,8 @@ namespace JustyBaseLegacy.UI
                 _completionContext,
                 _applicationSettingsContext,
                 this,
+                _connectionSessions,
+                _schemaTables,
                 NetezzaLoadSchemaTreeViewPhaseInvoked);
             _tabControlDrawingHandler = new TabControlDrawingHandler(_colorTheme, _applicationSettingsContext, this.Font
                 , JustData.Properties.Resources.close, JustData.Properties.Resources.closeJasne
@@ -630,7 +638,7 @@ namespace JustyBaseLegacy.UI
 
         private async Task LoadSourceTextCacheFromMenuAsync()
         {
-            if (!IGeneralDbService.GeneralDic.TryGetValue(SelectedConnectionName, out IGeneralDb cn)
+            if (!_connectionSessions.TryGetValue(SelectedConnectionName, out IGeneralDb cn)
                 || cn is not INetezza netezza
                 || _mvvmDatabaseExplorerControl?.TbFastSchemaSearch is not { } searchBox)
             {
@@ -1345,6 +1353,8 @@ namespace JustyBaseLegacy.UI
             }
             var sqlUpper = new SQLUpperPanel(
                 _generalDbService,
+                _connectionSessions,
+                _schemaTables,
                 _applicationSettingsContext,
                 _completionContext,
                 value => _completionRuntimeContext.SelectedConnectionName = value,

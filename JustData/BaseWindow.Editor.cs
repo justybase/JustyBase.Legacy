@@ -179,9 +179,9 @@ namespace JustyBaseLegacy.UI
 
             if (previousRenamedAway)
             {
-                IGeneralDbService.ConnectionSessions.Remove(previousConnectionName);
+                _connectionSessions.Remove(previousConnectionName);
             }
-            IGeneralDbService.ConnectionSessions.Remove(newConnectionName);
+            _connectionSessions.Remove(newConnectionName);
 
             if (previousRenamedAway)
             {

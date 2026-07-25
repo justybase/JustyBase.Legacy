@@ -1,5 +1,6 @@
 ﻿using AppBase.Common;
 using AppBase.Common.Enums;
+using AppBase.Data.Core.Core;
 using AppBase.Data.Core.Interfaces;
 using AppBase.Data.Core.Models;
 using JustyBase.NetezzaCatalogSql;
@@ -33,9 +34,6 @@ public static class NetezzaHelpers
     public const string SEARCH_PROCEDURE_SQL = NetezzaSystemSql.SearchProceduresTemplate;
 
     public static readonly string USER_GROUPS = NetezzaSystemSql.UserGroupsSql;
-
-    public static readonly Dictionary<string, Dictionary<int, NetezzaTableInfo>> baseTableDictionary = [];
-
 
     public static string ServerVersion = "";
     public static bool SqliteInProgress = false;
@@ -127,9 +125,17 @@ public static class NetezzaHelpers
     public static string ViewSql(string database)
         => NetezzaCatalogSql.GetLegacyViewSql(database);
 
-    public static bool InitializeConnectionSchemaData(AppBase.Common.Interfaces.IDatabaseRuntimeContext baseWindowHelpers, string preferedUserName, string connectionName)
+    public static bool InitializeConnectionSchemaData(
+        AppBase.Common.Interfaces.IDatabaseRuntimeContext baseWindowHelpers,
+        IConnectionSessionRegistry connectionSessions,
+        INetezzaSchemaTableCatalog schemaTables,
+        string preferedUserName,
+        string connectionName)
     {
-        if (!IGeneralDbService.GeneralDic.TryGetValue(connectionName, out var gdb)
+        ArgumentNullException.ThrowIfNull(connectionSessions);
+        ArgumentNullException.ThrowIfNull(schemaTables);
+
+        if (!connectionSessions.TryGetValue(connectionName, out var gdb)
             || gdb is not INetezza nz
             || !nz.BasesTablesList.TryGetValue(connectionName, out var basesTabels))
         {
@@ -169,8 +175,9 @@ public static class NetezzaHelpers
                 ThenBy(a => a.TABLE_NAME).
                 ThenBy(a => a.OWNER_NAME);
         }
-        baseTableDictionary[connectionName] = new();
-        var currentDatabaseTables = baseTableDictionary[connectionName];
+        var tablesByConnection = schemaTables.TablesByConnection;
+        tablesByConnection[connectionName] = new();
+        var currentDatabaseTables = tablesByConnection[connectionName];
 
         foreach (var row in orderedBaseTables)
         {
@@ -255,7 +262,7 @@ public static class NetezzaHelpers
                 {
                     foreach (int baseTable in dbTablesSet1)
                     {
-                        if (NetezzaHelpers.baseTableDictionary.TryGetValue(connectionName, out var btDict)
+                        if (tablesByConnection.TryGetValue(connectionName, out var btDict)
                             && btDict.TryGetValue(baseTable, out var table))
                         {
                             baseWindowHelpers.DatabaseSchemaLookup[connectionName][database.Value.DatabaseName][table.TABLE_NAME] = (table.TABLE_OWNER, baseTable);

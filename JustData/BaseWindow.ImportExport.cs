@@ -494,7 +494,7 @@ namespace JustyBaseLegacy.UI
 
         private void ImportCsvForceToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            if (IGeneralDbService.GeneralDic.TryGetValue(SelectedConnectionName, out IGeneralDb value) && value is INetezza)
+            if (_connectionSessions.TryGetValue(SelectedConnectionName, out IGeneralDb value) && value is INetezza)
             {
                 (new CsvFastImport(
                     new FastNetezzaCsvImport(),

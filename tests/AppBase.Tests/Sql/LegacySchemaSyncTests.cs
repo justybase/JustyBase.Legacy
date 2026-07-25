@@ -3,6 +3,7 @@ using AppBase.Common.Enums;
 using AppBase.Common.Interfaces;
 using AppBase.Data;
 using AppBase.Data.Completion;
+using AppBase.Data.Core.Interfaces;
 using AppBase.Data.Core.Models;
 using JustyBase.Netezza.Models;
 using JustyBase.NetezzaSqlParser.Visitor;
@@ -10,21 +11,26 @@ using NSubstitute;
 
 namespace AppBase.Tests.Sql;
 
-public sealed class LegacySchemaSyncTests : IDisposable
+public sealed class LegacySchemaSyncTests
 {
     private const string ConnectionName = "schema-sync-test";
+    private readonly Dictionary<string, Dictionary<int, NetezzaTableInfo>> _tables = new(StringComparer.OrdinalIgnoreCase);
 
-    public void Dispose()
+    private INetezzaSchemaTableCatalog CreateCatalog()
     {
-        NetezzaHelpers.baseTableDictionary.Remove(ConnectionName);
+        var catalog = Substitute.For<INetezzaSchemaTableCatalog>();
+        catalog.TablesByConnection.Returns(_tables);
+        return catalog;
     }
 
     [Fact]
     public void SyncConnection_returns_empty_for_null_or_missing_args()
     {
-        Assert.Same(NetezzaSchemaSnapshot.Empty, LegacySchemaSync.SyncConnection(null!, Substitute.For<INetezzaCompletionContext>(), "x"));
-        Assert.Same(NetezzaSchemaSnapshot.Empty, LegacySchemaSync.SyncConnection(new InMemorySchemaProvider(), null!, "x"));
-        Assert.Same(NetezzaSchemaSnapshot.Empty, LegacySchemaSync.SyncConnection(new InMemorySchemaProvider(), Substitute.For<INetezzaCompletionContext>(), ""));
+        var catalog = CreateCatalog();
+        Assert.Same(NetezzaSchemaSnapshot.Empty, LegacySchemaSync.SyncConnection(null!, Substitute.For<INetezzaCompletionContext>(), catalog, "x"));
+        Assert.Same(NetezzaSchemaSnapshot.Empty, LegacySchemaSync.SyncConnection(new InMemorySchemaProvider(), null!, catalog, "x"));
+        Assert.Same(NetezzaSchemaSnapshot.Empty, LegacySchemaSync.SyncConnection(new InMemorySchemaProvider(), Substitute.For<INetezzaCompletionContext>(), null!, "x"));
+        Assert.Same(NetezzaSchemaSnapshot.Empty, LegacySchemaSync.SyncConnection(new InMemorySchemaProvider(), Substitute.For<INetezzaCompletionContext>(), catalog, ""));
     }
 
     [Fact]
@@ -36,7 +42,7 @@ public sealed class LegacySchemaSyncTests : IDisposable
             new() { COLUMN_NAME = "NAME", DATA_TYPE = "NVARCHAR", IS_NULLABLE = true, COLUMN_DESCRIPTION = "label" }
         };
 
-        NetezzaHelpers.baseTableDictionary[ConnectionName] = new Dictionary<int, NetezzaTableInfo>
+        _tables[ConnectionName] = new Dictionary<int, NetezzaTableInfo>
         {
             [42] = new()
             {
@@ -82,7 +88,7 @@ public sealed class LegacySchemaSyncTests : IDisposable
         });
 
         var provider = new InMemorySchemaProvider();
-        var snapshot = LegacySchemaSync.SyncConnection(provider, context, ConnectionName);
+        var snapshot = LegacySchemaSync.SyncConnection(provider, context, CreateCatalog(), ConnectionName);
 
         Assert.Equal(2, snapshot.Tables.Count);
         var employees = Assert.Single(snapshot.Tables, t => t.Name == "EMPLOYEES");
@@ -103,7 +109,7 @@ public sealed class LegacySchemaSyncTests : IDisposable
     [Fact]
     public void SyncSelectedConnection_uses_selected_connection_name()
     {
-        NetezzaHelpers.baseTableDictionary[ConnectionName] = new Dictionary<int, NetezzaTableInfo>
+        _tables[ConnectionName] = new Dictionary<int, NetezzaTableInfo>
         {
             [1] = new()
             {
@@ -131,7 +137,7 @@ public sealed class LegacySchemaSyncTests : IDisposable
         context.ColumnTablesDictionary.Returns(new Dictionary<string, List<NetezzaColumnInfoRow>>());
 
         var provider = new InMemorySchemaProvider();
-        LegacySchemaSync.SyncSelectedConnection(provider, context);
+        LegacySchemaSync.SyncSelectedConnection(provider, context, CreateCatalog());
 
         Assert.True(provider.HasTables());
     }
@@ -140,7 +146,7 @@ public sealed class LegacySchemaSyncTests : IDisposable
     public void SyncAllLoadedConnections_is_noop_when_lookup_missing()
     {
         var provider = new InMemorySchemaProvider();
-        LegacySchemaSync.SyncAllLoadedConnections(provider, null!);
+        LegacySchemaSync.SyncAllLoadedConnections(provider, null!, CreateCatalog());
         Assert.False(provider.HasTables());
     }
 }

@@ -103,12 +103,12 @@ public sealed class GeneralSqlExecutionEngine : ISqlExecutionEngine
 
     public GeneralSqlExecutionEngine(
         ISqlExecutionSessionRegistry sessions,
-        IImportExportTasks? exportTasks = null,
-        IConnectionSessionRegistry? databaseSessions = null)
+        IImportExportTasks? exportTasks,
+        IConnectionSessionRegistry databaseSessions)
     {
         _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
         _exportTasks = exportTasks;
-        _databaseSessions = databaseSessions ?? IGeneralDbService.ConnectionSessions;
+        _databaseSessions = databaseSessions ?? throw new ArgumentNullException(nameof(databaseSessions));
     }
 
     internal bool EmitsStatementEvents => _sessions is not null;
@@ -429,7 +429,7 @@ public sealed class NetezzaSqlExecutionEngine : ISqlExecutionEngine
         ISqlExecutionSessionRegistry sessions,
         IImportExportTasks? exportTasks,
         SqlExecutionEngineContext legacyContext,
-        IConnectionSessionRegistry? databaseSessions = null)
+        IConnectionSessionRegistry databaseSessions)
     {
         _providerEngine = new GeneralSqlExecutionEngine(sessions, exportTasks, databaseSessions);
         _legacyContext = legacyContext ?? throw new ArgumentNullException(nameof(legacyContext));

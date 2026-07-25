@@ -305,7 +305,7 @@ namespace JustyBaseLegacy.UI
                             if (p1.TryGetValue(table, out var p2))
                             {
 
-                                TypeInDatabase typeInDatabase = NetezzaHelpers.baseTableDictionary.TryGetValue(SelectedConnectionName, out var btDict1)
+                                TypeInDatabase typeInDatabase = _schemaTables.TablesByConnection.TryGetValue(SelectedConnectionName, out var btDict1)
                                         && btDict1.TryGetValue(p2.tableId, out var btInfo1)
                                     ? btInfo1.TABLE_KIND
                                     : TypeInDatabase.table;
@@ -526,7 +526,7 @@ namespace JustyBaseLegacy.UI
                                 string toolTipTitle;
                                 int tableId = p2.tableId;
 
-                                if (!NetezzaHelpers.baseTableDictionary.TryGetValue(SelectedConnectionName, out var btDict2)
+                                if (!_schemaTables.TablesByConnection.TryGetValue(SelectedConnectionName, out var btDict2)
                                     || !btDict2.TryGetValue(tableId, out var tabInfo))
                                 {
                                     return;
@@ -841,7 +841,7 @@ namespace JustyBaseLegacy.UI
                         if (p1.TryGetValue(table, out var p2))
                         {
 
-                            TypeInDatabase tp = NetezzaHelpers.baseTableDictionary.TryGetValue(SelectedConnectionName, out var btDict3)
+                            TypeInDatabase tp = _schemaTables.TablesByConnection.TryGetValue(SelectedConnectionName, out var btDict3)
                                     && btDict3.TryGetValue(p2.tableId, out var btInfo3)
                                 ? btInfo3.TABLE_KIND
                                 : TypeInDatabase.table;
@@ -890,7 +890,7 @@ _generalDbService.DriverName(SelectedConnectionName) == "DB2"
         private void SelectNetezzaObjectInExplorer(string connectionName, string databaseName, int tableId)
         {
             if (_mvvmDatabaseExplorerControl is null
-                || !NetezzaHelpers.baseTableDictionary.TryGetValue(connectionName, out var tables)
+                || !_schemaTables.TablesByConnection.TryGetValue(connectionName, out var tables)
                 || !tables.TryGetValue(tableId, out var table))
                 return;
 
@@ -949,7 +949,7 @@ _generalDbService.DriverName(SelectedConnectionName) == "DB2"
                     schemaKey = db + "_" + schema;
                 }
 
-                if (IGeneralDbService.GeneralDic.TryGetValue(connectionName, out var thisDb) &&
+                if (_connectionSessions.TryGetValue(connectionName, out var thisDb) &&
                     thisDb.objectInSchema.TryGetValue(schemaKey, out var thisSchema) &&
                     thisSchema.TryGetValue(table, out var obj)) // table or view exists
                 {
@@ -1106,7 +1106,7 @@ _generalDbService.DriverName(SelectedConnectionName) == "DB2"
 
         private string? ResolveDimDateDatabaseName(string connectionName)
         {
-            if (!NetezzaHelpers.baseTableDictionary.TryGetValue(connectionName, out var tables))
+            if (!_schemaTables.TablesByConnection.TryGetValue(connectionName, out var tables))
             {
                 return null;
             }

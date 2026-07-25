@@ -19,17 +19,23 @@ public partial class AutocompleteClass : IAutocompleteClass
     private readonly INetezzaCompletionContext _completionContext;
     private readonly IApplicationSettingsContext _applicationSettingsContext;
     private readonly IEditorHost _editorHost;
+    private readonly IConnectionSessionRegistry _connectionSessions;
+    private readonly INetezzaSchemaTableCatalog _schemaTables;
     private readonly Action<string, bool, string> _loadSchemaPhase2Invoked;
 
     public AutocompleteClass(
         INetezzaCompletionContext completionContext,
         IApplicationSettingsContext applicationSettingsContext,
         IEditorHost editorHost,
+        IConnectionSessionRegistry connectionSessions,
+        INetezzaSchemaTableCatalog schemaTables,
         Action<string, bool, string> loadSchemaPhase2Invoked)
     {
         _completionContext = completionContext;
         _applicationSettingsContext = applicationSettingsContext;
         _editorHost = editorHost;
+        _connectionSessions = connectionSessions ?? throw new ArgumentNullException(nameof(connectionSessions));
+        _schemaTables = schemaTables ?? throw new ArgumentNullException(nameof(schemaTables));
         _loadSchemaPhase2Invoked = loadSchemaPhase2Invoked;
     }
 
@@ -270,7 +276,7 @@ public partial class AutocompleteClass : IAutocompleteClass
                 {
                     if (value4.ContainsKey(table))
                     {
-                        if (!NetezzaHelpers.SqliteInProgress && _completionContext.SchemaRefreshed && _applicationSettingsContext.Config.RefreshMode != 1 && IGeneralDbService.GeneralDic.TryGetValue(selConnName, out var gdb) && gdb.DatabaseType == DatabaseTypeEnum.Netezza
+                        if (!NetezzaHelpers.SqliteInProgress && _completionContext.SchemaRefreshed && _applicationSettingsContext.Config.RefreshMode != 1 && _connectionSessions.TryGetValue(selConnName, out var gdb) && gdb.DatabaseType == DatabaseTypeEnum.Netezza
                         && gdb is INetezza netezza)
                         {
                             if (netezza.AttachedDbsToSchema.Count != netezza.DatabasesCount && !netezza.AttachedDbsToSchema.ContainsKey(database)
@@ -303,7 +309,7 @@ public partial class AutocompleteClass : IAutocompleteClass
                         if (value4.TryGetValue(table, out var tmpTbl))
                         {
                             int tableId = tmpTbl.tableId;
-                            if (NetezzaHelpers.baseTableDictionary.TryGetValue(selConnName, out var hlp0) &&
+                            if (_schemaTables.TablesByConnection.TryGetValue(selConnName, out var hlp0) &&
                             hlp0.TryGetValue(tableId, out var hlp)
                             && _completionContext.ColumnTablesDictionary.TryGetValue(selConnName, out var hlp2))
                             {
@@ -487,7 +493,7 @@ public partial class AutocompleteClass : IAutocompleteClass
                 List<string> aliases = tableAliasEntry.Value;
 
                 string[] cols = Array.Empty<string>();
-                if (IGeneralDbService.GeneralDic.TryGetValue(connectionName, out IGeneralDb value) && value is not null
+                if (_connectionSessions.TryGetValue(connectionName, out IGeneralDb value) && value is not null
                 && !value.GetInitSchemaInProgress)
                 {
                     var gd = value;

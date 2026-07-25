@@ -112,7 +112,7 @@ namespace JustyBaseLegacy.UI
                 bool schemaDownloadSucceeded = true;
                 // Check session registry instead of tree — MVVM InitializeAsync may have
                 // created the node already, but the connection isn't initialized yet.
-                if (!IGeneralDbService.ConnectionSessions.ContainsKey(selConnName))
+                if (!_connectionSessions.ContainsKey(selConnName))
                 {
                     SelectedDatabase = _generalDbService.DBname(selConnName);
 
@@ -125,7 +125,7 @@ namespace JustyBaseLegacy.UI
                         Username = _generalDbService.UserName(selConnName),
                         LogErrorStdColor = MyColors.LogErrorStdColor
                     };
-                    IGeneralDbService.ConnectionSessions.Set(selConnName, nz);
+                    _connectionSessions.Set(selConnName, nz);
                     nz.InitDb();
 
                     statusTextBox.Text = $"Schema downloading";
@@ -150,7 +150,7 @@ namespace JustyBaseLegacy.UI
                         NetezzaSchemaRefreshErrorInfo();
                         // Drop the session so a later edit/save can recreate it with a fresh ConnectionString
                         // (same pattern as the non-Netezza InitDb failure path below).
-                        IGeneralDbService.ConnectionSessions.Remove(selConnName);
+                        _connectionSessions.Remove(selConnName);
                     }
 
                     if (schemaDownloadSucceeded)
@@ -200,7 +200,7 @@ namespace JustyBaseLegacy.UI
                     || _generalDbService.DriverName(selConnName) == "SQLite"
                     || _generalDbService.DriverName(selConnName) == "MySql"))
             {
-                if (!IGeneralDbService.ConnectionSessions.ContainsKey(selConnName))
+                if (!_connectionSessions.ContainsKey(selConnName))
                 {
                     statusTextBox.Text = $"{selConnName} schema refreshing";
                     SchemaRefreshOptionEnable(false);
@@ -217,7 +217,7 @@ namespace JustyBaseLegacy.UI
                     await Task.Delay(10);
                     SchemaRefreshOptionEnable(false);
                     chageEnableStateOfNotAddedTab(false);
-                    IGeneralDbService.ConnectionSessions.Set(selConnName, gdb);
+                    _connectionSessions.Set(selConnName, gdb);
                     try
                     {
                         await Task.Run(() => gdb.InitDb());
@@ -233,7 +233,7 @@ namespace JustyBaseLegacy.UI
                     catch (Exception ex)
                     {
                         _loggerLoud.MessageBox_Show(this, ex.Message, "Connection error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        IGeneralDbService.ConnectionSessions.Remove(selConnName);
+                        _connectionSessions.Remove(selConnName);
 
                         foreach (TabPage tab in EditorTabPages)
                         {
@@ -247,13 +247,13 @@ namespace JustyBaseLegacy.UI
                     SchemaRefreshOptionEnable(true);
                     chageEnableStateOfNotAddedTab(true);
                 }
-                else if (IGeneralDbService.GeneralDic.TryGetValue(selConnName, out var gdbReset))
+                else if (_connectionSessions.TryGetValue(selConnName, out var gdbReset))
                 {
                     gdbReset.ResetDynamicCollection();
                 }
 
                 if (SelectedConnectionName == selConnName
-                    && IGeneralDbService.GeneralDic.TryGetValue(selConnName, out var gdbExtend))
+                    && _connectionSessions.TryGetValue(selConnName, out var gdbExtend))
                 {
                     if (gdbExtend.DatabaseList is not null)
                     {
@@ -441,7 +441,7 @@ namespace JustyBaseLegacy.UI
                     statusTextBox.Text = $"schema loading";
                     try
                     {
-                        if (NetezzaHelpers.baseTableDictionary.TryGetValue(connectionName, out var value2))
+                        if (_schemaTables.TablesByConnection.TryGetValue(connectionName, out var value2))
                         {
                             value2.Clear();
                         }
@@ -600,7 +600,7 @@ namespace JustyBaseLegacy.UI
 
                         List<(TreeNode, string, List<string>)> tvl = new List<(TreeNode, string, List<string>)>();
                         string userName = _applicationSession.CurrentLogin?.Profile.UserName ?? string.Empty;
-                        bool flowControl = NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, userName, connectionName);
+                        bool flowControl = NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, _connectionSessions, _schemaTables, userName, connectionName);
                         //if (!flowControl)
                         //{
                         //    return;
@@ -679,7 +679,7 @@ namespace JustyBaseLegacy.UI
                     return;
                 }
 
-                if (IGeneralDbService.GeneralDic.TryGetValue(conName, out var db) && db is INetezza nz)
+                if (_connectionSessions.TryGetValue(conName, out var db) && db is INetezza nz)
                 {
                     nz.ResetLists();
                     await RefreshSchemaFullOrNot(conName, NetezzaRefreshMode.full, disableInUi);
@@ -804,7 +804,7 @@ namespace JustyBaseLegacy.UI
                 {
                     try
                     {
-                        if (!IGeneralDbService.GeneralDic.TryGetValue(conName, out var generalDb) || generalDb is null)
+                        if (!_connectionSessions.TryGetValue(conName, out var generalDb) || generalDb is null)
                         {
                             IGeneralDb gdb = _generalDbService.GetGeneralDb(_databaseRuntimeContext, _loggerLoud, _importExportTasks, conName, out string dbName);
                             gdb.Username = _generalDbService.UserName(conName);
@@ -815,7 +815,7 @@ namespace JustyBaseLegacy.UI
                             //await refreshSecond();
                             statusTextBox.Text = $"{dbName} schema refreshing";
 
-                            IGeneralDbService.ConnectionSessions.Set(conName, gdb);
+                            _connectionSessions.Set(conName, gdb);
                         }
 
                         await _schemaRefreshCoordinator.RefreshAsync(conName);
@@ -860,7 +860,7 @@ namespace JustyBaseLegacy.UI
                 }
             }
 
-            bool res = await (IGeneralDbService.GeneralDic[conName] as INetezza).DownloadSchemaNetezza(conName, refreshMode, dbsToRefresh);
+            bool res = await (_connectionSessions[conName] as INetezza).DownloadSchemaNetezza(conName, refreshMode, dbsToRefresh);
             InvokeOnMainWindow(() =>
             {
                 statusTextBox.Text = $"Schema downloaded";
@@ -874,7 +874,7 @@ namespace JustyBaseLegacy.UI
             // After a full refresh, run the schema-data side effects that legacy
             // NetezzaLoadSchemaTreeViewPhase would have done. Clear dictionaries first
             // so InitializeConnectionSchemaData starts from a clean state.
-            if (NetezzaHelpers.baseTableDictionary.TryGetValue(conName, out var nzValue))
+            if (_schemaTables.TablesByConnection.TryGetValue(conName, out var nzValue))
                 nzValue.Clear();
             if (_completionContext.DatabaseSchemaLookup.TryGetValue(conName, out var lookupValue))
                 lookupValue.Clear();
@@ -882,7 +882,7 @@ namespace JustyBaseLegacy.UI
                 ownersValue.Clear();
 
             string userName = _applicationSession.CurrentLogin?.Profile.UserName ?? string.Empty;
-            NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, userName, conName);
+            NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, _connectionSessions, _schemaTables, userName, conName);
             _netezzaSqlCompletionServices.InvalidateSchema();
             _netezzaSqlCompletionServices.EnsureSchemaForConnection(_completionContext, conName);
 
@@ -908,7 +908,7 @@ namespace JustyBaseLegacy.UI
                             string connName = item.Text;
 
                             // Clear dictionaries so InitializeConnectionSchemaData re-sorts from clean state
-                            if (NetezzaHelpers.baseTableDictionary.TryGetValue(connName, out var nzValue))
+                            if (_schemaTables.TablesByConnection.TryGetValue(connName, out var nzValue))
                                 nzValue.Clear();
                             if (_completionContext.DatabaseSchemaLookup.TryGetValue(connName, out var lookupValue))
                                 lookupValue.Clear();
@@ -916,7 +916,7 @@ namespace JustyBaseLegacy.UI
                                 ownersValue.Clear();
 
                             string userName = _applicationSession.CurrentLogin?.Profile.UserName ?? string.Empty;
-                            NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, userName, connName);
+                            NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, _connectionSessions, _schemaTables, userName, connName);
                             _completionRuntimeContext.SchemaRefreshed = true;
                             _netezzaSqlCompletionServices.InvalidateSchema();
                             _netezzaSqlCompletionServices.EnsureSchemaForConnection(_completionContext, connName);
@@ -1007,7 +1007,7 @@ namespace JustyBaseLegacy.UI
             if (success)
             {
                 // Clear dictionaries so InitializeConnectionSchemaData starts from a clean state
-                if (NetezzaHelpers.baseTableDictionary.TryGetValue(connectionName, out var nzValue))
+                if (_schemaTables.TablesByConnection.TryGetValue(connectionName, out var nzValue))
                     nzValue.Clear();
                 if (_completionContext.DatabaseSchemaLookup.TryGetValue(connectionName, out var lookupValue))
                     lookupValue.Clear();
@@ -1015,7 +1015,7 @@ namespace JustyBaseLegacy.UI
                     ownersValue.Clear();
 
                 string userName = _applicationSession.CurrentLogin?.Profile.UserName ?? string.Empty;
-                NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, userName, connectionName);
+                NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, _connectionSessions, _schemaTables, userName, connectionName);
                 _completionRuntimeContext.SchemaRefreshed = true;
                 _netezzaSqlCompletionServices.InvalidateSchema();
                 _netezzaSqlCompletionServices.EnsureSchemaForConnection(_completionContext, connectionName);
@@ -1039,7 +1039,7 @@ namespace JustyBaseLegacy.UI
                 return value;
             }
 
-            if (!NetezzaHelpers.baseTableDictionary.TryGetValue(connectionName, out var baseTables)
+            if (!_schemaTables.TablesByConnection.TryGetValue(connectionName, out var baseTables)
                 || !baseTables.TryGetValue(idObj, out var tableData))
             {
                 return string.Empty;
@@ -1052,7 +1052,7 @@ namespace JustyBaseLegacy.UI
             }
 
             string dbName = dbInfo.DatabaseName;
-            if (!IGeneralDbService.GeneralDic.TryGetValue(connectionName, out var generalDb))
+            if (!_connectionSessions.TryGetValue(connectionName, out var generalDb))
             {
                 return string.Empty;
             }

@@ -1,5 +1,6 @@
 using AppBase.Common;
 using AppBase.Common.Interfaces;
+using AppBase.Data.Core.Interfaces;
 using JustyBase.Netezza.Models;
 using JustyBase.NetezzaSqlParser.Caching;
 using JustyBase.NetezzaSqlParser.Completion;
@@ -13,12 +14,18 @@ namespace AppBase.Data.Completion;
 /// </summary>
 public sealed class NetezzaSqlCompletionServices
 {
+    private readonly INetezzaSchemaTableCatalog _schemaTables;
     private string _schemaSyncedForConnection;
 
     public InMemorySchemaProvider SchemaProvider { get; } = new();
     public NetezzaSchemaSnapshot MetadataSnapshot { get; private set; } = NetezzaSchemaSnapshot.Empty;
     public DocumentParsingCoordinator ParsingCoordinator { get; } = new();
     public event Action? SchemaInvalidated;
+
+    public NetezzaSqlCompletionServices(INetezzaSchemaTableCatalog schemaTables)
+    {
+        _schemaTables = schemaTables ?? throw new ArgumentNullException(nameof(schemaTables));
+    }
 
     public NzCompletionEngine CreateEngine(string documentUri)
     {
@@ -36,7 +43,7 @@ public sealed class NetezzaSqlCompletionServices
             && SchemaProvider.HasTables())
             return;
 
-        MetadataSnapshot = LegacySchemaSync.SyncConnection(SchemaProvider, completionContext, connectionName);
+        MetadataSnapshot = LegacySchemaSync.SyncConnection(SchemaProvider, completionContext, _schemaTables, connectionName);
         _schemaSyncedForConnection = connectionName;
     }
 

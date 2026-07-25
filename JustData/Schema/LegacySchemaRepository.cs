@@ -19,12 +19,20 @@ public sealed class LegacySchemaRepository : ISchemaRepository
 {
     private readonly IGeneralDbService _generalDbService;
     private readonly AppBase.Common.Interfaces.IDatabaseRuntimeContext _databaseRuntimeContext;
+    private readonly IConnectionSessionRegistry _connectionSessions;
+    private readonly INetezzaSchemaTableCatalog _schemaTables;
     private readonly ConcurrentDictionary<string, Task> _refreshes = new(StringComparer.OrdinalIgnoreCase);
 
-    public LegacySchemaRepository(IGeneralDbService generalDbService, AppBase.Common.Interfaces.IDatabaseRuntimeContext databaseRuntimeContext)
+    public LegacySchemaRepository(
+        IGeneralDbService generalDbService,
+        AppBase.Common.Interfaces.IDatabaseRuntimeContext databaseRuntimeContext,
+        IConnectionSessionRegistry connectionSessions,
+        INetezzaSchemaTableCatalog schemaTables)
     {
         _generalDbService = generalDbService ?? throw new ArgumentNullException(nameof(generalDbService));
         _databaseRuntimeContext = databaseRuntimeContext ?? throw new ArgumentNullException(nameof(databaseRuntimeContext));
+        _connectionSessions = connectionSessions ?? throw new ArgumentNullException(nameof(connectionSessions));
+        _schemaTables = schemaTables ?? throw new ArgumentNullException(nameof(schemaTables));
     }
 
     public Task<IReadOnlyList<SchemaNode>> GetRootsAsync(string? connectionName = null, CancellationToken cancellationToken = default)
@@ -32,7 +40,7 @@ public sealed class LegacySchemaRepository : ISchemaRepository
         cancellationToken.ThrowIfCancellationRequested();
         IEnumerable<string> names = _generalDbService.LoginDataDic.Keys;
         if (string.IsNullOrWhiteSpace(connectionName))
-            names = names.Concat(IGeneralDbService.ConnectionSessions.Keys).Distinct(StringComparer.OrdinalIgnoreCase);
+            names = names.Concat(_connectionSessions.Keys).Distinct(StringComparer.OrdinalIgnoreCase);
         else
             names = names.Append(connectionName).Distinct(StringComparer.OrdinalIgnoreCase);
 
@@ -47,7 +55,7 @@ public sealed class LegacySchemaRepository : ISchemaRepository
     public async Task<IReadOnlyList<SchemaNode>> GetChildrenAsync(SchemaNode parent, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!IGeneralDbService.ConnectionSessions.TryGetValue(parent.Path.Connection, out var database))
+        if (!_connectionSessions.TryGetValue(parent.Path.Connection, out var database))
         {
             if (parent.Kind == SchemaNodeKind.Connection && _generalDbService.LoginDataDic.TryGetValue(parent.Path.Connection, out var login))
             {
@@ -92,10 +100,10 @@ public sealed class LegacySchemaRepository : ISchemaRepository
         if (query.Length == 0) return new SchemaSearchResult([]);
 
         List<SchemaNode> matches = [];
-        foreach (string connection in _generalDbService.LoginDataDic.Keys.Concat(IGeneralDbService.ConnectionSessions.Keys).Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (string connection in _generalDbService.LoginDataDic.Keys.Concat(_connectionSessions.Keys).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (!string.IsNullOrWhiteSpace(request.Connection) && !connection.Equals(request.Connection, StringComparison.OrdinalIgnoreCase)) continue;
-            if (!IGeneralDbService.ConnectionSessions.TryGetValue(connection, out var database)) continue;
+            if (!_connectionSessions.TryGetValue(connection, out var database)) continue;
             if (database is INetezza)
             {
                 SchemaSearchResult netezzaResult = await Task.Run(
@@ -104,7 +112,7 @@ public sealed class LegacySchemaRepository : ISchemaRepository
                         query,
                         request.IncludeColumns,
                         request.MaxResults,
-                        NetezzaHelpers.baseTableDictionary.TryGetValue(connection, out var tables) ? tables : null,
+                        _schemaTables.TablesByConnection.TryGetValue(connection, out var tables) ? tables : null,
                         _databaseRuntimeContext.DatabaseDictionary.TryGetValue(connection, out var databases) ? databases : null,
                         _databaseRuntimeContext.ColumnTablesDictionary.TryGetValue(connection, out var columns) ? columns : null),
                     cancellationToken).ConfigureAwait(false);
@@ -214,11 +222,11 @@ public sealed class LegacySchemaRepository : ISchemaRepository
     public async Task RefreshAsync(string? connectionName = null, CancellationToken cancellationToken = default)
     {
         IEnumerable<string> names = string.IsNullOrWhiteSpace(connectionName)
-            ? IGeneralDbService.ConnectionSessions.Keys
+            ? _connectionSessions.Keys
             : [connectionName];
         foreach (string name in names.Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            if (!IGeneralDbService.ConnectionSessions.TryGetValue(name, out var database)) continue;
+            if (!_connectionSessions.TryGetValue(name, out var database)) continue;
             cancellationToken.ThrowIfCancellationRequested();
             Task refresh = _refreshes.GetOrAdd(name, _ => RefreshDatabaseAsync(name, database, cancellationToken));
             try { await refresh.WaitAsync(cancellationToken).ConfigureAwait(false); }
@@ -248,7 +256,7 @@ public sealed class LegacySchemaRepository : ISchemaRepository
                 string? userName = _generalDbService.LoginDataDic.TryGetValue(connectionName, out var login)
                     ? login.UserName
                     : null;
-                NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, userName, connectionName);
+                NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, _connectionSessions, _schemaTables, userName, connectionName);
             }
         }
     }
@@ -319,7 +327,7 @@ public sealed class LegacySchemaRepository : ISchemaRepository
 
     private IReadOnlyList<SchemaNode> MapNetezzaObjects(SchemaNode parent)
     {
-        if (!NetezzaHelpers.baseTableDictionary.TryGetValue(parent.Path.Connection, out var tables)
+        if (!_schemaTables.TablesByConnection.TryGetValue(parent.Path.Connection, out var tables)
             || !TryGetNetezzaDatabaseId(parent.Path.Connection, parent.Path.Database, out int databaseId))
             return [];
 
@@ -344,7 +352,7 @@ public sealed class LegacySchemaRepository : ISchemaRepository
     private IReadOnlyList<SchemaNode> MapNetezzaColumns(SchemaNode parent)
     {
         if (parent.LegacyObjectId is not int tableId
-            || !NetezzaHelpers.baseTableDictionary.TryGetValue(parent.Path.Connection, out var tables)
+            || !_schemaTables.TablesByConnection.TryGetValue(parent.Path.Connection, out var tables)
             || !tables.TryGetValue(tableId, out var table)
             || !_databaseRuntimeContext.ColumnTablesDictionary.TryGetValue(parent.Path.Connection, out var columns))
             return [];

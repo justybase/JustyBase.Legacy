@@ -28,9 +28,9 @@ namespace JustyBaseLegacy.UI
         public string GetDropTableSequenceCodeById(int objectID, string objectTypeName = "TABLE")
         {
             string connectionName = _mvvmDatabaseExplorerControl?.DatabaseTreeView.SelectedNode?.Parent?.Parent?.Parent?.Text ?? string.Empty;
-            string ownerTabeli = NetezzaHelpers.baseTableDictionary[connectionName][objectID].TABLE_OWNER;
-            string databaseName = _completionContext.DatabaseDictionary[connectionName][NetezzaHelpers.baseTableDictionary[connectionName][objectID].DATABASE_ID].DatabaseName;
-            var tableData = NetezzaHelpers.baseTableDictionary[connectionName][objectID];
+            string ownerTabeli = _schemaTables.TablesByConnection[connectionName][objectID].TABLE_OWNER;
+            string databaseName = _completionContext.DatabaseDictionary[connectionName][_schemaTables.TablesByConnection[connectionName][objectID].DATABASE_ID].DatabaseName;
+            var tableData = _schemaTables.TablesByConnection[connectionName][objectID];
 
             return $"DROP {objectTypeName} {databaseName}.{ownerTabeli}.{tableData.TABLE_NAME};";
         }
@@ -40,11 +40,11 @@ namespace JustyBaseLegacy.UI
 
         public string GetSeqCodeById(int objectID, string connectionName)
         {
-            string ownerTabeli = NetezzaHelpers.baseTableDictionary[connectionName][objectID].TABLE_OWNER;
-            string databaseName = _completionContext.DatabaseDictionary[connectionName][NetezzaHelpers.baseTableDictionary[connectionName][objectID].DATABASE_ID].DatabaseName;
-            var tableData = NetezzaHelpers.baseTableDictionary[connectionName][objectID];
+            string ownerTabeli = _schemaTables.TablesByConnection[connectionName][objectID].TABLE_OWNER;
+            string databaseName = _completionContext.DatabaseDictionary[connectionName][_schemaTables.TablesByConnection[connectionName][objectID].DATABASE_ID].DatabaseName;
+            var tableData = _schemaTables.TablesByConnection[connectionName][objectID];
 
-            using DbConnection conn = IGeneralDbService.GeneralDic[connectionName].GetConnection(databaseName);
+            using DbConnection conn = _connectionSessions[connectionName].GetConnection(databaseName);
             conn.Open();
 
             using DbCommand cmd = conn.CreateCommand();

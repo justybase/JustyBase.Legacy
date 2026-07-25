@@ -139,6 +139,7 @@ public static class Program
         services.AddSingleton<IDatabaseRuntimeContext>(sp => sp.GetRequiredService<LegacyDatabaseRuntimeContext>());
         services.AddSingleton<INetezzaCompletionContext>(sp => sp.GetRequiredService<LegacyDatabaseRuntimeContext>());
         services.AddSingleton<INetezzaCompletionRuntimeContext>(sp => sp.GetRequiredService<LegacyDatabaseRuntimeContext>());
+        services.AddSingleton<INetezzaSchemaTableCatalog>(sp => sp.GetRequiredService<LegacyDatabaseRuntimeContext>());
         services.AddSingleton<INetezzaDdlCodeProvider, LegacyNetezzaDdlCodeProvider>();
         services.AddSingleton<LegacySnippetContext>();
         services.AddSingleton<ISnippetInitializationContext>(sp => sp.GetRequiredService<LegacySnippetContext>());
@@ -146,7 +147,7 @@ public static class Program
         services.AddTransient<IFormatterService, FormatterService>();
         services.AddSingleton<IDatabaseProviderFactory, DatabaseProviderFactory>();
         services.AddSingleton<IGeneralDbService, GeneralDbService>();
-        services.AddSingleton<IConnectionSessionRegistry>(_ => IGeneralDbService.ConnectionSessions);
+        services.AddSingleton<IConnectionSessionRegistry, ConnectionSessionRegistry>();
         services.AddSingleton<IUiHelperService, UiHelperService>();
         services.AddSingleton<ICredentialStore, CredentialStore>();
         services.AddSingleton<IApplicationSession, ApplicationSession>();

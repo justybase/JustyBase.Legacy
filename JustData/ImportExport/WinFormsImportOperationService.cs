@@ -25,18 +25,32 @@ public sealed class WinFormsImportOperationService : IImportOperationService
     private readonly INetezzaCompletionContext _completion;
     private readonly IColorTheme _theme;
     private readonly IUiHelperService _ui;
+    private readonly IConnectionSessionRegistry _connectionSessions;
+    private readonly INetezzaSchemaTableCatalog _schemaTables;
 
-    public WinFormsImportOperationService(IImportExportTasks tasks, IApplicationSettingsContext settings,
-        INetezzaCompletionContext completion, IColorTheme theme, IUiHelperService ui)
+    public WinFormsImportOperationService(
+        IImportExportTasks tasks,
+        IApplicationSettingsContext settings,
+        INetezzaCompletionContext completion,
+        IColorTheme theme,
+        IUiHelperService ui,
+        IConnectionSessionRegistry connectionSessions,
+        INetezzaSchemaTableCatalog schemaTables)
     {
-        _tasks = tasks; _settings = settings; _completion = completion; _theme = theme; _ui = ui;
+        _tasks = tasks;
+        _settings = settings;
+        _completion = completion;
+        _theme = theme;
+        _ui = ui;
+        _connectionSessions = connectionSessions ?? throw new ArgumentNullException(nameof(connectionSessions));
+        _schemaTables = schemaTables ?? throw new ArgumentNullException(nameof(schemaTables));
     }
 
     public async IAsyncEnumerable<ImportProgress> ImportAsync(ImportRequest request,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.ConnectionName)
-            || !IGeneralDbService.GeneralDic.TryGetValue(request.ConnectionName, out IGeneralDb? connection))
+            || !_connectionSessions.TryGetValue(request.ConnectionName, out IGeneralDb? connection))
         {
             yield return new ImportProgress("failed", IsCompleted: true, ErrorMessage: "The selected connection is not available.");
             yield break;
@@ -103,7 +117,7 @@ public sealed class WinFormsImportOperationService : IImportOperationService
     }
     private string SelectTableName(int count)
     {
-        using var form = new TableListForm(_completion, count);
+        using var form = new TableListForm(_completion, _schemaTables, count);
         form.ShowDialog(); return form.GetSelected();
     }
     private List<string> SelectSheets(string[] sheets)

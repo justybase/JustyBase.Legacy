@@ -2,7 +2,8 @@ using AppBase.Common;
 using AppBase.Common.Configuration;
 using AppBase.Common.Enums;
 using AppBase.Common.Interfaces;
-using AppBase.Data;
+using AppBase.Data.Core.Core;
+using AppBase.Data.Core.Interfaces;
 using AppBase.Data.Core.Models;
 using AppBase.Data.Ddl;
 using JustyBase.NetezzaDdl.Models;
@@ -10,22 +11,25 @@ using NSubstitute;
 
 namespace AppBase.Tests.Sql;
 
-public sealed class LegacyDdlSchemaAdapterTests : IDisposable
+public sealed class LegacyDdlSchemaAdapterTests
 {
     private const string ConnectionName = "ddl-adapter-test";
-
-    public void Dispose()
-    {
-        NetezzaHelpers.baseTableDictionary.Remove(ConnectionName);
-    }
+    private readonly Dictionary<string, Dictionary<int, NetezzaTableInfo>> _tables = new(StringComparer.OrdinalIgnoreCase);
 
     [Fact]
     public void BuildTableInput_throws_when_object_missing()
     {
         var helpers = Substitute.For<IDatabaseRuntimeContext>();
+        var schemaTables = CreateSchemaTables();
+        var sessions = Substitute.For<IConnectionSessionRegistry>();
 
         Assert.Throws<InvalidOperationException>(
-            () => LegacyDdlSchemaAdapter.BuildTableInput(helpers, ConnectionName, objectId: 99));
+            () => LegacyDdlSchemaAdapter.BuildTableInput(
+                helpers,
+                schemaTables,
+                sessions,
+                ConnectionName,
+                objectId: 99));
     }
 
     [Fact]
@@ -33,9 +37,13 @@ public sealed class LegacyDdlSchemaAdapterTests : IDisposable
     {
         SeedTable();
         var helpers = CreateHelpers();
+        var schemaTables = CreateSchemaTables();
+        var sessions = Substitute.For<IConnectionSessionRegistry>();
 
         var input = LegacyDdlSchemaAdapter.BuildTableInput(
             helpers,
+            schemaTables,
+            sessions,
             ConnectionName,
             objectId: 42,
             overrideTableName: "EMPLOYEES_COPY",
@@ -59,9 +67,11 @@ public sealed class LegacyDdlSchemaAdapterTests : IDisposable
     {
         SeedTable(isView: true, description: "Employee view");
         var helpers = CreateHelpers();
+        var schemaTables = CreateSchemaTables();
 
         var input = LegacyDdlSchemaAdapter.BuildViewInput(
             helpers,
+            schemaTables,
             ConnectionName,
             objectId: 42,
             viewDefinition: "SELECT 1");
@@ -78,14 +88,22 @@ public sealed class LegacyDdlSchemaAdapterTests : IDisposable
     {
         SeedTable();
         var helpers = CreateHelpers();
+        var schemaTables = CreateSchemaTables();
         var options = new NetezzaExternalTableOptions { DataObject = @"\\share\file.txt" };
 
-        var input = LegacyDdlSchemaAdapter.BuildExternalInput(helpers, ConnectionName, objectId: 42, options);
+        var input = LegacyDdlSchemaAdapter.BuildExternalInput(helpers, schemaTables, ConnectionName, objectId: 42, options);
 
         Assert.Equal("JUST_DATA", input.Database);
         Assert.Equal("ADMIN", input.Schema);
         Assert.Equal("EMPLOYEES", input.TableName);
         Assert.Equal(@"\\share\file.txt", input.Options.DataObject);
+    }
+
+    private INetezzaSchemaTableCatalog CreateSchemaTables()
+    {
+        var schemaTables = Substitute.For<INetezzaSchemaTableCatalog>();
+        schemaTables.TablesByConnection.Returns(_tables);
+        return schemaTables;
     }
 
     private static IDatabaseRuntimeContext CreateHelpers()
@@ -122,9 +140,9 @@ public sealed class LegacyDdlSchemaAdapterTests : IDisposable
         return helpers;
     }
 
-    private static void SeedTable(bool isView = false, string description = "Employee roster")
+    private void SeedTable(bool isView = false, string description = "Employee roster")
     {
-        NetezzaHelpers.baseTableDictionary[ConnectionName] = new Dictionary<int, NetezzaTableInfo>
+        _tables[ConnectionName] = new Dictionary<int, NetezzaTableInfo>
         {
             [42] = new()
             {

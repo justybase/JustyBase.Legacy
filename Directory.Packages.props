@@ -5,7 +5,7 @@
     <JustyBaseNetezzaLibsPackageVersion Condition="'$(JustyBaseNetezzaLibsPackageVersion)' == ''">*-*</JustyBaseNetezzaLibsPackageVersion>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="DiffPlex" Version="1.7.2" />
+    <PackageVersion Include="DiffPlex" Version="1.9.0" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Data.SqlClient" Version="7.0.2" />
     <PackageVersion Include="Oracle.ManagedDataAccess.Core" Version="23.26.300" />
@@ -20,7 +20,6 @@
     <PackageVersion Include="Hogimn.Sql.Formatter" Version="2.0.4" />
     <PackageVersion Include="SpreadSheetTasks" Version="1.0.0" />
     <PackageVersion Include="Sylvan.Data.Csv" Version="1.4.4" />
-    <PackageVersion Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
     <PackageVersion Include="DockPanelSuite" Version="3.1.1" />
     <PackageVersion Include="DockPanelSuite.ThemeVS2015" Version="3.1.1" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />

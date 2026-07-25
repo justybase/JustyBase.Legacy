@@ -167,7 +167,7 @@ namespace JustyBaseLegacy.UI
             }
 
             DynamicCollectionForNettezaHelpers.SaveSnipets(_applicationSettingsContext);
-            IGeneralDbService.ConnectionSessions.Clear();
+            _connectionSessions.Clear();
 
             try
             {

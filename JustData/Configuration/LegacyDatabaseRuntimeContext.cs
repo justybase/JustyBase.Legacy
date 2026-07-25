@@ -2,6 +2,8 @@ using AppBase.Common;
 using AppBase.Common.Configuration;
 using AppBase.Common.Interfaces;
 using AppBase.Data.Core.Core;
+using AppBase.Data.Core.Interfaces;
+using AppBase.Data.Core.Models;
 using System.Drawing;
 using System.Text.RegularExpressions;
 
@@ -15,7 +17,8 @@ namespace JustyBaseLegacy.UI.Configuration;
 public sealed partial class LegacyDatabaseRuntimeContext :
     IDatabaseRuntimeContext,
     INetezzaCompletionContext,
-    INetezzaCompletionRuntimeContext
+    INetezzaCompletionRuntimeContext,
+    INetezzaSchemaTableCatalog
 {
     private readonly IApplicationSettingsContext _applicationSettingsContext;
 
@@ -49,6 +52,13 @@ public sealed partial class LegacyDatabaseRuntimeContext :
     public Dictionary<string, Dictionary<string, Dictionary<string, string>>> DatabaseOwners { get; } = [];
 
     public Dictionary<string, Dictionary<string, Dictionary<int, string>>> DatabaseTableDescriptions { get; } = [];
+
+    /// <summary>
+    /// Process catalog of Netezza table metadata keyed by connection.
+    /// Owned here so DI consumers of <see cref="INetezzaSchemaTableCatalog"/>
+    /// do not share a static dictionary.
+    /// </summary>
+    public Dictionary<string, Dictionary<int, NetezzaTableInfo>> TablesByConnection { get; } = [];
 
     [GeneratedRegex(@"(___expCsv|___expXlsx): (?<sql>.*)\s+->\s+(?<filePath>(.*\.(xlsx|xlsb|justData|[a-z]{3})|nul))", RegexOptions.IgnoreCase | RegexOptions.Singleline, "pl-PL")]
     private static partial Regex ExportRegex();

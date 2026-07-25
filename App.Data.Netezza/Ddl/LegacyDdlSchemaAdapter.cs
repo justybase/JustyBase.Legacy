@@ -1,6 +1,6 @@
 using AppBase.Common;
 using AppBase.Common.Enums;
-using AppBase.Data;
+using AppBase.Data.Core.Core;
 using AppBase.Data.Core.Interfaces;
 using AppBase.Data.Core.Models;
 using JustyBase.Netezza.Ddl;
@@ -13,13 +13,18 @@ public static class LegacyDdlSchemaAdapter
 {
     public static NetezzaTableDdlInput BuildTableInput(
         AppBase.Common.Interfaces.IDatabaseRuntimeContext baseWindowHelpers,
+        INetezzaSchemaTableCatalog schemaTables,
+        IConnectionSessionRegistry connectionSessions,
         string connectionName,
         int objectId,
         string? overrideTableName = null,
         string? middleCode = null,
         string? endingCode = null)
     {
-        if (!NetezzaHelpers.baseTableDictionary.TryGetValue(connectionName, out var baseTables)
+        ArgumentNullException.ThrowIfNull(schemaTables);
+        ArgumentNullException.ThrowIfNull(connectionSessions);
+
+        if (!schemaTables.TablesByConnection.TryGetValue(connectionName, out var baseTables)
             || !baseTables.TryGetValue(objectId, out var tableInfo))
         {
             throw new InvalidOperationException($"Object {objectId} not found in schema for {connectionName}");
@@ -33,7 +38,7 @@ public static class LegacyDdlSchemaAdapter
             BuildSchemaTable(baseWindowHelpers, connectionName, tableInfo, databaseName),
             BuildOrderedColumnNames(baseWindowHelpers, connectionName, tableInfo, useDist: true),
             BuildOrderedColumnNames(baseWindowHelpers, connectionName, tableInfo, useDist: false),
-            BuildKeys(baseWindowHelpers, connectionName, objectId, tableInfo),
+            BuildKeys(baseWindowHelpers, schemaTables, connectionSessions, connectionName, objectId),
             overrideTableName,
             middleCode,
             endingCode,
@@ -42,11 +47,14 @@ public static class LegacyDdlSchemaAdapter
 
     public static NetezzaExternalDdlInput BuildExternalInput(
         AppBase.Common.Interfaces.IDatabaseRuntimeContext baseWindowHelpers,
+        INetezzaSchemaTableCatalog schemaTables,
         string connectionName,
         int objectId,
         NetezzaExternalTableOptions options)
     {
-        if (!NetezzaHelpers.baseTableDictionary.TryGetValue(connectionName, out var baseTables)
+        ArgumentNullException.ThrowIfNull(schemaTables);
+
+        if (!schemaTables.TablesByConnection.TryGetValue(connectionName, out var baseTables)
             || !baseTables.TryGetValue(objectId, out var tableInfo))
         {
             throw new InvalidOperationException($"Object {objectId} not found in schema for {connectionName}");
@@ -63,11 +71,14 @@ public static class LegacyDdlSchemaAdapter
 
     public static NetezzaViewDdlInput BuildViewInput(
         AppBase.Common.Interfaces.IDatabaseRuntimeContext baseWindowHelpers,
+        INetezzaSchemaTableCatalog schemaTables,
         string connectionName,
         int objectId,
         string viewDefinition)
     {
-        if (!NetezzaHelpers.baseTableDictionary.TryGetValue(connectionName, out var baseTables)
+        ArgumentNullException.ThrowIfNull(schemaTables);
+
+        if (!schemaTables.TablesByConnection.TryGetValue(connectionName, out var baseTables)
             || !baseTables.TryGetValue(objectId, out var tableInfo))
         {
             throw new InvalidOperationException($"Object {objectId} not found in schema for {connectionName}");
@@ -169,11 +180,12 @@ public static class LegacyDdlSchemaAdapter
 
     private static List<NetezzaKeyDdl> BuildKeys(
         AppBase.Common.Interfaces.IDatabaseRuntimeContext baseWindowHelpers,
+        INetezzaSchemaTableCatalog schemaTables,
+        IConnectionSessionRegistry connectionSessions,
         string connectionName,
-        int objectId,
-        NetezzaTableInfo tableInfo)
+        int objectId)
     {
-        if (!IGeneralDbService.GeneralDic.TryGetValue(connectionName, out var gdb)
+        if (!connectionSessions.TryGetValue(connectionName, out var gdb)
             || gdb is not INetezza nz
             || !nz.keysInTables.TryGetValue(objectId, out var keyRows)
             || keyRows.Count == 0)
@@ -181,7 +193,9 @@ public static class LegacyDdlSchemaAdapter
             return [];
         }
 
-        var baseTableMap = NetezzaHelpers.baseTableDictionary[connectionName];
+        if (!schemaTables.TablesByConnection.TryGetValue(connectionName, out var baseTableMap))
+            return [];
+
         var keys = new List<NetezzaKeyDdl>();
 
         foreach (var keyName in keyRows.Select(k => k.keyName).Distinct())

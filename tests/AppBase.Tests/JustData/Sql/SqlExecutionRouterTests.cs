@@ -64,7 +64,8 @@ public sealed class SqlExecutionRouterTests
         var engine = new NetezzaSqlExecutionEngine(
             new SqlExecutionSessionRegistry(),
             exportTasks: null,
-            context);
+            context,
+            new AppBase.Data.Core.Core.ConnectionSessionRegistry());
 
         SqlExecutionEvent[] events = await CollectAsync(engine.ExecuteAsync(
             new SqlExecutionRequest(EditorDocumentId.New(), "select 1")
@@ -86,7 +87,8 @@ public sealed class SqlExecutionRouterTests
         var engine = new NetezzaSqlExecutionEngine(
             new SqlExecutionSessionRegistry(),
             exportTasks: null,
-            context);
+            context,
+            new AppBase.Data.Core.Core.ConnectionSessionRegistry());
 
         SqlExecutionEvent[] events = await CollectAsync(engine.ExecuteAsync(
             new SqlExecutionRequest(EditorDocumentId.New(), "select 1")

@@ -2,14 +2,14 @@
 
 ## Quick Start
 
-1. Read the [Architecture Decision Records](docs/ADR/) — 6 ADRs covering key design decisions.
+1. Read the [Architecture Decision Records](docs/ADR/) — 7 ADRs covering key design decisions.
 2. Restore packages from NuGet.org (`dotnet restore JustData.All.slnx`).
 3. Run `dotnet test` with `--filter "Category!=Integration"` before opening a PR (see [docs/INTEGRATION_TESTS.md](docs/INTEGRATION_TESTS.md) for optional real Netezza checks).
 4. Check an existing test in `tests/` for style conventions.
 
 ---
 
-## Rules (10)
+## Rules (11)
 
 ### 1. Clean Layer Boundaries
 `JustData.Application` and `JustData.ViewModels` must **not** reference `System.Windows.Forms`, `System.Drawing`, or any `-windows`-only API. Architecture tests enforce this in CI.
@@ -41,6 +41,9 @@ Every new `I*` in `JustData.Application` must have a concrete implementation, re
 ### 10. Link the Relevant ADR in PR Description
 Every PR that touches architecture should reference the relevant ADR (`docs/ADR/ADR-xxx-title.md`). If no ADR covers the decision, start a new one (template below).
 
+### 11. Prefer Injected Ports Over Global Mutable State
+Do not add new `public static` mutable fields in `App.Data.Netezza` or `AppBase.Services`. Use `INetezzaSchemaTableCatalog`, `IConnectionSessionRegistry`, and runtime/completion contexts instead. Prefer extracting use cases from `BaseWindow` over unit-testing WinForms. See [ADR-007](docs/ADR/ADR-007-testability-ports-over-global-state.md). `StaticStateFenceTests` enforces the allowlist in CI.
+
 ---
 
 ## ADR Template
@@ -71,6 +74,7 @@ Every PR that touches architecture should reference the relevant ADR (`docs/ADR/
 | [ADR-004](docs/ADR/ADR-004-docksuite-over-tabcontrol.md) | DockSuite over embedded TabControl |
 | [ADR-005](docs/ADR/ADR-005-credential-encryption.md) | Credential encryption: AES-GCM + DPAPI |
 | [ADR-006](docs/ADR/ADR-006-flaui-automationids.md) | FlaUI UI tests with stable AutomationIds |
+| [ADR-007](docs/ADR/ADR-007-testability-ports-over-global-state.md) | Testability through ports, not global state |
 
 ---
 
@@ -79,7 +83,7 @@ Every PR that touches architecture should reference the relevant ADR (`docs/ADR/
 - [ ] `pwsh ./scripts/verify-no-tracked-secrets.ps1` passes
 - [ ] `dotnet build JustData.All.slnx -c Release` succeeds
 - [ ] `dotnet test` passes (exclude Netezza integration: `--filter "Category!=Integration"`)
-- [ ] Architecture tests pass (no WinForms in clean layers)
+- [ ] Architecture tests pass (no WinForms in clean layers; no new static mutables outside allowlist)
 - [ ] `AutomationId` set on new interactive controls
 - [ ] ADR linked in PR description (or new ADR proposed)
 

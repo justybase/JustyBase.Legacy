@@ -268,7 +268,7 @@ public partial class BaseWindow
         table = null;
         databaseName = node.Path.Database ?? string.Empty;
         if (objectId < 0
-            || !NetezzaHelpers.baseTableDictionary.TryGetValue(node.Path.Connection, out var tables)
+            || !_schemaTables.TablesByConnection.TryGetValue(node.Path.Connection, out var tables)
             || !tables.TryGetValue(objectId, out table))
             return false;
         if (_completionContext.DatabaseDictionary.TryGetValue(node.Path.Connection, out var databases)
@@ -357,7 +357,7 @@ public partial class BaseWindow
             return;
 
         string sql = $"DROP {objectType} {databaseName}.{table.TABLE_OWNER}.{table.TABLE_NAME};";
-        if (!IGeneralDbService.ConnectionSessions.TryGetValue(node.Path.Connection, out IGeneralDb? database))
+        if (!_connectionSessions.TryGetValue(node.Path.Connection, out IGeneralDb? database))
             throw new InvalidOperationException($"Connection '{node.Path.Connection}' is not initialized.");
         await Task.Run(() =>
         {
@@ -378,7 +378,7 @@ public partial class BaseWindow
             || columnId < 0 || columnId >= columns.Count)
             throw new InvalidOperationException("The selected Netezza column is no longer present in the loaded catalog.");
         NetezzaColumnInfoRow column = columns[columnId];
-        if (!NetezzaHelpers.baseTableDictionary.TryGetValue(node.Path.Connection, out var tables)
+        if (!_schemaTables.TablesByConnection.TryGetValue(node.Path.Connection, out var tables)
             || !tables.TryGetValue(column.TABLE_ID, out NetezzaTableInfo? table)
             || !_completionContext.DatabaseDictionary[node.Path.Connection].TryGetValue(table.DATABASE_ID, out var database))
             throw new InvalidOperationException("The selected Netezza table is no longer present in the loaded catalog.");
@@ -481,7 +481,7 @@ public partial class BaseWindow
     private void OpenCreateUserDialog(ExplorerNodeViewModel node)
     {
         string connectionName = node.Path.Connection;
-        if (string.IsNullOrWhiteSpace(connectionName) || !IGeneralDbService.GeneralDic.TryGetValue(connectionName, out var generalDb))
+        if (string.IsNullOrWhiteSpace(connectionName) || !_connectionSessions.TryGetValue(connectionName, out var generalDb))
             return;
         var groups = generalDb is INetezza netezza ? netezza.GroupsList() : [];
         var dialog = new DbForms.NetezzaCreateUser(connectionName, o => _colorTheme.ColorForm(o), groups);
@@ -542,9 +542,9 @@ public partial class BaseWindow
         }
     }
 
-    private static async Task ExecuteNetezzaNonQueryAsync(string connectionName, string databaseName, string sql)
+    private async Task ExecuteNetezzaNonQueryAsync(string connectionName, string databaseName, string sql)
     {
-        if (!IGeneralDbService.ConnectionSessions.TryGetValue(connectionName, out IGeneralDb? database))
+        if (!_connectionSessions.TryGetValue(connectionName, out IGeneralDb? database))
             throw new InvalidOperationException($"Connection '{connectionName}' is not initialized.");
         await Task.Run(() =>
         {
@@ -563,7 +563,7 @@ public partial class BaseWindow
 
     private async Task ShowMvvmDistributionAsync(SchemaNode node, NetezzaTableInfo table, string databaseName)
     {
-        if (!IGeneralDbService.ConnectionSessions.TryGetValue(node.Path.Connection, out IGeneralDb? database))
+        if (!_connectionSessions.TryGetValue(node.Path.Connection, out IGeneralDb? database))
             throw new InvalidOperationException($"Connection '{node.Path.Connection}' is not initialized.");
 
         long slices = 0;

@@ -14,14 +14,19 @@ public sealed class LegacyDbCompletionFallback
 {
     private readonly INetezzaCompletionContext _completionContext;
     private readonly IGeneralDbService _generalDbService;
+    private readonly INetezzaSchemaTableCatalog _schemaTables;
 
     private string _cacheText1;
     private string _cacheText2;
 
-    public LegacyDbCompletionFallback(INetezzaCompletionContext completionContext, IGeneralDbService generalDbService)
+    public LegacyDbCompletionFallback(
+        INetezzaCompletionContext completionContext,
+        IGeneralDbService generalDbService,
+        INetezzaSchemaTableCatalog schemaTables)
     {
         _completionContext = completionContext ?? throw new ArgumentNullException(nameof(completionContext));
         _generalDbService = generalDbService;
+        _schemaTables = schemaTables ?? throw new ArgumentNullException(nameof(schemaTables));
     }
 
     public void ResetCache()
@@ -44,7 +49,7 @@ public sealed class LegacyDbCompletionFallback
         if (!DynamicCollectionForNettezaHelpers.DatabaseArray.TryGetValue(selectedConnectionName, out var selectedDatabaseList))
             yield break;
 
-        NetezzaHelpers.baseTableDictionary.TryGetValue(selectedConnectionName, out var databasesTablesSelected);
+        _schemaTables.TablesByConnection.TryGetValue(selectedConnectionName, out var databasesTablesSelected);
         _completionContext.DatabaseSchemaLookup.TryGetValue(selectedConnectionName, out var databaseSchemaDictionarySelected);
         _completionContext.ColumnTablesDictionary.TryGetValue(selectedConnectionName, out var selectedColumns);
 

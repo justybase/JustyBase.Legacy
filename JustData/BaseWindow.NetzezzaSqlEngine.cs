@@ -152,7 +152,7 @@ public partial class BaseWindow
 
             if (!TabConnectionCache.Default.TryGet(fctbFromStart, out var tabConnectionData))
             {
-                if (!IGeneralDbService.GeneralDic.TryGetValue(connectionName, out IGeneralDb db1))
+                if (!_connectionSessions.TryGetValue(connectionName, out IGeneralDb db1))
                 {
                     db1 = new Netezza(_databaseRuntimeContext, _loggerLoud, _importExportTasks, _generalDbService)
                     {
@@ -161,7 +161,7 @@ public partial class BaseWindow
                         Username = _generalDbService.UserName(connectionName),
                         LogErrorStdColor = MyColors.LogErrorStdColor
                     };
-                    IGeneralDbService.ConnectionSessions.Set(connectionName, db1);
+                    _connectionSessions.Set(connectionName, db1);
                 }
 
                 var conn1 = db1.GetConnection(SelectedDatabase, usePool: false);
@@ -193,7 +193,7 @@ public partial class BaseWindow
 
             DbConnection connection;
 
-            if (!IGeneralDbService.GeneralDic.TryGetValue(connectionName, out var generalDbForConnection))
+            if (!_connectionSessions.TryGetValue(connectionName, out var generalDbForConnection))
             {
                 _sqlExecutionSessionRegistry.Complete(executionDocumentId);
                 _loggerLoud.MessageBox_Show(this, "Not connected.", "Connection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -686,7 +686,7 @@ public partial class BaseWindow
                                 {
                                     DbCommand cost = null;
                                     if (connectionForCost is null
-                                        && IGeneralDbService.GeneralDic.TryGetValue(connectionName, out var generalDbForCost))
+                                        && _connectionSessions.TryGetValue(connectionName, out var generalDbForCost))
                                     {
                                         connectionForCost = generalDbForCost.GetConnection(selectedDb);
                                         connectionForCost.Open();

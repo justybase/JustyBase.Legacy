@@ -21,6 +21,7 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
     private readonly INetezzaCompletionContext _completionContext;
     private readonly Func<string> _activeDocumentTitleProvider;
     private readonly IGeneralDbService _generalDbService;
+    private readonly INetezzaSchemaTableCatalog _schemaTables;
     private readonly NetezzaSqlCompletionServices _completionServices;
     private NzCompletionEngine _completionEngine;
     private EditorDocumentId _documentId;
@@ -37,6 +38,7 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         JustData.Application.Variables.ISessionVariableStore sessionVariableStore,
         Func<string> activeDocumentTitleProvider,
         IGeneralDbService generalDbService,
+        INetezzaSchemaTableCatalog schemaTables,
         NetezzaSqlCompletionServices completionServices,
         EditorDocumentId? documentId = null)
     {
@@ -44,12 +46,13 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         _completionContext = completionContext;
         _activeDocumentTitleProvider = activeDocumentTitleProvider;
         _generalDbService = generalDbService;
+        _schemaTables = schemaTables ?? throw new ArgumentNullException(nameof(schemaTables));
         _completionServices = completionServices;
         _schemaProvider = completionServices.SchemaProvider;
         _snippetsProvider = new LegacySnippetsProvider(
             applicationSettingsContext,
             sessionVariableStore);
-        _dbFallback = new LegacyDbCompletionFallback(completionContext, generalDbService);
+        _dbFallback = new LegacyDbCompletionFallback(completionContext, generalDbService, _schemaTables);
 
         _documentId = documentId ?? EditorDocumentId.New();
         _completionEngine = completionServices.CreateEngine(_documentId.ToString());

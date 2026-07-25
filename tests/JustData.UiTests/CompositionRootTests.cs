@@ -52,6 +52,7 @@ public sealed class CompositionRootTests
         var firstDatabaseRuntime = firstScope.ServiceProvider.GetRequiredService<IDatabaseRuntimeContext>();
         var firstCompletionContext = firstScope.ServiceProvider.GetRequiredService<INetezzaCompletionContext>();
         var firstCompletionRuntimeContext = firstScope.ServiceProvider.GetRequiredService<INetezzaCompletionRuntimeContext>();
+        var firstSchemaTables = firstScope.ServiceProvider.GetRequiredService<AppBase.Data.Core.Interfaces.INetezzaSchemaTableCatalog>();
         var firstSnippetContext = firstScope.ServiceProvider.GetRequiredService<ISnippetInitializationContext>();
         var firstTabNameProvider = firstScope.ServiceProvider.GetRequiredService<ITabNameProvider>();
         var firstDdlProvider = firstScope.ServiceProvider.GetRequiredService<INetezzaDdlCodeProvider>();
@@ -74,6 +75,7 @@ public sealed class CompositionRootTests
         Assert.Same(settings.Config, firstDatabaseRuntime.Config);
         Assert.Same(firstDatabaseRuntime, firstCompletionContext);
         Assert.Same(firstDatabaseRuntime, firstCompletionRuntimeContext);
+        Assert.Same(firstDatabaseRuntime, firstSchemaTables);
         Assert.Same(firstSnippetContext, firstTabNameProvider);
         Assert.IsType<LegacyNetezzaDdlCodeProvider>(firstDdlProvider);
         Assert.NotSame(firstDispatcher, secondDispatcher);

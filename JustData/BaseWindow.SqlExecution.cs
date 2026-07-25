@@ -392,7 +392,7 @@ namespace JustyBaseLegacy.UI
 
             if (TabConnectionCache.Default.TryGet(fctb, out var connectionData))
             {
-                if (IGeneralDbService.GeneralDic.TryGetValue(connectionData.ConnectionName, out var generalDb) && generalDb is INetezza)
+                if (_connectionSessions.TryGetValue(connectionData.ConnectionName, out var generalDb) && generalDb is INetezza)
                 {
                     NzConnString = _generalDbService.ConnectionStringForNz(_applicationSettingsContext.Config.ConnectionTimeout, connectionData.ConnectionName, SelectedDatabase);
                 }
@@ -427,7 +427,7 @@ namespace JustyBaseLegacy.UI
             {
                 await Task.Run(() =>
                 {
-                    if (IGeneralDbService.GeneralDic.TryGetValue(SelectedConnectionName, out var gdbForExport))
+                    if (_connectionSessions.TryGetValue(SelectedConnectionName, out var gdbForExport))
                         gdbForExport.DoCsvOrXlsxExport(cmd, log, st);
                 });
                 return true;
@@ -633,7 +633,7 @@ namespace JustyBaseLegacy.UI
                     return;
                 }
 
-                if (IGeneralDbService.GeneralDic.TryGetValue(SelectedConnectionName, out var database))
+                if (_connectionSessions.TryGetValue(SelectedConnectionName, out var database))
                     await database.AbortAsync("x");
             }
             catch (Exception ex)
@@ -955,7 +955,7 @@ namespace JustyBaseLegacy.UI
             _ = _sqlExecutionSessionRegistry.CancelAsync(documentId);
 
             if (!string.IsNullOrWhiteSpace(connectionName)
-                && IGeneralDbService.GeneralDic.TryGetValue(connectionName, out var generalDb))
+                && _connectionSessions.TryGetValue(connectionName, out var generalDb))
             {
                 _ = generalDb.AbortAsync("x");
             }

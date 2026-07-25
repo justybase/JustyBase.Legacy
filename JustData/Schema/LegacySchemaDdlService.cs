@@ -1,6 +1,5 @@
 using AppBase.Common;
 using AppBase.Common.Enums;
-using AppBase.Data;
 using AppBase.Data.Core.Core;
 using AppBase.Data.Core.Enums;
 using AppBase.Data.Core.Interfaces;
@@ -17,17 +16,25 @@ public sealed class LegacySchemaDdlService : ISchemaDdlService
 {
     private readonly INetezzaHelperService _netezzaHelperService;
     private readonly AppBase.Common.Interfaces.IDatabaseRuntimeContext _databaseRuntimeContext;
+    private readonly IConnectionSessionRegistry _connectionSessions;
+    private readonly INetezzaSchemaTableCatalog _schemaTables;
 
-    public LegacySchemaDdlService(INetezzaHelperService netezzaHelperService, AppBase.Common.Interfaces.IDatabaseRuntimeContext databaseRuntimeContext)
+    public LegacySchemaDdlService(
+        INetezzaHelperService netezzaHelperService,
+        AppBase.Common.Interfaces.IDatabaseRuntimeContext databaseRuntimeContext,
+        IConnectionSessionRegistry connectionSessions,
+        INetezzaSchemaTableCatalog schemaTables)
     {
         _netezzaHelperService = netezzaHelperService ?? throw new ArgumentNullException(nameof(netezzaHelperService));
         _databaseRuntimeContext = databaseRuntimeContext ?? throw new ArgumentNullException(nameof(databaseRuntimeContext));
+        _connectionSessions = connectionSessions ?? throw new ArgumentNullException(nameof(connectionSessions));
+        _schemaTables = schemaTables ?? throw new ArgumentNullException(nameof(schemaTables));
     }
 
     public async Task<string> GetDdlAsync(SchemaDdlRequest request, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!IGeneralDbService.ConnectionSessions.TryGetValue(request.Node.Path.Connection, out var database))
+        if (!_connectionSessions.TryGetValue(request.Node.Path.Connection, out var database))
             throw new InvalidOperationException($"Connection '{request.Node.Path.Connection}' is not initialized.");
 
         if (database is INetezza && request.Node.LegacyObjectId is int objectId)
@@ -51,7 +58,7 @@ public sealed class LegacySchemaDdlService : ISchemaDdlService
         CancellationToken cancellationToken)
     {
         string connection = request.Node.Path.Connection;
-        if (!NetezzaHelpers.baseTableDictionary.TryGetValue(connection, out var tables)
+        if (!_schemaTables.TablesByConnection.TryGetValue(connection, out var tables)
             || !tables.TryGetValue(objectId, out var table))
             throw new InvalidOperationException($"Netezza object id '{objectId}' is not present in the loaded catalog.");
         if (!_databaseRuntimeContext.DatabaseDictionary.TryGetValue(connection, out var databases)
@@ -88,7 +95,7 @@ public sealed class LegacySchemaDdlService : ISchemaDdlService
     private string BuildNetezzaSelect(string connection, string database, string owner, string tableName, int objectId)
     {
         string[] columns = [];
-        if (NetezzaHelpers.baseTableDictionary.TryGetValue(connection, out var tables)
+        if (_schemaTables.TablesByConnection.TryGetValue(connection, out var tables)
             && tables.TryGetValue(objectId, out var table)
             && _databaseRuntimeContext.ColumnTablesDictionary.TryGetValue(connection, out var catalogColumns))
         {

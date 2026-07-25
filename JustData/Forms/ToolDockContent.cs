@@ -4,7 +4,7 @@ namespace JustyBaseLegacy.UI.Forms;
 
 /// <summary>
 /// A DockContent that wraps an arbitrary <see cref="Control"/> (e.g.
-/// DatabaseExplorerControl, FilesControl, VariablesControl) as a
+/// MvvmDatabaseExplorerControl, FilesControl, VariablesControl) as a
 /// dockable/auto-hidable tool window — similar to the Visual Studio
 /// Solution Explorer, Toolbox, etc.
 /// </summary>

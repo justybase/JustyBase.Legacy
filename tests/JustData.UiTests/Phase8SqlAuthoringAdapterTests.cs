@@ -1,16 +1,25 @@
 using AppBase.Data.Completion;
+using AppBase.Data.Core.Interfaces;
 using JustData.Application.Editor;
 using JustData.Application.Sql;
 using JustyBaseLegacy.UI.Sql;
+using NSubstitute;
 
 namespace JustData.UiTests;
 
 public sealed class Phase8SqlAuthoringAdapterTests
 {
+    private static NetezzaSqlCompletionServices CreateCompletion()
+    {
+        var catalog = Substitute.For<INetezzaSchemaTableCatalog>();
+        catalog.TablesByConnection.Returns(new Dictionary<string, Dictionary<int, AppBase.Data.Core.Models.NetezzaTableInfo>>());
+        return new NetezzaSqlCompletionServices(catalog);
+    }
+
     [Fact]
     public async Task Lint_disable_enable_and_code_actions_keep_stable_document_identity()
     {
-        var completion = new NetezzaSqlCompletionServices();
+        var completion = CreateCompletion();
         using var legacy = new LegacySqlAuthoringServices(completion);
         var inner = new NetezzaSqlAuthoringUseCase(completion, legacy);
         var adapter = new NetezzaSqlAuthoringUseCaseAdapter(inner, legacy);
@@ -46,7 +55,7 @@ public sealed class Phase8SqlAuthoringAdapterTests
     [Fact]
     public async Task Completion_and_signature_requests_are_mapped_without_parser_types()
     {
-        var completion = new NetezzaSqlCompletionServices();
+        var completion = CreateCompletion();
         using var legacy = new LegacySqlAuthoringServices(completion);
         var adapter = new NetezzaSqlAuthoringUseCaseAdapter(
             new NetezzaSqlAuthoringUseCase(completion, legacy),

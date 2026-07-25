@@ -169,11 +169,7 @@ public sealed class Netezza : GeneralDb, INetezza
         {
             // Timing markers removed from production code
 
-            if (!IGeneralDbService.GeneralDic.TryGetValue(connectionName, out var generalDb))
-            {
-                throw new KeyNotFoundException($"Connection '{connectionName}' not found in registry. Available connections: {string.Join(", ", IGeneralDbService.GeneralDic.Keys)}");
-            }
-            using NzConnection connTemp = generalDb.GetConnection(database, usePool: false) as NzConnection;
+            using NzConnection connTemp = GetConnection(database, usePool: false) as NzConnection;
             connTemp.Open();            
             
 
@@ -364,11 +360,7 @@ public sealed class Netezza : GeneralDb, INetezza
                 DbCommand cm1;
                 DbDataReader rd1;
 
-                if (!IGeneralDbService.GeneralDic.TryGetValue(connectionName, out var gdbDownload))
-                {
-                    throw new InvalidOperationException($"Connection '{connectionName}' not found.");
-                }
-                using NzConnection netezzaConnection = gdbDownload.GetConnection() as NzConnection;
+                using NzConnection netezzaConnection = GetConnection() as NzConnection;
                 netezzaConnection.Open();
                 lock (string.Intern(connectionName))
                 {
@@ -626,11 +618,7 @@ public sealed class Netezza : GeneralDb, INetezza
     {
         List<string> tabs = new List<string>();
 
-        if (!IGeneralDbService.GeneralDic.TryGetValue(ConnectionName, out var gdbTables))
-        {
-            return tabs;
-        }
-        using (DbConnection dbConnection = gdbTables.GetConnection())
+        using (DbConnection dbConnection = GetConnection())
         {
             dbConnection.Open();
             string sql = NetezzaSystemSql.AllNonSystemTables;
@@ -868,11 +856,7 @@ public sealed class Netezza : GeneralDb, INetezza
             _importExportTasks.LinesPipeServer(lines, serverName, f);
             Thread.Sleep(100);
 
-            if (!IGeneralDbService.GeneralDic.TryGetValue(ConnectionName, out var gdbImportXml))
-            {
-                throw new InvalidOperationException($"Connection '{ConnectionName}' not found.");
-            }
-            using DbConnection dbConnection = gdbImportXml.GetConnection(db);
+            using DbConnection dbConnection = GetConnection(db);
             dbConnection.Open();
 
             var cmd = dbConnection.CreateCommand();
@@ -1012,12 +996,7 @@ public sealed class Netezza : GeneralDb, INetezza
                 _importExportTasks.LinesPipeServer(lines, serverName, f);
                 Thread.Sleep(100);
 
-                if (!IGeneralDbService.GeneralDic.TryGetValue(connectionName, out var gdbText))
-                {
-                    f?.AddRow($"Connection '{connectionName}' not found — import aborted.");
-                    return;
-                }
-                using DbConnection dbConnection = gdbText.GetConnection(db);
+                using DbConnection dbConnection = GetConnection(db);
                 dbConnection.Open();
                 importSchema = ResolveImportSchemaName(db, dbConnection);
 

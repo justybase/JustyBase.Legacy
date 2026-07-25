@@ -1,17 +1,26 @@
 using AppBase.Data.Completion;
+using AppBase.Data.Core.Interfaces;
 using JustyBase.Netezza.Models;
 using JustyBase.NetezzaSqlParser.Ast;
 using JustyBase.NetezzaSqlParser.Completion;
 using JustyBase.NetezzaSqlParser.Visitor;
+using NSubstitute;
 
 namespace AppBase.Tests.Sql;
 
 public sealed class NetezzaCompletionMapperTests
 {
+    private static NetezzaSqlCompletionServices CreateServices()
+    {
+        var catalog = Substitute.For<INetezzaSchemaTableCatalog>();
+        catalog.TablesByConnection.Returns(new Dictionary<string, Dictionary<int, AppBase.Data.Core.Models.NetezzaTableInfo>>());
+        return new NetezzaSqlCompletionServices(catalog);
+    }
+
     [Fact]
     public void InvalidateSchema_BumpsEpochAndRaisesInvalidation()
     {
-        var services = new NetezzaSqlCompletionServices();
+        var services = CreateServices();
         var invalidated = false;
         services.SchemaInvalidated += () => invalidated = true;
         services.SchemaProvider.AddTable(new TableInfo("EMPLOYEES"));

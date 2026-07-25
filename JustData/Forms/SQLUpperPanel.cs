@@ -33,6 +33,8 @@ namespace JustyBaseLegacy.UI.DbForms
         private readonly INetezzaCompletionContext _completionContext;
         private readonly Action<string> _setSelectedConnectionName;
         private readonly IGeneralDbService _generalDbService;
+        private readonly IConnectionSessionRegistry _connectionSessions;
+        private readonly INetezzaSchemaTableCatalog _schemaTables;
         private readonly ILogger _logger;
         private readonly BaseWindow _baseWindow;
         private readonly IColorTheme _colorTheme;
@@ -51,6 +53,8 @@ namespace JustyBaseLegacy.UI.DbForms
 
 
         public SQLUpperPanel(IGeneralDbService generalDbService,
+            IConnectionSessionRegistry connectionSessions,
+            INetezzaSchemaTableCatalog schemaTables,
             IApplicationSettingsContext applicationSettingsContext,
             INetezzaCompletionContext completionContext,
             Action<string> setSelectedConnectionName,
@@ -67,6 +71,8 @@ namespace JustyBaseLegacy.UI.DbForms
             bool isEnabledMode)
         {
             _generalDbService = generalDbService;
+            _connectionSessions = connectionSessions ?? throw new ArgumentNullException(nameof(connectionSessions));
+            _schemaTables = schemaTables ?? throw new ArgumentNullException(nameof(schemaTables));
             _applicationSettingsContext = applicationSettingsContext;
             _codeActionProvider = codeActionProvider ?? throw new ArgumentNullException(nameof(codeActionProvider));
             _completionContext = completionContext;
@@ -176,6 +182,7 @@ namespace JustyBaseLegacy.UI.DbForms
                 sessionVariableStore,
                 activeDocumentTitleProvider,
                 _generalDbService,
+                _schemaTables,
                 _netezzaSqlCompletionServices);
             _autocompleteSource = autocompleteSource;
             popupMenu.Items.SetAutocompleteItems(autocompleteSource);
@@ -267,7 +274,7 @@ namespace JustyBaseLegacy.UI.DbForms
         }
         private void CbDatabases_DropDown(object sender, EventArgs e)
         {
-            if (!IGeneralDbService.GeneralDic.TryGetValue(SelectedConnectionName, out var selectedDatabase))
+            if (!_connectionSessions.TryGetValue(SelectedConnectionName, out var selectedDatabase))
             {
                 return;
             }
@@ -375,7 +382,7 @@ namespace JustyBaseLegacy.UI.DbForms
                 return;
 
             SelectedDatabase = selectedDatabase;
-            if (IGeneralDbService.GeneralDic.TryGetValue(SelectedConnectionName, out IGeneralDb db) && db is not null)
+            if (_connectionSessions.TryGetValue(SelectedConnectionName, out IGeneralDb db) && db is not null)
             {
                 db.ResetDbName(SelectedConnectionName, SelectedDatabase);
             }

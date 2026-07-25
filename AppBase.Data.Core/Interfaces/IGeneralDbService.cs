@@ -7,16 +7,6 @@ namespace AppBase.Data.Core.Interfaces;
 
 public interface IGeneralDbService
 {
-    /// <summary>
-    /// Canonical process-wide session registry. The static access is retained temporarily
-    /// because the WinForms layer is still being migrated to constructor injection.
-    /// </summary>
-    public static IConnectionSessionRegistry ConnectionSessions { get; } = new ConnectionSessionRegistry();
-
-    /// <summary>
-    /// Legacy name kept as a compatibility alias while callers migrate.
-    /// </summary>
-    public static IConnectionSessionRegistry GeneralDic => ConnectionSessions;
     DatabaseTypeEnum RelatedDatabaseType { get; set; }
 
     static string ActiveQuerySql(DatabaseTypeEnum databaseType)

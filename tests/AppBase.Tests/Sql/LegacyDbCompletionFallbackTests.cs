@@ -5,7 +5,6 @@ using AppBase.Data;
 using AppBase.Data.Completion;
 using AppBase.Data.Core.Interfaces;
 using AppBase.Data.Core.Models;
-using FastColoredTextBoxNS;
 using NSubstitute;
 
 namespace AppBase.Tests.Sql;
@@ -13,6 +12,7 @@ namespace AppBase.Tests.Sql;
 public sealed class LegacyDbCompletionFallbackTests : IDisposable
 {
     private const string ConnectionName = "fallback-test";
+    private readonly Dictionary<string, Dictionary<int, NetezzaTableInfo>> _tables = new(StringComparer.OrdinalIgnoreCase);
     private readonly LegacyDbCompletionFallback _sut;
     private readonly INetezzaCompletionContext _context;
     private readonly IGeneralDbService _db;
@@ -21,7 +21,9 @@ public sealed class LegacyDbCompletionFallbackTests : IDisposable
     {
         _context = Substitute.For<INetezzaCompletionContext>();
         _db = Substitute.For<IGeneralDbService>();
-        _sut = new LegacyDbCompletionFallback(_context, _db);
+        var catalog = Substitute.For<INetezzaSchemaTableCatalog>();
+        catalog.TablesByConnection.Returns(_tables);
+        _sut = new LegacyDbCompletionFallback(_context, _db, catalog);
         SeedHappyPath();
     }
 
@@ -29,13 +31,14 @@ public sealed class LegacyDbCompletionFallbackTests : IDisposable
     {
         _sut.ResetCache();
         DynamicCollectionForNettezaHelpers.DatabaseArray.Remove(ConnectionName);
-        NetezzaHelpers.baseTableDictionary.Remove(ConnectionName);
+        _tables.Remove(ConnectionName);
     }
 
     [Fact]
     public void Constructor_rejects_null_context()
     {
-        Assert.Throws<ArgumentNullException>(() => new LegacyDbCompletionFallback(null!, _db));
+        var catalog = Substitute.For<INetezzaSchemaTableCatalog>();
+        Assert.Throws<ArgumentNullException>(() => new LegacyDbCompletionFallback(null!, _db, catalog));
     }
 
     [Fact]
@@ -112,7 +115,7 @@ public sealed class LegacyDbCompletionFallbackTests : IDisposable
 
         DynamicCollectionForNettezaHelpers.DatabaseArray[ConnectionName] = ["JUST_DATA", "OTHER_DB"];
 
-        NetezzaHelpers.baseTableDictionary[ConnectionName] = new Dictionary<int, NetezzaTableInfo>
+        _tables[ConnectionName] = new Dictionary<int, NetezzaTableInfo>
         {
             [10] = new()
             {
