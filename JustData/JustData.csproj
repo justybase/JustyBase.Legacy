@@ -1,0 +1,135 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<AssemblyName>JustyBaseLegacy</AssemblyName>
+		<TargetFramework>net10.0-windows10.0.22000.0</TargetFramework>
+		<UseWindowsForms>true</UseWindowsForms>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<Platforms>x64</Platforms>
+		<RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+		<ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+		<ApplicationIcon>icon2ico.ico</ApplicationIcon>
+		<SatelliteResourceLanguages>en-US</SatelliteResourceLanguages>
+		<TieredPGO>true</TieredPGO>
+		<!--<ServerGarbageCollection>true</ServerGarbageCollection>-->
+		<!--<NeutralLanguage>true</NeutralLanguage>-->
+		<NoWarn>$(NoWarn);WFO1000</NoWarn>
+		
+		<SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+		<CustomResourceTypesSupport>true</CustomResourceTypesSupport>
+		<EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+	</PropertyGroup>
+	<PropertyGroup>
+		<IncludeDB2 Condition="'$(IncludeDB2)' == ''">false</IncludeDB2>
+		<IncludeOracle Condition="'$(IncludeOracle)' == ''">false</IncludeOracle>
+		<IncludeMsSql Condition="'$(IncludeMsSql)' == ''">false</IncludeMsSql>
+		<IncludePostgres Condition="'$(IncludePostgres)' == ''">false</IncludePostgres>
+		<IncludePublishAotCompressed Condition="'$(IncludePublishAotCompressed)' == ''">false</IncludePublishAotCompressed>
+		<UseAOT Condition="'$(UseAOT)' == ''">true</UseAOT>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(UseAOT)' == 'true'">
+		<PublishAot>true</PublishAot>
+		<PublishSingleFile>false</PublishSingleFile>
+		<IlcTreatWarningsAsErrors>false</IlcTreatWarningsAsErrors>
+		<_SuppressWinFormsTrimError>true</_SuppressWinFormsTrimError>
+		<TrimMode>link</TrimMode>
+		<BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+		<EventSourceSupport>false</EventSourceSupport>
+		<DefineConstants>$(DefineConstants);AOT_BUILD</DefineConstants>
+	</PropertyGroup>
+
+	<ItemGroup Condition="'$(UseAOT)' == 'true'">
+		<TrimmableAssembly Include="System.Windows.Forms" />
+		<TrimmableAssembly Include="System.Windows.Forms.Primitives" />
+		<TrimmerRootAssembly Include="System.Resources.Extensions" />
+		<RdXmlFile Include="rd.xml" />
+
+	</ItemGroup>
+	<PropertyGroup Condition="'$(IncludeDB2)' == 'true'">
+		<DefineConstants>$(DefineConstants);INCLUDE_DB2</DefineConstants>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(IncludeOracle)' == 'true'">
+		<DefineConstants>$(DefineConstants);INCLUDE_ORACLE</DefineConstants>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(IncludeMsSql)' == 'true'">
+		<DefineConstants>$(DefineConstants);INCLUDE_MSSQL</DefineConstants>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(IncludePostgres)' == 'true'">
+		<DefineConstants>$(DefineConstants);INCLUDE_POSTGRES</DefineConstants>
+	</PropertyGroup>
+	<PropertyGroup Condition="'$(SelfContained)' == 'true'">
+		<DefineConstants>SELF_CONTAINED</DefineConstants>
+	</PropertyGroup>
+	<PropertyGroup Condition="'$(IncludePublishAotCompressed)' == 'true'">
+        <PublishAotCompressed>true</PublishAotCompressed>
+    </PropertyGroup>
+
+
+	<ItemGroup>
+		<Content Include="icon2ico.ico" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<DesignDataWithDesignTimeCreatableTypes Include="Resources\mainIcon\iconNew.ico" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Include="..\Icons\icon2.png">
+	    <Pack>True</Pack>
+	    <PackagePath>\</PackagePath>
+	  </None>
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="DiffPlex" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+		<PackageReference Include="DockPanelSuite" />
+		<PackageReference Include="DockPanelSuite.ThemeVS2015" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\JustData.Application\JustData.Application.csproj" />
+		<ProjectReference Include="..\JustData.ViewModels\JustData.ViewModels.csproj" />
+		<ProjectReference Include="..\App.Data.Netezza\App.Data.Netezza.csproj" />
+		<ProjectReference Include="..\JustyBaseLegacy.AdditionalForms\JustyBaseLegacy.AdditionalForms.csproj" />
+		<ProjectReference Include="..\AppBase.Common\AppBase.Common.csproj" />
+		<ProjectReference Include="..\AppBase.Data.Core\AppBase.Data.Core.csproj" />
+		<ProjectReference Include="..\AppBase.Services\AppBase.Services.csproj" />
+		<ProjectReference Include="..\DatabaseDataGridView.WinForms\source\DatabaseDataGridView.WinForms.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+		<Compile Update="Forms\DraggableTabControl.cs">
+			<SubType>Component</SubType>
+		</Compile>
+		<Compile Update="Forms\TabPagePicture.cs">
+			<SubType>Component</SubType>
+		</Compile>
+		<Compile Update="Properties\Resources.Designer.cs">
+			<DesignTime>True</DesignTime>
+			<AutoGen>True</AutoGen>
+			<DependentUpon>Resources.resx</DependentUpon>
+		</Compile>
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Update="Resources\mainIcon\iconNew.png">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+		<None Update="Resources\NZ.SQL">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
+
+	<ItemGroup>
+		<EmbeddedResource Update="Properties\Resources.resx">
+			<Generator>ResXFileCodeGenerator</Generator>
+			<LastGenOutput>Resources.Designer.cs</LastGenOutput>
+		</EmbeddedResource>
+	</ItemGroup>
+</Project>

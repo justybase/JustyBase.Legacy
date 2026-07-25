@@ -1,0 +1,14 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+	<TargetFramework>net10.0-windows10.0.22000.0</TargetFramework>
+	  <ImplicitUsings>enable</ImplicitUsings>
+      <Nullable>enable</Nullable>
+	  <UseWindowsForms>true</UseWindowsForms>
+	  <CustomResourceTypesSupport>true</CustomResourceTypesSupport>
+	  <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AppBase.Common\AppBase.Common.csproj" />
+  </ItemGroup>
+</Project>

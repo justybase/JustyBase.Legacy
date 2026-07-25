@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_PLATFORM: x64
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.301
+
+      - name: Restore
+        run: dotnet restore JustData.All.slnx
+
+      - name: Audit NuGet dependencies
+        run: dotnet list JustData/JustData.csproj package --vulnerable --include-transitive --no-restore
+
+      - name: Build solution
+        run: dotnet build JustData.All.slnx -c Release --no-restore -p:Platform=${{ env.DOTNET_PLATFORM }}
+
+      - name: Smoke test Release build
+        run: dotnet run --project JustData/JustData.csproj -c Release -p:Platform=${{ env.DOTNET_PLATFORM }} --no-build --no-launch-profile -- --smoke-test
+
+      - name: Run core tests with coverage
+        run: dotnet test tests/AppBase.Tests/AppBase.Tests.csproj -c Release --no-build --collect:"XPlat Code Coverage" --settings tests/coverage.runsettings --results-directory artifacts/test-results/AppBase.Tests
+
+      - name: Run ViewModels tests with coverage
+        run: dotnet test tests/JustData.ViewModels.Tests/JustData.ViewModels.Tests.csproj -c Release --no-build --collect:"XPlat Code Coverage" --settings tests/coverage.runsettings --results-directory artifacts/test-results/JustData.ViewModels.Tests
+
+      - name: Run Preferences tests with coverage
+        run: dotnet test tests/JustData.Preferences.Tests/JustData.Preferences.Tests.csproj -c Release --no-build --collect:"XPlat Code Coverage" --settings tests/coverage.runsettings --results-directory artifacts/test-results/JustData.Preferences.Tests
+
+      - name: Run Login tests with coverage
+        run: dotnet test tests/JustData.Login.Tests/JustData.Login.Tests.csproj -c Release --no-build --collect:"XPlat Code Coverage" --settings tests/coverage.runsettings --results-directory artifacts/test-results/JustData.Login.Tests
+
+      - name: Merge coverage reports
+        shell: pwsh
+        run: ./scripts/merge-cobertura-coverage.ps1 -ResultsDirectory artifacts/test-results -OutputFile artifacts/coverage/coverage.cobertura.xml
+
+      - name: Enforce core coverage threshold
+        shell: pwsh
+        run: |
+          ./scripts/check-core-coverage.ps1 -CoverageFile artifacts/coverage/coverage.cobertura.xml -MinimumLineRatePercent 35
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-coverage
+          path: |
+            artifacts/test-results/**/coverage.cobertura.xml
+            artifacts/coverage/coverage.cobertura.xml
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Verify no tracked secrets
+        shell: pwsh
+        run: ./scripts/verify-no-tracked-secrets.ps1
+
+      - name: Check whitespace
+        run: git diff --check

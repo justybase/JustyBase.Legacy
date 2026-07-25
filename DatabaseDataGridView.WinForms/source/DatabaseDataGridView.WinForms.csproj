@@ -1,0 +1,61 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net10.0-windows10.0.22000.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+	  <OutputType>Library</OutputType>
+	  <Version>1.0.1</Version>
+	  <PackageLicenseExpression>LGPL-3.0-or-later</PackageLicenseExpression>
+	  <PackageReadmeFile>README.md</PackageReadmeFile>
+	  <ImplicitUsings>enable</ImplicitUsings>
+	  <NoWarn>$(NoWarn);WFO1000</NoWarn>
+	  <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	  <CustomResourceTypesSupport>true</CustomResourceTypesSupport>
+	  <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+	  <PackageId>DatabaseDataGridView.WinForms</PackageId>                                                                
+	  <Authors>Krzysztof Duśko</Authors>                                                                                       
+	  <Description>
+		  Enhanced DataGridView control for WinForms with filtering, export capabilities, and custom theming
+	  </Description>
+	  <PackageTags>winforms;datagridview;data;grid;filter;export</PackageTags>
+	  <RepositoryUrl>https://github.com/justybase/JustyBase.Legacy</RepositoryUrl>
+	  <PackageProjectUrl>https://github.com/justybase/JustyBase.Legacy</PackageProjectUrl>
+
+  </PropertyGroup>
+  
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <ProjectReference Include="..\..\JustyBase.Legacy.TextBox\source\JustyBase.Legacy.TextBox.csproj" />
+  </ItemGroup>
+  
+  
+  <ItemGroup>
+    <Compile Update="Coloring\CustomToolStripSeparator.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Update="CueTextBox.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Update="FilterForm.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Update="CustomDataGridView.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Update="GetNameFromUser.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="SummariesChooseForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Update="CustomDataGridView.resx">
+      <SubType>Designer</SubType>
+    </EmbeddedResource>
+  </ItemGroup>
+</Project>

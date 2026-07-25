@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+	  <TargetFramework>net10.0-windows10.0.22000.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>annotations</Nullable>
+	  <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="JustyBase.NetezzaDriver" />
+    <PackageReference Include="Hogimn.Sql.Formatter" />
+    <PackageReference Include="JustyBase.Netezza" />
+    <PackageReference Include="JustyBase.NetezzaSqlParser" />
+    <PackageReference Include="JustyBase.NetezzaDdl" />
+    <PackageReference Include="JustyBase.NetezzaCatalogSql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\JustData.Application\JustData.Application.csproj" />
+    <ProjectReference Include="..\AppBase.Data.Core\AppBase.Data.Core.csproj" />
+  </ItemGroup>
+
+</Project>

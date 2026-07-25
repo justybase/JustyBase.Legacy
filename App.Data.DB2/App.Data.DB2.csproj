@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+	  <TargetFramework>net10.0-windows10.0.22000.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>annotations</Nullable>
+	  <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Net.IBM.Data.Db2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AppBase.Data.Core\AppBase.Data.Core.csproj" />
+  </ItemGroup>
+
+</Project>

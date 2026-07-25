@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Directives>
+	<Application>
+		<Assembly Name="System.Drawing">
+			<Type Name="System.Drawing.Bitmap" Dynamic="Required All" />
+			<Type Name="System.Drawing.Icon" Dynamic="Required All" />
+		</Assembly>
+		<Assembly Name="System.Windows.Forms">
+			<Type Name="System.Windows.Forms.PropertyGridInternal.PropertiesTab" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewColumn" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewButtonColumn" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewComboBoxColumn" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewCheckBoxColumn" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewImageColumn" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewLinkColumn" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewTextBoxColumn" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewButtonCell" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewComboBoxCell" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewCheckBoxCell" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewHeaderCell" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewImageCell" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewLinkCell" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewRowHeaderCell" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewTextBoxCell" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewTopLeftHeaderCell" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewComboBoxEditingControl" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.DataGridViewTextBoxEditingControl" Dynamic="Required All" />
+			<Type Name="System.Windows.Forms.RadioButton" Dynamic="Required All" />
+		</Assembly>
+		<Assembly Name="JustyBaseLegacy" Dynamic="Required All" />
+		<Assembly Name="JustyBaseLegacy.AdditionalForms" Dynamic="Required All" />
+		<Assembly Name="AppBase.Common" Dynamic="Required All" />
+		<Assembly Name="AppBase.Services" Dynamic="Required All" />
+		<Assembly Name="AppBase.Data.Core" Dynamic="Required All" />
+		<Assembly Name="App.Data.Netezza" Dynamic="Required All" />
+		<Assembly Name="DatabaseDataGridView.WinForms" Dynamic="Required All" />
+		<Assembly Name="JustyBase.Legacy.TextBox" Dynamic="Required All" />
+		<Assembly Name="WeifenLuo.WinFormsUI.Docking" Dynamic="Required All" />
+		<Assembly Name="WeifenLuo.WinFormsUI.Docking.ThemeVS2015" Dynamic="Required All" />
+		<Assembly Name="System.Runtime.InteropServices">
+			<Type Name="System.Runtime.InteropServices.Marshalling.StrategyBasedComWrappers" Dynamic="Required All" />
+			<Type Name="System.Runtime.InteropServices.ComWrappers" Dynamic="Required All" />
+		</Assembly>
+	</Application>
+</Directives>

@@ -1,0 +1,40 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+	<TargetFramework>net10.0-windows10.0.22000.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>annotations</Nullable>
+	<UseWindowsForms>true</UseWindowsForms>
+	<CustomResourceTypesSupport>true</CustomResourceTypesSupport>
+	<EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IncludeDB2 Condition="'$(IncludeDB2)' == ''">false</IncludeDB2>
+	<IncludeOracle Condition="'$(IncludeOracle)' == ''">false</IncludeOracle>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DisableRuntimeMarshalling>true</DisableRuntimeMarshalling>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(IncludeDB2)' == 'true'">
+    <DefineConstants>$(DefineConstants);INCLUDE_DB2</DefineConstants>
+  </PropertyGroup>
+	
+	<PropertyGroup Condition="'$(IncludeOracle)' == 'true'">
+		<DefineConstants>$(DefineConstants);INCLUDE_ORACLE</DefineConstants>
+	</PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Hogimn.Sql.Formatter" />
+    <PackageReference Include="SpreadSheetTasks" />
+    <PackageReference Include="Sylvan.Data.Csv" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\JustData.Application\JustData.Application.csproj" />
+    <ProjectReference Include="..\App.Data.Netezza\App.Data.Netezza.csproj" />
+    <ProjectReference Include="..\AppBase.Common\AppBase.Common.csproj" />
+    <ProjectReference Include="..\AppBase.Data.Core\AppBase.Data.Core.csproj" />
+  </ItemGroup>
+
+</Project>

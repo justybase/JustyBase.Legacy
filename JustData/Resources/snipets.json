@@ -1,0 +1,53 @@
+{
+  "Keywords": [
+    "SELECT",
+    "AS",
+    "WHERE",
+    "HAVING",
+    "FROM",
+    "GROUP BY",
+    "ORDER BY",
+    "ROW_NUMBER()",
+    "PARTITION BY",
+    "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW",
+    "UNBOUNDED",
+    "FOLLOWING",
+    "LIKE",
+    "UPDATE",
+    "DISTRIBUTE",
+    "ORGANIZE",
+    "RANDOM",
+    "SUBSTRING",
+    "UNION ALL",
+    "ALL ",
+    "COMMIT",
+    "UNBOUNDED FOLLOWING",
+    "UNBOUNDED PRECEDING",
+    "UNBOUNDED",
+    "FOLLOWING",
+    "PRECEDING",
+    "STRLEFT",
+    "STRRIGHT",
+    "RENAME"
+  ],
+  "Snippets": [
+    "CASE WHEN (^)\nTHEN\n;\nEND",
+    "SELECT\n*\nFROM ^ \n;",
+    "CREATE TABLE ^ AS \n(\n\n) \nDISTRIBUTE ON RANDOM;",
+    "CREATE TABLE IF NOT EXISTS ^ AS \n(\n\n) \nDISTRIBUTE ON RANDOM;",
+    "DROP TABLE ^ IF EXISTS;",
+    "DROP TABLE ^;",
+    "GROOM TABLE ^ VERSIONS;"
+  ],
+  "MonkeySnippets": [
+    "@@mysessions SELECT * FROM _V_SESSION WHERE USERNAME = USER",
+    "@@let __Let $snpt_date_id1=20201220|$snpt_date_id2=20201031",
+    "@@for __LetFor $snpt_date_id|20200131|202000229|20200331|20200430|20200531",
+    "@@activequeries select\r\n                q.qs_planid\r\n                , q.qs_sessionid\r\n                , q.qs_clientid\r\n                , s.dbname\r\n                , s.username\r\n                , q.qs_cliipaddr\r\n                , q.qs_sql\r\n                , q.qs_state\r\n                , q.qs_tsubmit\r\n                , q.qs_tstart\r\n                , case when q.qs_tstart = \u0027epoch\u0027 then \u00270\u0027 else abstime \u0027now\u0027 - q.qs_tstart end as ELAPSED_SECS, initcap(q.qs_pritxt) AS PRIORYTY\r\n                , TRIM(TO_CHAR(ROUND(case when qs_estcost \u003E= 0 then qs_estcost else 18446744073709551616 \u002B qs_estcost end / 1000.0,0),\u0027999 999 999\u0027)) AS ESTIMATED_SECS\r\n                  , q.qs_estdisk / 1024 AS ESTIMATED_DISK_MB\r\n                    , TRIM(TO_CHAR(ROUND(q.qs_estmem / 1024.0, 0), \u0027999 999 999\u0027)) AS ESTIMATED_MEMORY_MB\r\n                        , q.qs_snippets AS SNIPPETS\r\n\t            , q.qs_cursnipt AS CURRENTSNIPET\r\n\t            , q.qs_resrows AS RESOULTROWS\r\n\t            , q.qs_resbytes AS RESOULTBYES\r\n            from\r\n                _v_qrystat q,\r\n                _v_session s\r\n            where q.qs_sessionid = s.id;",
+    "@@window https://www.ibm.com/support/knowledgecenter/SSTNZ3/com.ibm.ips.doc/postgresql/dbuser/c_dbuser_window_analytic_funcs.html",
+    "@@window2 \u003Cpartition_by_clause\u003E = PARTITION BY \u003Cvalue_expression\u003E [, ...]\u002B\r\n                    \u003Corder_by_clause\u003E = ORDER BY \u003Cvalue_expression\u003E [asc | desc] [nulls \r\n                    {first|last}] [, ...]\u002B\r\n                    \u003Cframe_spec_clause\u003E = \u003Cframe_extent\u003E [\u003Cexclusion clause\u003E]\r\n                    \u003Cframe_extent\u003E = \r\n                           ROWS  UNBOUNDED PRECEDING\r\n                          |ROWS  \u003Cconstant\u003E PRECEDING\r\n                          |ROWS   CURRENT ROW\r\n                          |RANGE  UNBOUNDED PRECEDING\r\n                          |RANGE  \u003Cconstant\u003E PRECEDING\r\n                          |RANGE  CURRENT ROW\r\n                          |ROWS BETWEEN {UNBOUNDED PRECEDING| \u003Cconstant\u003E PRECEDING | CURRENT \r\n                    ROW } AND { UNBOUNDED FOLLOWING | \u003Cconstant\u003E  FOLLOWING | CURRENT ROW }\r\n                          |RANGE BETWEEN {UNBOUNDED PRECEDING| \u003Cconstant\u003E PRECEDING | CURRENT \r\n                    ROW } AND { UNBOUNDED FOLLOWING | \u003Cconstant\u003E  FOLLOWING | CURRENT ROW } \r\n                    \u003Cexclusion_clause\u003E =  EXCLUDE CURRENT ROW | EXCLUDE TIES | EXCLUDE \r\n                    GROUP | EXCLUDE  NO OTHERS",
+    "@@merge MERGE INTO merge_demo1 AS A \r\nusing merge_demo2 AS B\r\nON A.ID = B.ID\r\nWHEN MATCHED THEN\r\nUPDATE SET A.LastName = B.LastName\r\nWHEN NOT MATCHED THEN\r\nINSERT VALUES (B.ID, B.FirstName, B.LastName); \r\n-- https://dwgeek.com/netezza-merge-command-manipulate-records.html/",
+    "@@tableSizes --SET CATALOG TEST;\r\n\r\nSELECT OBJID, TABLENAME, OWNER, \r\n       CREATEDATE, RELNATTS, ALLOCATED_BYTES::bigint as ALLOCATED_BYTES, USED_BYTES::bigint as USED_BYTES, SKEW, CAST(NULL as NUMERIC) as ROW_COUNT, \r\n       ALLOCATED_BLOCKS, USED_BLOCKS, BLOCK_SIZE, USED_MIN, USED_MAX, USED_AVG, \r\n       RELDISTMETHOD, MATER_COUNT, MATER_BLOCKS, MATER_BYTES, MATER_OVERHEAD\r\n  FROM _V_TABLE_STORAGE_STAT\r\n WHERE UPPER(OBJTYPE) = \u0027TABLE\u0027\r\n ORDER BY  TABLENAME, OWNER;\r\n\r\nselect RELNAME, RELREFS, RELTUPLES from _T_CLASS;\r\n\r\nSELECT o.OBJNAME as TABLENAME, o.OWNER, z.DSID, z.HWID, NULL as DATA_PART,\r\n       z.ALLOCATED_BLOCKS, z.USED_BLOCKS, z.ALLOCATED_BYTES::bigint as ALLOCATED_BYTES, z.USED_BYTES::bigint as USED_BYTES,\r\n             z.SORTED_BLOCKS, z.SORTED_BYTES\r\n    FROM _V_SYS_OBJECT_DSLICE_INFO z\r\n    join _v_object_data o on o.objid = z.tblid\r\n where o.objdb = current_db;",
+    "@@deleted SET show_deleted_records = 1;\r\nselect createxid,deletexid, * from YOURTABLENAME WHERE deletexid \u003C\u003E 0;\r\nSET show_deleted_records = 0;"
+  ]
+}

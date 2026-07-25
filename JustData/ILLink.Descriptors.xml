@@ -1,0 +1,6 @@
+<!--<linker>
+	<assembly fullname="System.Resources.Extensions" preserve="all" />
+	<assembly fullname="System.Resources.Extensions">
+		<type fullname="System.Resources.Extensions.UnknownType" preserve="all" />
+	</assembly>
+</linker>-->

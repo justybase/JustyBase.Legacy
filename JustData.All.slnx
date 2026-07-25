@@ -1,0 +1,32 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/App.Data/">
+    <Project Path="App.Data.DB2/App.Data.DB2.csproj" Id="4fc0d161-0d2a-4753-bc10-789fad82eb1b" />
+    <Project Path="App.Data.MsSqlDb/App.Data.MsSqlDb.csproj" Id="0b5d7059-3bc6-4ac4-a333-136f6776f554" />
+    <Project Path="App.Data.Netezza/App.Data.Netezza.csproj" Id="e67e8319-3b20-483f-89a5-d9d2b35fe253" />
+    <Project Path="App.Data.Oracle/App.Data.Oracle.csproj" Id="56890bb1-a0c8-4975-8637-1815d13df9d1" />
+    <Project Path="App.Data.Postgres/App.Data.Postgres.csproj" Id="8c75a5eb-bf70-423a-a4ad-e36e27392a78" />
+    <Project Path="AppBase.Data.Core/AppBase.Data.Core.csproj" />
+  </Folder>
+  <Project Path="AppBase.Common/AppBase.Common.csproj" />
+  <Project Path="AppBase.Services/AppBase.Services.csproj" />
+  <Project Path="JustData.Application/JustData.Application.csproj" />
+  <Project Path="DatabaseDataGridView.WinForms/source/DatabaseDataGridView.WinForms.csproj" />
+  <Project Path="JustData/JustData.csproj">
+    <Platform Solution="*|Any CPU" Project="x64" />
+    <Platform Solution="*|x64" Project="x64" />
+  </Project>
+  <Project Path="JustData.ViewModels/JustData.ViewModels.csproj" />
+  <Project Path="JustyBase.Legacy.TextBox/source/JustyBase.Legacy.TextBox.csproj" />
+  <Project Path="JustyBaseLegacy.AdditionalForms/JustyBaseLegacy.AdditionalForms.csproj" />
+  <Project Path="tests/AppBase.Tests/AppBase.Tests.csproj" />
+  <Project Path="tests/AppBase.IntegrationTests/AppBase.IntegrationTests.csproj" />
+  <Project Path="tests/JustData.UiTests/JustData.UiTests.csproj" />
+  <Project Path="tests/JustData.Login.Tests/JustData.Login.Tests.csproj" />
+  <Project Path="tests/JustData.Preferences.Tests/JustData.Preferences.Tests.csproj" />
+  <Project Path="tests/JustData.ViewModels.Tests/JustData.ViewModels.Tests.csproj" />
+</Solution>

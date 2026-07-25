@@ -1,0 +1,38 @@
+PackageIdentifier: JustyBase.JustyBaseLegacy
+PackageVersion: "{VERSION}"
+PackageName: JustyBase Legacy
+Publisher: Krzysztof Duśko
+License: MIT
+LicenseUrl: https://github.com/justybase/JustyBase.Legacy/blob/main/LICENSE.md
+Moniker: justybaselegacy
+Tags:
+  - database
+  - sql
+  - oracle
+  - db2
+  - postgres
+  - mssql
+  - netezza
+ShortDescription: Multi-database management and query tool supporting Oracle, DB2, PostgreSQL, SQL Server, Netezza
+Description: JustyBase Legacy is an advanced multi-database management and query tool. It supports Oracle, IBM DB2, PostgreSQL, Microsoft SQL Server and Netezza. Built with .NET 10 and Windows Forms.
+PackageUrl: https://github.com/justybase/JustyBase.Legacy
+ReleaseNotesUrl: https://github.com/justybase/JustyBase.Legacy/releases/tag/v{VERSION}
+MinimumOSVersion: 10.0.17763.0
+Installers:
+  - Architecture: x64
+    InstallerType: inno
+    InstallerUrl: https://github.com/justybase/JustyBase.Legacy/releases/download/v{VERSION}/JustyBaseLegacy-{VERSION}.exe
+    InstallerSha256: "{SHA256_EXE}"
+    InstallerSwitches:
+      Silent: /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+      SilentWithProgress: /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+    ProductCode: "{{6742BA9A-5384-4711-878B-00B1E0893640}"
+  - Architecture: x64
+    InstallerType: zip
+    NestedInstallerType: portable
+    NestedInstallerFiles:
+      - RelativeFilePath: JustyBaseLegacy.exe
+    InstallerUrl: https://github.com/justybase/JustyBase.Legacy/releases/download/v{VERSION}/JustyBaseLegacy-{VERSION}.zip
+    InstallerSha256: "{SHA256_ZIP}"
+ManifestType: singleton
+ManifestVersion: 1.6.0

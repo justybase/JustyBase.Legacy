@@ -1,0 +1,1130 @@
+// BaseWindow SQL object explorer (Legend) and editor integration partial.
+using AppBase.Common;
+using AppBase.Common.Enums;
+using AppBase.Common.Interfaces;
+using AppBase.Common.JsonContext;
+using AppBase.Common.Models;
+using AppBase.Common.WindowManagement;
+using AppBase.Data;
+using AppBase.Data.Completion;
+using AppBase.Data.Core.Core;
+using AppBase.Data.Core.Enums;
+using AppBase.Data.Core.Interfaces;
+using AppBase.Data.Core.Models;
+using AppBase.Services;
+using AppBase.Services.Helpers;
+using AppBase.Services.Sql;
+using JustyBaseLegacy.UI.Sql;
+using DatabaseDataGridView.WinForms;
+using DatabaseDataGridView.WinForms.Coloring;
+using FastColoredTextBoxNS;
+using JustyBase.NetezzaSqlParser.Authoring;
+using FastColoredTextBoxNS.Helpers;
+using JustDataAdditionalForms;
+using JustData.Application.Schema;
+using JustData.Application.Startup;
+using JustData.Application.Editor;
+using JustData.ViewModels.Editor;
+using JustyBase.NetezzaDriver;
+using System.Drawing;
+using JustyBase.NetezzaSqlParser.Linter;
+using JustyBaseLegacy.UI.Helpers;
+using JustyBaseLegacy.Services;
+using JustyBaseLegacy.UI.Controls;
+using JustyBaseLegacy.UI.DbForms;
+using JustyBaseLegacy.UI.Extensions;
+using JustyBaseLegacy.UI.Models;
+using JustyBaseLegacy.UI.Schema;
+using JustyBaseLegacy.UI.Forms;
+using SpreadSheetTasks;
+using System;
+using System.Buffers;
+using System.Collections.Generic;
+using System.Data;
+using System.Data.Common;
+using System.Diagnostics;
+using System.Drawing.Drawing2D;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using System.Xml;
+
+
+namespace JustyBaseLegacy.UI
+{
+    public partial class BaseWindow
+    {
+        private Controls.ObjectExplorerControl _objectExplorerControl;
+        public DataGridView DgvObjectExplorer
+        {
+            get
+            {
+                if (_objectExplorerControl is null)
+                {
+                    if (this.InvokeRequired)
+                    {
+                        this.Invoke(() => InitializeObjectExplorerControl());
+                    }
+                    else
+                    {
+                        InitializeObjectExplorerControl();
+                    }
+                }
+                return _mvvmObjectExplorerControl?.DataGridView ?? _objectExplorerControl?.DataGridView;
+            }
+        }
+
+        private void InitializeObjectExplorerControl()
+        {
+            if (_objectExplorerControl == null)
+            {
+                _objectExplorerControl = new ObjectExplorerControl(this, _uiHelperService, _colorTheme, _autocompleteClass, imageList1);
+
+                // Keep the legacy parser alive for F4/hover compatibility while the
+                // visible adapter is selected by the temporary composition switch.
+                if (_tabManager is UI.DockSuiteTabManager dsm)
+                {
+                    _mvvmObjectExplorerControl ??= new Controls.MvvmObjectExplorerControl(_objectExplorerViewModel);
+                    dsm.RegisterPersistentTool("Outline", _mvvmObjectExplorerControl, WeifenLuo.WinFormsUI.Docking.DockState.DockLeft);
+                }
+                tabPageLegend.Tag = "initialized";
+            }
+        }
+
+        private void RebuildObjectExplorer(string text)
+        {
+            _objectExplorerControl?.ReBuildObjectExplorer(text);
+            if (_mvvmObjectExplorerControl is not null)
+                _ = RebuildMvvmObjectExplorerAsync(text);
+        }
+
+        private async Task RebuildMvvmObjectExplorerAsync(string text)
+        {
+            try
+            {
+                if (_mvvmObjectExplorerControl is not null && !_mvvmObjectExplorerControl.IsDisposed)
+                {
+                    await _mvvmObjectExplorerControl.RebuildAsync(text, SelectedConnectionName);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // A newer editor change superseded this object-explorer refresh.
+            }
+            catch (Exception exception)
+            {
+                Trace.WriteLine($"Object explorer rebuild failed: {exception.GetType().Name}");
+                _loggerLoud.LogError("Object explorer rebuild failed", exception);
+            }
+        }
+        private SqlTextModifyDefaultSqlImplementations _sqlTextChangingDefaultSqlImplementation;
+        private readonly NzSignatureHelpPopup _signaturePopup = new();
+
+        public void FctbTextChanging(object sender, TextChangingEventArgs e)
+        {
+            _sqlTextChangingDefaultSqlImplementation ??= new SqlTextModifyDefaultSqlImplementations(_autocompleteClass, _applicationSettingsContext.Config);
+
+            _sqlTextChangingDefaultSqlImplementation.TextChangingDefaultSqlImplementation(sender as FastColoredTextBox, e);
+        }
+
+        public void FastColoredNew_KeyDown(object sender, KeyEventArgs e) =>
+            _ = RunUiEventAsync(nameof(FastColoredNew_KeyDown), () => FastColoredNew_KeyDownAsync(sender, e));
+
+        private async Task FastColoredNew_KeyDownAsync(object sender, KeyEventArgs e)
+        {
+            try
+            {
+                if (e.Control && e.KeyCode is Keys.N or Keys.T)
+                {
+                    OpenNewSqlDocument();
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    return;
+                }
+
+                if (e.Control && e.KeyCode is Keys.F7 or Keys.F8)
+                {
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    await RunSQL(
+                        0,
+                        e.KeyCode == Keys.F7 ? ExportOptions.xlsx : ExportOptions.csv);
+                    return;
+                }
+
+                if (sender is FastColoredTextBox authoringEditor
+                    && (authoringEditor.Name.StartsWith("NetezzaSQL", StringComparison.Ordinal)
+                        || _generalDbService.DriverName(SelectedConnectionName) == "NetezzaSQL"))
+                {
+                    if (e.KeyData == Keys.F12)
+                    {
+                        FctbGoToDefinition(authoringEditor);
+                        e.Handled = true;
+                        return;
+                    }
+
+                    if (e.KeyData == (Keys.F12 | Keys.Shift))
+                    {
+                        FctbShowReferences(authoringEditor);
+                        e.Handled = true;
+                        return;
+                    }
+
+                    if (e.KeyData == Keys.F2)
+                    {
+                        FctbRenameSymbol(authoringEditor);
+                        e.Handled = true;
+                        return;
+                    }
+
+                    if (e.KeyCode == Keys.Escape || e.KeyCode == Keys.OemCloseBrackets)
+                        _signaturePopup.Hide();
+                }
+
+                if (_signaturePopup.Visible)
+                {
+                    if (e.KeyCode == Keys.Up)
+                    {
+                        _signaturePopup.SelectPreviousOverload();
+                        e.Handled = true;
+                        return;
+                    }
+                    if (e.KeyCode == Keys.Down)
+                    {
+                        _signaturePopup.SelectNextOverload();
+                        e.Handled = true;
+                        return;
+                    }
+                }
+
+            if (e.KeyData == (Keys.C | Keys.Alt))
+            {
+                var fastColoredTextBox = sender as FastColoredTextBox;
+                int position = fastColoredTextBox.SelectionStart;
+                (var word, var length) = fastColoredTextBox.CurrentWord(_applicationSettingsContext.Config.CurrentWordLengthLimit);
+
+                foreach (string snippet in DynamicCollectionForNettezaHelpers.MonkeySnippets)
+                {
+                    if (snippet.StartsWith($"@@{word} ", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string snippet2 = snippet.Replace("\r", "");
+                        int index1 = snippet2.IndexOf(' ');
+                        fastColoredTextBox.SelectionStart = position - length;
+                        fastColoredTextBox.SelectionLength = length;
+
+                        string text = snippet2.Substring(index1 + 1);
+
+                        if (text.Contains('^'))
+                        {
+                            int a = text.Length - text.IndexOf('^');
+
+                            fastColoredTextBox.InsertText(text);
+                            while (--a > 0)
+                            {
+                                fastColoredTextBox.Selection.GoLeftThroughFolded();
+                            }
+                            fastColoredTextBox.InsertText("\b");
+                        }
+                        else
+                        {
+                            fastColoredTextBox.InsertText(text);
+                        }
+
+                        break;
+                    }
+                }
+                e.Handled = true;
+            }
+            else if (e.KeyData == (Keys.E | Keys.Control))
+            {
+                CurrentTB.ExpandAllFoldingBlocks();
+                e.Handled = true;
+            }
+            else if (e.KeyData == (Keys.R | Keys.Control))
+            {
+                CollapseAllregion(CurrentTB);
+                e.Handled = true;
+            }
+            else if (e.KeyData == (Keys.B | Keys.Control))
+            {
+                splitContainer1.Panel1Collapsed = !splitContainer1.Panel1Collapsed;
+                e.Handled = true;
+            }
+            else if (e.KeyData == Keys.F4)
+            {
+                _currentMyGrid?.HideFilters();
+
+                var range = new FastColoredTextBoxNS.Range(CurrentTB, CurrentTB.Selection.Start, CurrentTB.Selection.Start);
+                string clickedWord = range.GetFragment(@"[^(\s|,|;)]").Text;
+
+                if (_leftTabs.SelectedTab.Text != "Outline")
+                {
+                    RebuildObjectExplorer(_cleanSqlText);
+                }
+
+                for (int i = 0; i < _objectExplorerControl.ExplorerList.Count; i++)
+                {
+                    if (_objectExplorerControl.ExplorerList[i].Title.Trim().Equals(clickedWord, StringComparison.OrdinalIgnoreCase)
+                        && (
+                        _objectExplorerControl.ExplorerList[i].type == ExplorerItemType.Drop ||
+                        _objectExplorerControl.ExplorerList[i].type == ExplorerItemType.TemporatyTable ||
+                        _objectExplorerControl.ExplorerList[i].type == ExplorerItemType.With
+                        )
+                      )
+                    {
+                        var item = _objectExplorerControl.ExplorerList[i];
+                        DgvObjectExplorer.Rows[i].Selected = true;
+                        CurrentTB.GoEnd();
+                        CurrentTB.SelectionStart = item.Position;
+                        CurrentTB.SelectionLength = item.Title.TrimStart().Length;
+                        CurrentTB.DoSelectionVisible();
+                        CurrentTB.Focus();
+                        return;
+                    }
+                }
+
+                if (_generalDbService.DriverName(SelectedConnectionName) == "NetezzaSQL")
+                {
+                    var match = _baseTableNZ.Match(clickedWord);
+                    if (!clickedWord.Contains('.'))
+                    {
+                        match = _baseTableNZ.Match($"{this.SelectedDatabase}..{clickedWord}");
+                    }
+                    if (match.Success)
+                    {
+                        string db = match.Groups["base"].Value;
+                        string table = match.Groups["table"].Value;
+                        if (_completionContext.DatabaseSchemaLookup.TryGetValue(SelectedConnectionName, out var value) && value.TryGetValue(db, out var p1))
+                        {
+                            if (p1.TryGetValue(table, out var p2))
+                            {
+
+                                TypeInDatabase typeInDatabase = NetezzaHelpers.baseTableDictionary.TryGetValue(SelectedConnectionName, out var btDict1)
+                                        && btDict1.TryGetValue(p2.tableId, out var btInfo1)
+                                    ? btInfo1.TABLE_KIND
+                                    : TypeInDatabase.table;
+                                if (typeInDatabase == TypeInDatabase.table || typeInDatabase == TypeInDatabase.view || typeInDatabase == TypeInDatabase.thisExternal)
+                                {
+                                    if (_mvvmDatabaseExplorerControl is not null)
+                                    {
+                                        SelectNetezzaObjectInExplorer(SelectedConnectionName, db, p2.tableId);
+                                    }
+
+                                    CurrentTB.ClearHints();
+                                    CurrentTB.AddHint(range, new CustomHint(clickedWord, CurrentTB, _objectExplorerNavigationController, _ddlCodeProvider, db, table, typeInDatabase, _colorTheme), false, false, false);
+                                    //var h = CurrentTB.AddHint(range, new DataGridView(), false, false, false);
+                                    //h.DoVisible();
+                                }
+                            }
+                        }
+                    }
+                }
+                else if (
+                    _generalDbService.DriverName(SelectedConnectionName) == "DB2"
+                    || _generalDbService.DriverName(SelectedConnectionName) == "Oracle"
+                    || _generalDbService.DriverName(SelectedConnectionName) == "MsSqlStd"
+                    || _generalDbService.DriverName(SelectedConnectionName) == "MsSqlTrusted"
+                    || _generalDbService.DriverName(SelectedConnectionName) == "Postgres"
+                    || _generalDbService.DriverName(SelectedConnectionName) == "SQLite"
+                    || _generalDbService.DriverName(SelectedConnectionName) == "MySql"
+                    )
+                {
+                    GoToObjectNotNetezza(clickedWord);
+                }
+            }
+            }
+            catch (Exception ex)
+            {
+                _loggerLoud.LogError(ex.Message, ex);
+            }
+        }
+
+        string _cleanSqlText = "";
+
+
+
+        private string _empty = "";
+        public void GetTextCommentRanges(FastColoredTextBox fctb)
+        {
+            _cleanSqlText = fctb.GetTextCommentRanges(_colorTheme.CurrentFctbColors, ref _empty, _cleanSqlText);
+        }
+
+        public void GetTextCommentRanges(string txt, ref string res)
+        {
+            MiscellaneousExtensions.GetTextCommentRanges(_colorTheme.CurrentFctbColors, txt, ref res);
+        }
+
+        public void FctbTextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (sender is FastColoredTextBox fctb)
+            {
+                if (_documentIdsByEditor.TryGetValue(fctb, out var documentId))
+                {
+                    var document = _editorWorkspaceViewModel.Documents.FirstOrDefault(item => item.Id == documentId);
+                    document?.UpdateTextFromView(fctb.Text);
+                }
+
+                _cleanSqlText = _sqlTextChangingDefaultSqlImplementation.HandleTextChanged(fctb, e, _colorTheme.CurrentFctbColors, ref _empty, _cleanSqlText, ref DynamicCollectionForNettezaHelpers.CurrentColumn,
+                    fctb.Name.StartsWith("NetezzaSQL") || _generalDbService.DriverName(SelectedConnectionName) == "NetezzaSQL");
+            }
+        }
+
+        public async void FctbTextChangedDelayed(object sender, TextChangedEventArgs e)
+        {
+            if (sender is not FastColoredTextBox fastColored || fastColored.IsDisposed)
+                return;
+
+            try
+            {
+                EditorDocumentViewModel? document = null;
+                bool workspaceTextIsClean = false;
+                if (_documentIdsByEditor.TryGetValue(fastColored, out var documentId))
+                {
+                    document = _editorWorkspaceViewModel.Documents.FirstOrDefault(item => item.Id == documentId);
+                    document?.UpdateTextFromView(fastColored.Text);
+                    workspaceTextIsClean = document is { IsDirty: false }
+                        && string.Equals(document.Text, fastColored.Text, StringComparison.Ordinal);
+                }
+
+                TabPageMainTag? tag = fastColored.FindAncestorTabPage()?.Tag as TabPageMainTag;
+                if (workspaceTextIsClean && tag is not null)
+                {
+                    tag.NotFirstTime = true;
+                    tag.IsSaved = true;
+                }
+                else if (tag is { NotFirstTime: false })
+                {
+                    tag.NotFirstTime = true;
+                }
+                else if (tag is not null)
+                {
+                    tag.IsSaved = false;
+                }
+
+                string connectionName = string.IsNullOrWhiteSpace(document?.ConnectionName)
+                    ? SelectedConnectionName
+                    : document.ConnectionName;
+                bool isNetezza = fastColored.Name.StartsWith("NetezzaSQL", StringComparison.Ordinal)
+                    || _generalDbService.DriverName(connectionName) == "NetezzaSQL";
+                if (isNetezza)
+                {
+                    EditorDocumentId stableDocumentId = document?.Id ?? EnsureEditorDocumentId(fastColored);
+                    RegisterDiagnosticsTarget(stableDocumentId, fastColored);
+                    ApplySemanticClassification(fastColored, stableDocumentId.ToString());
+                }
+
+                // Object-explorer text is global presentation state. A delayed
+                // callback from a background document must not overwrite the
+                // active document's parsed text after a tab switch.
+                if (ReferenceEquals(fastColored, CurrentTB))
+                {
+                    _cleanSqlText = _sqlTextChangingDefaultSqlImplementation.HandleSqlTextModification(
+                        e,
+                        fastColored,
+                        _colorTheme.CurrentFctbColors,
+                        ref _empty,
+                        _cleanSqlText);
+                    if (_applicationSettingsContext.Config.DoLegend && _leftTabs.SelectedTab?.Text == "Outline")
+                        RebuildObjectExplorer(_cleanSqlText);
+                }
+
+                if (document is not null)
+                    await document.SqlAuthoring.LintNowAsync(fastColored.Text, connectionName);
+            }
+            catch (OperationCanceledException)
+            {
+                // A newer delayed edit superseded this lint pass.
+            }
+            catch (Exception exception)
+            {
+                Trace.WriteLine($"Object explorer refresh failed: {exception.GetType().Name}");
+            }
+        }
+        readonly Regex _baseTableNZ = RegexBaseTableNZ();
+
+        private string prevTekst = "";
+        public void FctbToolTipNeeded(object sender, ToolTipNeededEventArgs e)
+        {
+            if (sender is not FastColoredTextBox editor)
+                return;
+
+            if (TryGetLintIssue(editor, editor.PlaceToPosition(e.Place), out var lintIssue))
+            {
+                e.ToolTipTitle = $"{GetLintSeverityLabel(lintIssue.Severity)} · {lintIssue.RuleId}";
+                e.ToolTipText = GetDiagnosticMessage(lintIssue);
+                e.ToolTipIcon = lintIssue.Severity switch
+                {
+                    LintSeverity.Error => ToolTipIcon.Error,
+                    LintSeverity.Warning => ToolTipIcon.Warning,
+                    LintSeverity.Information => ToolTipIcon.Info,
+                    _ => ToolTipIcon.None
+                };
+                return;
+            }
+
+            // PointToPlace maps the gutter/lightbulb to the beginning of the
+            // source line (often the WHERE keyword). Prefer the line diagnostic
+            // over parser hover text in that case.
+            if (TryGetLintIssueOnLine(editor, e.Place.iLine, out lintIssue))
+            {
+                e.ToolTipTitle = $"{GetLintSeverityLabel(lintIssue.Severity)} · {lintIssue.RuleId}";
+                e.ToolTipText = GetDiagnosticMessage(lintIssue);
+                e.ToolTipIcon = lintIssue.Severity switch
+                {
+                    LintSeverity.Error => ToolTipIcon.Error,
+                    LintSeverity.Warning => ToolTipIcon.Warning,
+                    LintSeverity.Information => ToolTipIcon.Info,
+                    _ => ToolTipIcon.None
+                };
+                return;
+            }
+
+            if (_generalDbService.DriverName(SelectedConnectionName) != "NetezzaSQL")
+            {
+                return;
+            }
+
+            string documentUri = EnsureEditorDocumentId(editor).ToString();
+            var parserHover = _legacySqlAuthoringServices.GetHover(editor.Text, editor.PlaceToPosition(e.Place), documentUri);
+            if (parserHover is not null)
+            {
+                e.ToolTipTitle = null;
+                e.ToolTipText = parserHover.Content;
+                return;
+            }
+
+            var range = new FastColoredTextBoxNS.Range(sender as FastColoredTextBox, e.Place, e.Place);
+            var r1 = range.GetFragment("[^(\\s|,)]");
+            string hoveredWord = r1.Text;
+
+            try
+            {
+                if (!string.IsNullOrEmpty(hoveredWord) && hoveredWord.Length < 300)
+                {
+                    var m1 = _baseTableNZ.Match(hoveredWord);
+                    if (!hoveredWord.Contains('.'))
+                    {
+                        m1 = _baseTableNZ.Match($"{SelectedDatabase}..{hoveredWord}");
+                    }
+
+                    if (m1.Success)
+                    {
+                        string db = m1.Groups["base"].Value;
+                        string table = m1.Groups["table"].Value;
+
+                        if (_completionContext.DatabaseSchemaLookup.TryGetValue(SelectedConnectionName, out var value) && value.TryGetValue(db, out var p1))
+                        {
+                            if (p1.TryGetValue(table, out var p2))
+                            {
+                                string toolTipText;
+                                string toolTipTitle;
+                                int tableId = p2.tableId;
+
+                                if (!NetezzaHelpers.baseTableDictionary.TryGetValue(SelectedConnectionName, out var btDict2)
+                                    || !btDict2.TryGetValue(tableId, out var tabInfo))
+                                {
+                                    return;
+                                }
+
+                                if (prevTekst == hoveredWord)
+                                {
+                                    if (!_completionContext.ColumnTablesDictionary.ContainsKey(SelectedConnectionName))
+                                    {
+                                        return;
+                                    }
+
+
+                                    StringBuilder sb = new StringBuilder();
+                                    for (int i = 0; i < tabInfo.COLUMN_COUNT; i++)
+                                    {
+                                        var colInfo = _completionContext.ColumnTablesDictionary[SelectedConnectionName][tabInfo.FIRST_COLUMN_ID + i];
+                                        string name = colInfo.COLUMN_NAME;
+                                        string dataType = colInfo.DATA_TYPE;
+                                        string desc = colInfo.COLUMN_DESCRIPTION;
+                                        if (desc != null && desc.Length >= 100)
+                                        {
+                                            desc = desc[0..97] + "...";
+                                        }
+
+                                        string nullIf = colInfo.IS_NULLABLE ? "" : " not null";
+                                        sb.AppendLine($"{name} ({dataType}{nullIf}) - {desc}");
+                                        if (i >= 30)
+                                        {
+                                            sb.Append($"...");
+                                            break;
+                                        }
+                                    }
+
+                                    toolTipTitle = $"{table} - {tabInfo.COLUMN_COUNT} cols";
+
+                                    toolTipText = sb.ToString();
+                                    prevTekst = "";
+                                }
+                                else
+                                {
+                                    toolTipTitle = table;
+
+                                    if (tabInfo.TABLE_DESC is not null && tabInfo.TABLE_DESC.Length > 100)
+                                    {
+                                        StringBuilder sb = new StringBuilder();
+                                        var parts = tabInfo.TABLE_DESC.Split('\n', StringSplitOptions.TrimEntries);
+                                        for (int i = 0; i < parts.Length; i++)
+                                        {
+                                            string part = parts[i];
+                                            if (part.Length < 100)
+                                            {
+                                                sb.AppendLine(part);
+                                            }
+                                            else
+                                            {
+                                                for (int j = 0; j < part.Length / 100; j++)
+                                                {
+                                                    sb.AppendLine(part[(100 * j)..(100 * (j + 1))]);
+                                                }
+                                                sb.AppendLine(part[(100 * (part.Length / 100))..]);
+                                            }
+                                        }
+                                        toolTipText = sb.ToString();
+                                    }
+                                    else
+                                    {
+                                        toolTipText = tabInfo.TABLE_DESC;
+                                    }
+
+                                    prevTekst = hoveredWord;
+                                }
+
+                                if (String.IsNullOrEmpty(toolTipText))
+                                {
+                                    toolTipText = "(no desc)";
+                                }
+
+
+                                var lines = toolTipTitle.Split(Environment.NewLine);
+                                if (lines.Length >= 100)
+                                {
+                                    StringBuilder sb = new StringBuilder();
+                                    for (int i = 0; i < 100; i++)
+                                    {
+                                        sb.AppendLine(lines[i]);
+                                    }
+                                    toolTipTitle = sb.ToString();
+                                }
+
+
+                                if (toolTipText.Length <= 5_000)
+                                {
+                                    e.ToolTipText = toolTipText;
+                                }
+                                else
+                                {
+                                    e.ToolTipText = toolTipText[0..4_999] + "...";
+                                }
+                            }
+                        }
+                    }
+                    else if (_objectExplorerControl?.ExplorerList != null && _objectExplorerControl.ExplorerList.Where(arg => arg.Title.Trim().ToString().Equals(hoveredWord, StringComparison.OrdinalIgnoreCase)).Any())
+                    {
+                        e.ToolTipTitle = hoveredWord;
+                        prevTekst = hoveredWord;
+                        e.ToolTipText = "ctrl + click - go to first reference";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _loggerLoud.MessageBox_Show(this, ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        public void FctbAuthoringKeyUp(object sender, KeyEventArgs e)
+        {
+            if (sender is not FastColoredTextBox editor
+                || (!editor.Name.StartsWith("NetezzaSQL", StringComparison.Ordinal)
+                    && _generalDbService.DriverName(SelectedConnectionName) != "NetezzaSQL"))
+                return;
+
+            if (e.KeyCode is not (Keys.D9 or Keys.OemOpenBrackets or Keys.Oemcomma) || editor.SelectionStart <= 0)
+                return;
+
+            string documentUri = EnsureEditorDocumentId(editor).ToString();
+            var help = _legacySqlAuthoringServices.GetSignatureHelp(editor.Text, editor.SelectionStart, documentUri);
+            if (help is null)
+            {
+                _signaturePopup.Hide();
+                return;
+            }
+
+            _signaturePopup.Show(editor, help);
+        }
+
+        private void ApplySemanticClassification(FastColoredTextBox editor, string documentUri)
+        {
+            // The classifier owns SQL semantics. FCTB's base SQL styles continue to render
+            // comments, strings and numbers; this call warms the shared per-document cache.
+            // Keep the captured text check so an obsolete delayed event never becomes visible.
+            string text = editor.Text;
+            var tokens = _legacySqlAuthoringServices.ClassifySemanticTokens(text, documentUri);
+            if (editor.IsDisposed || !string.Equals(editor.Text, text, StringComparison.Ordinal))
+                return;
+
+            ApplySemanticStyling(editor, tokens, _colorTheme.CurrentFctbColors);
+        }
+
+        private static void ApplySemanticStyling(FastColoredTextBox editor, IReadOnlyList<SemanticTokenSpan> tokens, FctbColors colors)
+        {
+            if (tokens.Count == 0)
+                return;
+
+            var documentRange = editor.Range;
+            documentRange.ClearStyle(colors.SemanticStyles);
+
+            foreach (var token in tokens)
+            {
+                var style = FctbSemanticStyleMapper.Resolve(token.Kind, colors);
+                if (style is null)
+                    continue;
+
+                if (token.Start < 0 || token.Start >= editor.TextLength)
+                    continue;
+
+                int length = Math.Max(1, Math.Min(token.Length, editor.TextLength - token.Start));
+                var range = new FastColoredTextBoxNS.Range(editor)
+                {
+                    Start = editor.PositionToPlace(token.Start),
+                    End = editor.PositionToPlace(token.Start + length)
+                };
+                range.SetStyle(style);
+            }
+
+            editor.Invalidate();
+        }
+
+        public void FctbGoToDefinition(FastColoredTextBox editor)
+        {
+            var definition = _legacySqlAuthoringServices.GetDefinition(editor.Text, editor.SelectionStart);
+            if (definition is null)
+            {
+                MessageBox.Show(this, "No CTE or alias definition was found at the cursor.", "Go to Definition",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            SelectOccurrence(editor, definition);
+        }
+
+        public void FctbShowReferences(FastColoredTextBox editor)
+        {
+            var references = _legacySqlAuthoringServices.GetReferences(editor.Text, editor.SelectionStart);
+            if (references.Count == 0)
+            {
+                MessageBox.Show(this, "No CTE or alias references were found at the cursor.", "Find References",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var choices = references.Select((occurrence, index) =>
+                $"{index + 1}: line {editor.PositionToPlace(occurrence.StartAbsolute).iLine + 1} ({(occurrence.IsDefinition ? "definition" : "reference")})")
+                .ToArray();
+            using var dialog = new Form { Text = "References", Width = 420, Height = 260, StartPosition = FormStartPosition.CenterParent };
+            var list = new ListBox { Dock = DockStyle.Fill };
+            list.Items.AddRange(choices);
+            list.SelectedIndex = 0;
+            list.DoubleClick += (_, _) => dialog.DialogResult = DialogResult.OK;
+            dialog.Controls.Add(list);
+            if (dialog.ShowDialog(this) == DialogResult.OK && list.SelectedIndex >= 0)
+                SelectOccurrence(editor, references[list.SelectedIndex]);
+        }
+
+        public void FctbRenameSymbol(FastColoredTextBox editor)
+        {
+            var symbol = _legacySqlAuthoringServices.GetSymbol(editor.Text, editor.SelectionStart);
+            if (symbol is null)
+            {
+                MessageBox.Show(this, "Only parser-recognized CTE and alias symbols can be renamed.", "Rename",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string? newName = PromptForRename(symbol.OldName, symbol.Occurrences.Count);
+            if (string.IsNullOrWhiteSpace(newName))
+                return;
+            if (!_legacySqlAuthoringServices.IsValidIdentifier(newName))
+            {
+                MessageBox.Show(this, "Enter a valid SQL identifier.", "Rename", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string renamed = _legacySqlAuthoringServices.ApplyRename(editor.Text, symbol, newName);
+            if (!string.Equals(renamed, editor.Text, StringComparison.Ordinal))
+                editor.Text = renamed; // one FCTB text replacement, hence one undo action.
+        }
+
+        private string? PromptForRename(string currentName, int occurrenceCount)
+        {
+            using var dialog = new Form { Text = $"Rename ({occurrenceCount} occurrences)", Width = 380, Height = 140, StartPosition = FormStartPosition.CenterParent };
+            var input = new TextBox { Text = currentName, Left = 12, Top = 12, Width = 340 };
+            var ok = new Button { Text = "Rename", DialogResult = DialogResult.OK, Left = 196, Top = 48, Width = 75 };
+            var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Left = 277, Top = 48, Width = 75 };
+            dialog.Controls.AddRange([input, ok, cancel]);
+            dialog.AcceptButton = ok;
+            dialog.CancelButton = cancel;
+            return dialog.ShowDialog(this) == DialogResult.OK ? input.Text.Trim() : null;
+        }
+
+        private static void SelectOccurrence(FastColoredTextBox editor, SymbolOccurrence occurrence)
+        {
+            editor.SelectionStart = occurrence.StartAbsolute;
+            editor.SelectionLength = occurrence.EndAbsolute - occurrence.StartAbsolute;
+            editor.DoSelectionVisible();
+            editor.Focus();
+        }
+
+        public void FctbNew_MouseClick(object sender, MouseEventArgs e)
+        {
+            _currentMyGrid?.HideFilters();
+
+            if (e.Button != MouseButtons.Left || !ModifierKeys.HasFlag(Keys.Control))
+            {
+                return;
+            }
+
+            var range = new FastColoredTextBoxNS.Range(CurrentTB, CurrentTB.Selection.Start, CurrentTB.Selection.Start);
+            string clickedWord = range.GetFragment("[^(\\s|,|;)]").Text;
+
+            if (_leftTabs.SelectedTab.Text != "Outline")
+            {
+                RebuildObjectExplorer(_cleanSqlText);
+            }
+
+            if (_objectExplorerControl is null) return;
+            for (int i = 0; i < _objectExplorerControl.ExplorerList.Count; i++)
+            {
+                if (_objectExplorerControl.ExplorerList[i].Title.Trim().Equals(clickedWord, StringComparison.OrdinalIgnoreCase)
+                    && (
+                    _objectExplorerControl.ExplorerList[i].type == ExplorerItemType.Drop ||
+                    _objectExplorerControl.ExplorerList[i].type == ExplorerItemType.TemporatyTable ||
+                    _objectExplorerControl.ExplorerList[i].type == ExplorerItemType.With
+                    )
+                  )
+                {
+                    var item = _objectExplorerControl.ExplorerList[i];
+                    DgvObjectExplorer.Rows[i].Selected = true;
+                    CurrentTB.GoEnd();
+                    CurrentTB.SelectionStart = item.Position;
+                    CurrentTB.SelectionLength = item.Title.TrimStart().Length;
+                    CurrentTB.DoSelectionVisible();
+                    CurrentTB.Focus();
+                    return;
+                }
+            }
+
+            if (ModifierKeys.HasFlag(Keys.Control) && _generalDbService.DriverName(SelectedConnectionName) == "NetezzaSQL")
+            {
+                var m1 = _baseTableNZ.Match(clickedWord);
+                if (!clickedWord.Contains('.'))
+                {
+                    m1 = _baseTableNZ.Match($"{this.SelectedDatabase}..{clickedWord}");
+                }
+                if (m1.Success)
+                {
+                    string db = m1.Groups["base"].Value;
+                    string table = m1.Groups["table"].Value;
+                    if (_completionContext.DatabaseSchemaLookup.TryGetValue(SelectedConnectionName, out var value) && value.TryGetValue(db, out var p1))
+                    {
+                        if (p1.TryGetValue(table, out var p2))
+                        {
+
+                            TypeInDatabase tp = NetezzaHelpers.baseTableDictionary.TryGetValue(SelectedConnectionName, out var btDict3)
+                                    && btDict3.TryGetValue(p2.tableId, out var btInfo3)
+                                ? btInfo3.TABLE_KIND
+                                : TypeInDatabase.table;
+                            if (tp == TypeInDatabase.table || tp == TypeInDatabase.view || tp == TypeInDatabase.thisExternal)
+                            {
+                                SelectNetezzaObjectInExplorer(SelectedConnectionName, db, p2.tableId);
+                                CurrentTB.ClearHints();
+                                CurrentTB.AddHint(range, new CustomHint(clickedWord, CurrentTB, _objectExplorerNavigationController, _ddlCodeProvider, db, table, tp, _colorTheme), false, false, false);
+                                //var h = CurrentTB.AddHint(range, new DataGridView(), false, false, false);
+                                //h.DoVisible();
+                            }
+                        }
+                    }
+                }
+            }
+            else if (ModifierKeys.HasFlag(Keys.Control) && (
+_generalDbService.DriverName(SelectedConnectionName) == "DB2"
+                || _generalDbService.DriverName(SelectedConnectionName) == "Oracle"
+                || _generalDbService.DriverName(SelectedConnectionName) == "MsSqlStd"
+                || _generalDbService.DriverName(SelectedConnectionName) == "MsSqlTrusted"
+                || _generalDbService.DriverName(SelectedConnectionName) == "Postgres"
+                || _generalDbService.DriverName(SelectedConnectionName) == "SQLite"
+                || _generalDbService.DriverName(SelectedConnectionName) == "MySql"
+                ))
+            {
+                GoToObjectNotNetezza(clickedWord);
+            }
+        }
+
+        private static readonly Regex baseTableGeneralSchema = new Regex(@"(?<schema>(\w+|""[\w\.]+""))\.(?<table>\w+)");
+        private static readonly Regex baseTableGeneralSchemaWithDb = new Regex(@"(?<database>\w+)\.(?<schema>(\w+|""[\w\.]+""))\.(?<table>\w+)");
+
+        private static string NetezzaCategory(TypeInDatabase kind) => kind switch
+        {
+            TypeInDatabase.table => "Tables",
+            TypeInDatabase.view => "Views",
+            TypeInDatabase.thisExternal => "External Tables",
+            TypeInDatabase.procedure => "Procedures",
+            TypeInDatabase.function => "Functions",
+            TypeInDatabase.sequence => "Sequences",
+            TypeInDatabase.synonym => "Synonyms",
+            TypeInDatabase.thisAggregate => "Aggregate",
+            _ => "Tables"
+        };
+
+        private void SelectNetezzaObjectInExplorer(string connectionName, string databaseName, int tableId)
+        {
+            if (_mvvmDatabaseExplorerControl is null
+                || !NetezzaHelpers.baseTableDictionary.TryGetValue(connectionName, out var tables)
+                || !tables.TryGetValue(tableId, out var table))
+                return;
+
+            RevealDatabaseExplorer();
+            _ = _mvvmDatabaseExplorerControl.SelectObjectAsync(
+                connectionName,
+                databaseName,
+                NetezzaCategory(table.TABLE_KIND),
+                table.TABLE_NAME,
+                LegacySchemaTypeMapper.Map(table.TABLE_KIND));
+        }
+
+        private void RevealDatabaseExplorer()
+        {
+            if (_tabManager is UI.DockSuiteTabManager dsm && _mvvmDatabaseExplorerControl is not null)
+            {
+                dsm.ShowToolWindow("Database", _mvvmDatabaseExplorerControl,
+                    WeifenLuo.WinFormsUI.Docking.DockState.DockLeft);
+            }
+        }
+
+        public void GoToObjectNotNetezza(string clickedWord, string objectType = null)
+        {
+            if (_generalDbService.DriverName(SelectedConnectionName) == "SQLite")
+            {
+                clickedWord = "master." + clickedWord;
+            }
+
+            var m1 = baseTableGeneralSchemaWithDb.Match(clickedWord);
+            if (!m1.Success)
+            {
+                m1 = baseTableGeneralSchema.Match(clickedWord);
+            }
+
+
+            if (m1.Success)
+            {
+                string schema = m1.Groups["schema"].Value;
+                string table = m1.Groups["table"].Value;
+                string db = "";
+                if (m1.Groups.ContainsKey("database"))
+                {
+                    db = m1.Groups["database"].Value;
+                }
+
+                if (_leftTabs.SelectedIndex != 0)
+                {
+                    _leftTabs.SelectedIndex = 0;
+                }
+
+                string connectionName = SelectedConnectionName;
+
+                string schemaKey = schema;
+                if (!string.IsNullOrWhiteSpace(db))
+                {
+                    schemaKey = db + "_" + schema;
+                }
+
+                if (IGeneralDbService.GeneralDic.TryGetValue(connectionName, out var thisDb) &&
+                    thisDb.objectInSchema.TryGetValue(schemaKey, out var thisSchema) &&
+                    thisSchema.TryGetValue(table, out var obj)) // table or view exists
+                {
+                    if (_mvvmDatabaseExplorerControl is not null)
+                    {
+                        // The legacy implementation navigates by indexing TreeNode
+                        // levels. The MVVM adapter must load those levels lazily and
+                        // select the same object without depending on hidden controls.
+                        RevealDatabaseExplorer();
+                        _ = _mvvmDatabaseExplorerControl.SelectObjectAsync(
+                            connectionName,
+                            string.IsNullOrWhiteSpace(db) ? thisDb.DefaultDatabaseName : db,
+                            schema.Replace("\"", "", StringComparison.Ordinal),
+                            table,
+                            LegacySchemaTypeMapper.Map(obj));
+                        return;
+                    }
+
+                    string tableOrView;
+                    if (objectType != null)
+                    {
+                        tableOrView = objectType;
+                    }
+                    else
+                    {
+                        switch (obj)
+                        {
+                            case TypeInDatabase.table:
+                                tableOrView = "Tables";
+                                break;
+                            case TypeInDatabase.view:
+                                tableOrView = "Views";
+                                break;
+                            case TypeInDatabase.synonym:
+                                tableOrView = "Synonyms";
+                                break;
+                            case TypeInDatabase.procedure:
+                                tableOrView = "Procedures";
+                                break;
+                            case TypeInDatabase.db2alias:
+                                tableOrView = "Aliases";
+                                break;
+                            default:
+                                _loggerLoud.MessageBox_Show(this, "The operation failed.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                return;
+                        }
+                    }
+
+                    TreeNode nd;
+                    if (!string.IsNullOrWhiteSpace(db))
+                    {
+                        nd = _mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Nodes[0]?.Nodes[db]?.Nodes[schema.Replace("\"", "")];
+                    }
+                    else
+                    {
+                        nd = _mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Nodes[0]?.Nodes[0]?.Nodes[schema.Replace("\"", "")];
+                    }
+
+
+                    if (nd == null)
+                        return;
+
+                    if (_mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.IsExpanded == false)
+                    {
+                        _mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Expand();
+                    }
+                    if (_mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Nodes[0]?.IsExpanded == false)
+                    {
+                        _mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Nodes[0]?.Expand();
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(db) && _mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Nodes[0]?.Nodes[db]?.IsExpanded == false)
+                    {
+                        _mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Nodes[0]?.Nodes[db]?.Expand();
+                    }
+                    else if (_mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Nodes[0]?.Nodes[0]?.IsExpanded == false)
+                    {
+                        _mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Nodes[0]?.Nodes[0]?.Expand();
+                    }
+
+                    if (!nd.IsExpanded)
+                    {
+                        nd.Expand();
+                    }
+
+                    if (!nd.Nodes[tableOrView].IsExpanded)
+                    {
+                        nd.Nodes[tableOrView].Expand();
+                    }
+                    string txtToSelect = schema.Replace("\"", "") + "." + table;
+
+                    if (!string.IsNullOrWhiteSpace(db))
+                    {
+                        txtToSelect = db + "." + txtToSelect;
+                    }
+
+                    _mvvmDatabaseExplorerControl?.DatabaseTreeView.SelectedNode = nd.Nodes[tableOrView].Nodes[txtToSelect];
+                    _mvvmDatabaseExplorerControl?.DatabaseTreeView.Focus();
+                }
+            }
+        }
+
+        internal Task NavigateDocumentationDimDateExplorerAsync()
+        {
+            if (!StartupArguments.IsDocumentationNavigateDimDate(Environment.GetCommandLineArgs()))
+            {
+                return Task.CompletedTask;
+            }
+
+            return NavigateDocumentationDimDateExplorerCoreAsync();
+        }
+
+        private async Task NavigateDocumentationDimDateExplorerCoreAsync()
+        {
+            if (_mvvmDatabaseExplorerControl is null
+                || string.IsNullOrWhiteSpace(SelectedConnectionName))
+            {
+                return;
+            }
+
+            RevealDatabaseExplorer();
+            string connectionName = SelectedConnectionName;
+            await _mvvmDatabaseExplorerControl.InitializeAsync(connectionName).ConfigureAwait(true);
+
+            DateTime deadline = DateTime.UtcNow.AddMinutes(3);
+            while (DateTime.UtcNow < deadline)
+            {
+                string databaseName = ResolveDimDateDatabaseName(connectionName) ?? "JUST_DATA";
+                bool selected = await _mvvmDatabaseExplorerControl.SelectObjectAsync(
+                    connectionName,
+                    databaseName,
+                    "Tables",
+                    "DIMDATE",
+                    SchemaNodeKind.Table).ConfigureAwait(true);
+                if (selected)
+                {
+                    TreeView tree = _mvvmDatabaseExplorerControl.DatabaseTreeView;
+                    if (tree.SelectedNode is { } node)
+                    {
+                        // Show DIMDATE near the top of the viewport (avoid TopNode=Tables,
+                        // which hides it under ADMIN.DIMACCOUNT_CPY_* siblings).
+                        node.EnsureVisible();
+                        tree.TopNode = node;
+                        tree.SelectedNode = node;
+                        tree.Focus();
+                    }
+
+                    return;
+                }
+
+                await Task.Delay(1000).ConfigureAwait(true);
+            }
+        }
+
+        private string? ResolveDimDateDatabaseName(string connectionName)
+        {
+            if (!NetezzaHelpers.baseTableDictionary.TryGetValue(connectionName, out var tables))
+            {
+                return null;
+            }
+
+            NetezzaTableInfo? dimDate = tables.Values.FirstOrDefault(table =>
+                table.TABLE_NAME.Equals("DIMDATE", StringComparison.OrdinalIgnoreCase));
+            if (dimDate is null)
+            {
+                return null;
+            }
+
+            if (_databaseRuntimeContext.DatabaseDictionary.TryGetValue(connectionName, out var databases)
+                && databases.TryGetValue(dimDate.DATABASE_ID, out var database))
+            {
+                return database.DatabaseName;
+            }
+
+            return "JUST_DATA";
+        }
+    }
+}

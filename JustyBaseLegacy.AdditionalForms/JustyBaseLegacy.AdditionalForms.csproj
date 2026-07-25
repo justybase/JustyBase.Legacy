@@ -1,0 +1,129 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.22000.0</TargetFramework>
+    <Nullable>annotations</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>enable</ImplicitUsings>
+	 <NoWarn>$(NoWarn);WFO1000</NoWarn>
+	 <CustomResourceTypesSupport>true</CustomResourceTypesSupport>
+	 <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AppBase.Common\AppBase.Common.csproj" />
+    <ProjectReference Include="..\DatabaseDataGridView.WinForms\source\DatabaseDataGridView.WinForms.csproj" />
+    <ProjectReference Include="..\JustData.Application\JustData.Application.csproj" />
+    <ProjectReference Include="..\JustData.ViewModels\JustData.ViewModels.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="DatabaseDataGridView.WinForms" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Update="AddNewTableControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Update="ColumnEditNetezzaForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="ContexScripts.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="CreateSequenceNz.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="CsvFastImport.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="CustomHint.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Update="DB2CreateServer.cs" Condition="'$(IncludeDB2)' == 'true'">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="DbForms\AddIndexForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="DbForms\DistForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="DbForms\PleaseWaitForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="DbForms\ProvideName.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="DbForms\SpecialControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Update="EncodingForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="ExportTableDataNetezza.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="GetNameFromUser.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="GroomForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="History.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="UtilityForms\QueryWatch.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="ImportChoseTab.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="ImportProgressForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="ImportTableDataNetezza.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="NetezzaCreateGroup.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="NetezzaCreateUser.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="NetezzaDistribution.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="NewProcedureNetezza.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="Properties\Resources.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Resources.resx</DependentUpon>
+    </Compile>
+    <Compile Update="ProvideCode.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="Rename.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="SaveSnippet.cs">
+      <SubType>Form</SubType>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Update="ContexScripts.resx">
+      <SubType>Designer</SubType>
+    </EmbeddedResource>
+    <EmbeddedResource Update="DbForms\AddIndexForm.resx">
+      <SubType>Designer</SubType>
+    </EmbeddedResource>
+    <EmbeddedResource Update="ImportProgressForm.resx">
+      <SubType>Designer</SubType>
+    </EmbeddedResource>
+    <EmbeddedResource Update="Properties\Resources.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+  </ItemGroup>
+</Project>

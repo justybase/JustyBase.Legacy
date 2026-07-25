@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+	<TargetFramework>net10.0-windows10.0.22000.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	<CustomResourceTypesSupport>true</CustomResourceTypesSupport>
+	<EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DatabaseDataGridView.WinForms\source\DatabaseDataGridView.WinForms.csproj" />
+    <ProjectReference Include="..\JustyBase.Legacy.TextBox\source\JustyBase.Legacy.TextBox.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <DisableRuntimeMarshalling>true</DisableRuntimeMarshalling>
+    <IncludeDB2 Condition="'$(IncludeDB2)' == ''">false</IncludeDB2>
+	<IncludeOracle Condition="'$(IncludeOracle)' == ''">false</IncludeOracle>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(IncludeDB2)' == 'true'">
+    <DefineConstants>$(DefineConstants);INCLUDE_DB2</DefineConstants>
+  </PropertyGroup>
+	
+	<PropertyGroup Condition="'$(IncludeOracle)' == 'true'">
+		<DefineConstants>$(DefineConstants);INCLUDE_ORACLE</DefineConstants>
+	</PropertyGroup>
+</Project>
