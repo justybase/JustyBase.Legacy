@@ -7,6 +7,7 @@ using JustData.Application.Schema;
 using JustyBase.Netezza.Ddl;
 using JustyBase.NetezzaCatalogSql;
 using JustyBase.NetezzaDdl;
+using JustyBase.NetezzaDdl.Models;
 using System.Data.Common;
 using System.Text;
 
@@ -156,13 +157,16 @@ public sealed class LegacySchemaDdlService : ISchemaDdlService
         string? minValue = reader.GetValue(3)?.ToString();
         string? maxValue = reader.GetValue(4)?.ToString();
         int isCycled = reader.GetInt32(5);
-        bool isDefaultMax = typeName == "INTEGER" && maxValue == "2147483647"
-            || typeName == "BIGINT" && maxValue == "9223372036854775807";
-        return $"CREATE SEQUENCE {databaseName}.{owner}.{sequenceName}\r\n"+
-            $"AS {typeName}\r\nSTART WITH {lastValue}\r\nINCREMENT BY {incrementBy}\r\n"+
-            $"{(string.IsNullOrEmpty(minValue) ? "NO MINVALUE" : "MINVALUE " + minValue)}\r\n"+
-            $"{(string.IsNullOrEmpty(maxValue) || isDefaultMax ? "NO MAXVALUE" : "MAXVALUE " + maxValue)}\r\n"+
-            $"{(isCycled == 1 ? "CYCLE" : "NO CYCLE")};";
+        return new NetezzaDdlTextBuilder().BuildCreateSequence(new NetezzaSequenceDdlInput(
+            databaseName,
+            owner,
+            sequenceName,
+            typeName,
+            lastValue,
+            incrementBy,
+            minValue,
+            maxValue,
+            Cycle: isCycled == 1));
     }
 
     private static string GetCatalogDdl(IGeneralDb database, TypeInDatabase kind, int objectId, string objectName, string databaseName)

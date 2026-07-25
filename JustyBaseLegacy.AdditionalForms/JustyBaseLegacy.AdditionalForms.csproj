@@ -17,6 +17,9 @@
     <ProjectReference Include="..\JustData.ViewModels\JustData.ViewModels.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="JustyBase.NetezzaDdl" />
+  </ItemGroup>
+  <ItemGroup>
     <Using Include="DatabaseDataGridView.WinForms" />
   </ItemGroup>
   <ItemGroup>

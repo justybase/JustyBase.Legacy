@@ -27,7 +27,7 @@ public sealed class FastNetezzaCsvImportTests
 
         (string createSql, string insertSql, string fullCreate) = importer.GetCodes("target_table", "pipe_1");
 
-        Assert.Contains("CREATE TABLE target_table (id INTEGER,name VARCHAR(50))", createSql);
+        Assert.Contains("CREATE TABLE \"target_table\" (id INTEGER,name VARCHAR(50))", createSql);
         Assert.Contains("\\\\.\\pipe\\pipe_1", insertSql);
         Assert.Contains("DELIMITER '\\t'", insertSql);
         Assert.Contains("DECIMALDELIM ','", insertSql);

@@ -7,7 +7,6 @@ using AppBase.Data.Core.Core;
 using AppBase.Data.Core.Enums;
 using AppBase.Data.Core.Interfaces;
 using JustyBase.NetezzaDriver;
-using JustyBase.NetezzaCatalogSql;
 using System.Data.Common;
 using System.Text;
 using System.Windows.Forms;
@@ -37,40 +36,6 @@ namespace JustyBaseLegacy.UI
 
 
         public bool KeepConnectionOpen => CurrentUpper.KeepConnectionOpen;
-
-        public string GetSeqCodeById(int objectID, string connectionName)
-        {
-            string ownerTabeli = _schemaTables.TablesByConnection[connectionName][objectID].TABLE_OWNER;
-            string databaseName = _completionContext.DatabaseDictionary[connectionName][_schemaTables.TablesByConnection[connectionName][objectID].DATABASE_ID].DatabaseName;
-            var tableData = _schemaTables.TablesByConnection[connectionName][objectID];
-
-            using DbConnection conn = _connectionSessions[connectionName].GetConnection(databaseName);
-            conn.Open();
-
-            using DbCommand cmd = conn.CreateCommand();
-            cmd.CommandText = NetezzaSystemSql.GetSequenceMetadata(tableData.TABLE_NAME);
-
-            using var rdr = cmd.ExecuteReader();
-            rdr.Read();
-
-            string typeNme = rdr.GetString(0);
-            string LAST_VALUE = rdr.GetString(1);
-            string INCREMENT_BY = rdr.GetString(2);
-            string MINVALUE = rdr.GetString(3);
-            string MAXVALUE = rdr.GetString(4);
-            int IS_CYCLED = rdr.GetInt32(5);
-
-            string clipText = @$"
-CREATE SEQUENCE {databaseName}.{ownerTabeli}.{tableData.TABLE_NAME}
-AS {typeNme}
-START WITH {LAST_VALUE}
-INCREMENT BY {INCREMENT_BY}
-{(MINVALUE == null ? "NO MINVALUE" : "MINVALUE " + MINVALUE)}
-{(MAXVALUE == null || typeNme == "INTEGER" && MAXVALUE == "2147483647" || typeNme == "BIGINT" && MAXVALUE == "9223372036854775807" ? "NO MAXVALUE" : "MAXVALUE " + MAXVALUE)}
-{(IS_CYCLED == 1 ? "CYCLE" : "NO CYCLE")};";
-            return clipText;
-
-        }
 
         private void DgvVariables_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
         {

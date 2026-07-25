@@ -1,4 +1,5 @@
 using AppBase.Common;
+using JustyBase.NetezzaDdl;
 using System.Data.Common;
 using System.IO.Pipes;
 using System.Text.RegularExpressions;
@@ -130,7 +131,7 @@ public sealed class FastNetezzaCsvImport : IFastNetezzaCsvImport
                 )";
         string selectCode = @$"SELECT * FROM EXTERNAL '\\.\pipe\{serverName}' ({String.Join(',', headers)})";
 
-        string createSql = $"CREATE TABLE {tablename} ({String.Join(',', headers)}){nl}DISTRIBUTE ON RANDOM;{nl}{nl}";
+        string createSql = NetezzaImportSql.CreateRandomDistributionTable(tablename, headers);
         string inserSql = @$"INSERT INTO {tablename} {selectCode} {usingCode};";
 
         string fullCreate = $"CREATE TABLE {tablename} AS {nl} ({selectCode} {usingCode}){nl}DISTRIBUTE ON RANDOM;{nl}{nl}";

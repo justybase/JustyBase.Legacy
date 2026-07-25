@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using JustyBase.NetezzaDdl;
 
 namespace JustyBaseLegacy.UI
 {
@@ -27,13 +28,10 @@ namespace JustyBaseLegacy.UI
         public string ResultSql { get; set; }
         private void btGromOk_Click(object sender, EventArgs e)
         {
-            string backupSet = cbOptions.SelectedItem.ToString();
-            if (backupSet != "DEFAULT" && backupSet != "NONE")
-            {
-                backupSet = $"'{backupSet}'";
-            }
-
-            ResultSql = $"GROOM TABLE {_tableName} {cbMode.SelectedItem} RECLAIM BACKUPSET {backupSet};";
+            ResultSql = NetezzaMaintenanceSql.BuildGroom(
+                _tableName,
+                cbMode.SelectedItem?.ToString() ?? NetezzaMaintenanceSql.GroomModes[0],
+                cbOptions.SelectedItem?.ToString());
             DialogResult = DialogResult.OK;
             this.Close();
         }

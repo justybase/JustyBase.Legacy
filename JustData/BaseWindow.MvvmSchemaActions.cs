@@ -202,13 +202,13 @@ public partial class BaseWindow
                 break;
             case SchemaContextAction.SelectDeletedRows:
                 AddMainTab(null, qualifiedName,
-                    $"SET show_deleted_records = 1;\r\nselect t1.createxid, t1.deletexid, t1.* from {qualifiedName} t1 WHERE deletexid != 0;\r\nSET show_deleted_records = 0;");
+                    NetezzaDdlTemplates.GetDeletedRecordsSql(qualifiedName, [], static name => name));
                 break;
             case SchemaContextAction.GrantClipboard:
                 SetClipboardText(NetezzaDdlTemplates.GetGrantSelectSql($"{databaseName}..{table.TABLE_NAME}"));
                 break;
             case SchemaContextAction.CommentClipboard:
-                SetClipboardText($"COMMENT ON TABLE {qualifiedName} IS 'some comment';");
+                SetClipboardText(NetezzaDdlTemplates.GetAddTableCommentTemplateSql(qualifiedName));
                 break;
             case SchemaContextAction.AddKey:
                 SetClipboardText($"ALTER TABLE {qualifiedName} ADD CONSTRAINT PK_{table.TABLE_NAME} PRIMARY KEY (COL1,COL2);");
@@ -218,7 +218,7 @@ public partial class BaseWindow
                 break;
             case SchemaContextAction.GenerateStatistics:
                 AddMainTab(null, $"stats for {table.TABLE_NAME}",
-                    $"GENERATE EXPRESS STATISTICS ON {databaseName}..{table.TABLE_NAME};\r\n--https://www.ibm.com/docs/en/netezza?topic=reference-generate-express-statistics");
+                    NetezzaDdlTemplates.GetGenerateStatsSql($"{databaseName}..{table.TABLE_NAME}"));
                 break;
             case SchemaContextAction.EmptyTable:
                 AddMainTab(null, $"empty for {table.TABLE_NAME}",

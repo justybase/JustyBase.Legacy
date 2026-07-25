@@ -11,6 +11,7 @@ using AppBase.Common.JsonContext;
 using AppBase.Common.Models;
 using AppBase.Data;
 using JustyBase.NetezzaDriver;
+using JustyBase.NetezzaDdl;
 using SpreadSheetTasks;
 using Sylvan.Data.Csv;
 using System.Data;
@@ -257,17 +258,13 @@ public sealed partial class ImportExportTasks : IImportExportTasks
     #region SQL Generation Helpers
 
     private string BuildCreateTableCommand(string tableName, string[] headers)
-    {
-        return $"CREATE TABLE {tableName} {Environment.NewLine}(" +
-               String.Join($"{Environment.NewLine},", headers) +
-               Environment.NewLine + ") DISTRIBUTE ON RANDOM;";
-    }
+        => NetezzaImportSql.CreateRandomDistributionTable(tableName, headers);
 
     private string BuildExternalInsertCommand(string tableName, string serverName, string[] headers, string remoteSource)
     {
         char sepInExternal = _applicationSettingsContext.Config.SepInExternal[0];
 
-        return @$"INSERT INTO {tableName} SELECT * FROM EXTERNAL '\\.\pipe\{serverName}' ({String.Join(',', headers)}) " +
+        return NetezzaImportSql.InsertFromExternalPipe(tableName, serverName, headers) +
                @$"USING(
                 REMOTESOURCE '{remoteSource}'
                 DELIMITER '{sepInExternal}'
@@ -1164,7 +1161,7 @@ public sealed partial class ImportExportTasks : IImportExportTasks
 
         string REMOTESOURCE = dbConnection is NzConnection ? "dotnet" : "odbc";
 
-        string insertCommand = @$"INSERT INTO {randName} SELECT * FROM EXTERNAL '\\.\pipe\{serverName}' ({String.Join(',', headers)}) "
+        string insertCommand = NetezzaImportSql.InsertFromExternalPipe(randName, serverName, headers)
          + @$"USING(
                 REMOTESOURCE '{REMOTESOURCE}'
                 DELIMITER '{sepInExternal}'
