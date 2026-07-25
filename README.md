@@ -26,7 +26,7 @@
 ---
 
 <p align="center">
-  <img src="docs/images/editor-showcase-dark.png" alt="SQL editor with results — dark theme" width="920"/>
+  <img src="docs/images/explorer-dark.png" alt="SQL editor with results — dark theme" width="920"/>
 </p>
 <p align="center"><sub>SQL editor, result grid, and database explorer — dark theme</sub></p>
 
