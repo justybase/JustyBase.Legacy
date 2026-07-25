@@ -30,4 +30,4 @@ dotnet run --project JustData/JustData.csproj -c Release --no-build --no-launch-
 
 ## Coverage reference (local run, core CI projects)
 
-Weighted merged line coverage across core assemblies enforced at **≥35%** in CI. A recent local merge reported **~46%** overall, with **JustData.Application** and **JustData.ViewModels** each **~90%+** (WinForms and provider adapters pull the blended number down).
+Weighted merged line coverage across core assemblies enforced at **≥46%** in CI, with per-assembly floors for **App.Data.Netezza (≥18%)** and **AppBase.Services (≥35%)**. A recent local merge reported **~48%** overall, with **JustData.Application** ~90%+ and **JustData.ViewModels** ~65%+ (Netezza adapters and large service helpers still pull the blended number down). The coverage job writes `artifacts/coverage/coverage-summary.md` for PR review.

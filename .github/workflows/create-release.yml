@@ -64,7 +64,15 @@ jobs:
 
     - name: Enforce core coverage threshold
       shell: pwsh
-      run: ./scripts/check-core-coverage.ps1 -CoverageFile artifacts/coverage/coverage.cobertura.xml -MinimumLineRatePercent 35
+      run: |
+        ./scripts/check-core-coverage.ps1 `
+          -CoverageFile artifacts/coverage/coverage.cobertura.xml `
+          -MinimumLineRatePercent 46 `
+          -MinimumAssemblyLineRates @(
+            'App.Data.Netezza=18',
+            'AppBase.Services=35'
+          ) `
+          -MarkdownReportPath artifacts/coverage/coverage-summary.md
 
     - name: Check whitespace
       run: git diff --check

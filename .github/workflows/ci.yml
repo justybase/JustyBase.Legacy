@@ -57,7 +57,14 @@ jobs:
       - name: Enforce core coverage threshold
         shell: pwsh
         run: |
-          ./scripts/check-core-coverage.ps1 -CoverageFile artifacts/coverage/coverage.cobertura.xml -MinimumLineRatePercent 35
+          ./scripts/check-core-coverage.ps1 `
+            -CoverageFile artifacts/coverage/coverage.cobertura.xml `
+            -MinimumLineRatePercent 46 `
+            -MinimumAssemblyLineRates @(
+              'App.Data.Netezza=18',
+              'AppBase.Services=35'
+            ) `
+            -MarkdownReportPath artifacts/coverage/coverage-summary.md
 
       - name: Upload coverage report
         if: always()
@@ -67,6 +74,7 @@ jobs:
           path: |
             artifacts/test-results/**/coverage.cobertura.xml
             artifacts/coverage/coverage.cobertura.xml
+            artifacts/coverage/coverage-summary.md
           if-no-files-found: error
           retention-days: 14
 

@@ -1,2 +1,22 @@
 <Project>
+  <!--
+    When sibling JustyBase.Netezza / JustyBase.NetezzaSql checkouts exist (or
+    UseLocalJustyBaseLibraries=true), swap NuGet PackageReferences for ProjectReferences.
+    JustyBase.NetezzaDriver stays on NuGet.
+  -->
+  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' == 'true'">
+    <ProjectReference Include="$(JustyBaseLocalNetezzaProject)"
+                      Condition="'@(PackageReference->WithMetadataValue('Identity', 'JustyBase.Netezza'))' != ''" />
+    <ProjectReference Include="$(JustyBaseLocalNetezzaSqlParserProject)"
+                      Condition="'@(PackageReference->WithMetadataValue('Identity', 'JustyBase.NetezzaSqlParser'))' != ''" />
+    <ProjectReference Include="$(JustyBaseLocalNetezzaDdlProject)"
+                      Condition="'@(PackageReference->WithMetadataValue('Identity', 'JustyBase.NetezzaDdl'))' != ''" />
+    <ProjectReference Include="$(JustyBaseLocalNetezzaCatalogSqlProject)"
+                      Condition="'@(PackageReference->WithMetadataValue('Identity', 'JustyBase.NetezzaCatalogSql'))' != ''" />
+
+    <PackageReference Remove="JustyBase.Netezza" />
+    <PackageReference Remove="JustyBase.NetezzaSqlParser" />
+    <PackageReference Remove="JustyBase.NetezzaDdl" />
+    <PackageReference Remove="JustyBase.NetezzaCatalogSql" />
+  </ItemGroup>
 </Project>

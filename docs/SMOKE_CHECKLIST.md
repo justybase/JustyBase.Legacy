@@ -6,7 +6,7 @@ Run these checks manually before pushing a release tag (`vMAJOR.MINOR.PATCH.REVI
 
 - [ ] `pwsh ./scripts/verify-no-tracked-secrets.ps1` passes
 - [ ] NuGet vulnerability audit passes
-- [ ] `dotnet test` on core projects passes with merged coverage ≥ 35%
+- [ ] `dotnet test` on core projects passes with merged coverage ≥ 46% (Netezza ≥ 18%, Services ≥ 35%)
 - [ ] `--smoke-test` passes on built and published binaries
 - [ ] `git diff --check` is clean
 

@@ -1,0 +1,176 @@
+using AppBase.Common;
+using AppBase.Common.Enums;
+using AppBase.Common.Interfaces;
+using AppBase.Data;
+using AppBase.Data.Completion;
+using AppBase.Data.Core.Interfaces;
+using AppBase.Data.Core.Models;
+using FastColoredTextBoxNS;
+using NSubstitute;
+
+namespace AppBase.Tests.Sql;
+
+public sealed class LegacyDbCompletionFallbackTests : IDisposable
+{
+    private const string ConnectionName = "fallback-test";
+    private readonly LegacyDbCompletionFallback _sut;
+    private readonly INetezzaCompletionContext _context;
+    private readonly IGeneralDbService _db;
+
+    public LegacyDbCompletionFallbackTests()
+    {
+        _context = Substitute.For<INetezzaCompletionContext>();
+        _db = Substitute.For<IGeneralDbService>();
+        _sut = new LegacyDbCompletionFallback(_context, _db);
+        SeedHappyPath();
+    }
+
+    public void Dispose()
+    {
+        _sut.ResetCache();
+        DynamicCollectionForNettezaHelpers.DatabaseArray.Remove(ConnectionName);
+        NetezzaHelpers.baseTableDictionary.Remove(ConnectionName);
+    }
+
+    [Fact]
+    public void Constructor_rejects_null_context()
+    {
+        Assert.Throws<ArgumentNullException>(() => new LegacyDbCompletionFallback(null!, _db));
+    }
+
+    [Fact]
+    public void GetCompletions_returns_empty_when_schema_not_refreshed()
+    {
+        _context.SchemaRefreshed.Returns(false);
+
+        Assert.Empty(_sut.GetCompletions("EMP"));
+    }
+
+    [Fact]
+    public void GetCompletions_returns_empty_for_non_netezza_driver()
+    {
+        _db.DriverName(ConnectionName).Returns("Postgres");
+
+        Assert.Empty(_sut.GetCompletions("EMP"));
+    }
+
+    [Fact]
+    public void GetCompletions_dotCount0_returns_databases_and_matching_tables()
+    {
+        var items = _sut.GetCompletions("EMP").ToList();
+
+        Assert.Contains(items, i => i.ToString() == "JUST_DATA");
+        Assert.Contains(items, i => i.ToString() == "EMPLOYEES");
+        Assert.DoesNotContain(items, i => i.ToString() == "ORDERS");
+    }
+
+    [Fact]
+    public void GetCompletions_one_dot_after_schema_returns_tables()
+    {
+        var items = _sut.GetCompletions("ADMIN.").ToList();
+
+        Assert.Contains(items, i => i.ToString()!.Contains("EMPLOYEES", StringComparison.Ordinal));
+        Assert.Contains(items, i => i.ToString()!.Contains("ORDERS", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GetCompletions_one_dot_after_table_returns_columns()
+    {
+        var items = _sut.GetCompletions("EMPLOYEES.").ToList();
+
+        Assert.Contains(items, i => i.ToString()!.Contains("EMP_ID", StringComparison.Ordinal));
+        Assert.Contains(items, i => i.ToString()!.Contains("EMP_NAME", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GetCompletions_two_dots_database_schema_returns_tables()
+    {
+        var items = _sut.GetCompletions("JUST_DATA.ADMIN.").ToList();
+
+        Assert.Contains(items, i => i.ToString()!.Contains("EMPLOYEES", StringComparison.Ordinal));
+        Assert.Contains(items, i => i.ToString()!.Contains("ORDERS", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ResetCache_clears_helper_caches()
+    {
+        DynamicCollectionForNettezaHelpers.CacheList1.Add(("a", "b"));
+        DynamicCollectionForNettezaHelpers.CacheList2.Add(("c", "d"));
+
+        _sut.ResetCache();
+
+        Assert.Empty(DynamicCollectionForNettezaHelpers.CacheList1);
+        Assert.Empty(DynamicCollectionForNettezaHelpers.CacheList2);
+    }
+
+    private void SeedHappyPath()
+    {
+        _context.SchemaRefreshed.Returns(true);
+        _context.SelectedConnectionName.Returns(ConnectionName);
+        _context.SelectedDatabase.Returns("JUST_DATA");
+        _db.DriverName(ConnectionName).Returns("NetezzaSQL");
+
+        DynamicCollectionForNettezaHelpers.DatabaseArray[ConnectionName] = ["JUST_DATA", "OTHER_DB"];
+
+        NetezzaHelpers.baseTableDictionary[ConnectionName] = new Dictionary<int, NetezzaTableInfo>
+        {
+            [10] = new()
+            {
+                DATABASE_ID = 1,
+                TABLE_NAME = "EMPLOYEES",
+                TABLE_DESC = "emps",
+                TABLE_OWNER = "ADMIN",
+                TABLE_SCHEMA = "ADMIN",
+                TABLE_OBJECT_OWNER = "ADMIN",
+                TABLE_KIND = TypeInDatabase.table,
+                FIRST_COLUMN_ID = 0,
+                COLUMN_COUNT = 2
+            },
+            [20] = new()
+            {
+                DATABASE_ID = 1,
+                TABLE_NAME = "ORDERS",
+                TABLE_DESC = "ords",
+                TABLE_OWNER = "ADMIN",
+                TABLE_SCHEMA = "ADMIN",
+                TABLE_OBJECT_OWNER = "ADMIN",
+                TABLE_KIND = TypeInDatabase.table,
+                FIRST_COLUMN_ID = 2,
+                COLUMN_COUNT = 1
+            }
+        };
+
+        _context.DatabaseSchemaLookup.Returns(new Dictionary<string, Dictionary<string, Dictionary<string, (string owner, int tableId)>>>
+        {
+            [ConnectionName] = new()
+            {
+                ["JUST_DATA"] = new()
+                {
+                    ["EMPLOYEES"] = ("ADMIN", 10),
+                    ["ORDERS"] = ("ADMIN", 20)
+                }
+            }
+        });
+
+        _context.ColumnTablesDictionary.Returns(new Dictionary<string, List<NetezzaColumnInfoRow>>
+        {
+            [ConnectionName] =
+            [
+                new() { COLUMN_NAME = "EMP_ID", DATA_TYPE = "INTEGER", COLUMN_DESCRIPTION = "id" },
+                new() { COLUMN_NAME = "EMP_NAME", DATA_TYPE = "NVARCHAR", COLUMN_DESCRIPTION = "name" },
+                new() { COLUMN_NAME = "ORDER_ID", DATA_TYPE = "INTEGER", COLUMN_DESCRIPTION = "oid" }
+            ]
+        });
+
+        _context.DatabaseOwners.Returns(new Dictionary<string, Dictionary<string, Dictionary<string, string>>>
+        {
+            [ConnectionName] = new()
+            {
+                ["JUST_DATA"] = new()
+                {
+                    ["ADMIN"] = "ADMIN"
+                }
+            }
+        });
+    }
+}
