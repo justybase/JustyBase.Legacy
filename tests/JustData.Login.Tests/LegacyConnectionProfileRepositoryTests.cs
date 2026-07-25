@@ -91,5 +91,18 @@ public sealed class LegacyConnectionProfileRepositoryTests : IDisposable
         Assert.Empty(unknown);
     }
 
+    [Theory]
+    [InlineData("warehouse.local", "warehouse.local", "5480")]
+    [InlineData("warehouse.local:5480", "warehouse.local", "5480")]
+    [InlineData("10.0.0.1:1234", "10.0.0.1", "1234")]
+    [InlineData(null, "", "5480")]
+    public void Database_catalog_splits_netezza_host_and_port(string? server, string expectedHost, string expectedPort)
+    {
+        LegacyDatabaseCatalogService.SplitHostAndPort(server, out string host, out string port);
+
+        Assert.Equal(expectedHost, host);
+        Assert.Equal(expectedPort, port);
+    }
+
     public void Dispose() { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); }
 }
