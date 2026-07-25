@@ -1,6 +1,6 @@
 <Project>
   <!--
-    When sibling JustyBase.Netezza / JustyBase.NetezzaSql checkouts exist (or
+    When sibling JustyBase.NetezzaSql checkout exists (or
     UseLocalJustyBaseLibraries=true), swap NuGet PackageReferences for ProjectReferences.
     JustyBase.NetezzaDriver stays on NuGet.
   -->

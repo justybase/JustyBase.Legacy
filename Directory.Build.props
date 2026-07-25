@@ -17,11 +17,11 @@
     <PlatformTarget Condition="'$(PlatformTarget)' == ''">x64</PlatformTarget>
 
     <!--
-      Local sibling checkout (##justybase/JustyBase.Netezza + JustyBase.NetezzaSql):
+      Local sibling checkout (##justybase/JustyBase.NetezzaSql):
       ProjectReference instead of NuGet. Override: -p:UseLocalJustyBaseLibraries=false|true
     -->
     <JustyBaseLibrariesRoot Condition="'$(JustyBaseLibrariesRoot)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\'))</JustyBaseLibrariesRoot>
-    <JustyBaseLocalNetezzaProject>$(JustyBaseLibrariesRoot)JustyBase.Netezza\JustyBase.Netezza.csproj</JustyBaseLocalNetezzaProject>
+    <JustyBaseLocalNetezzaProject>$(JustyBaseLibrariesRoot)JustyBase.NetezzaSql\JustyBase.Netezza\JustyBase.Netezza.csproj</JustyBaseLocalNetezzaProject>
     <JustyBaseLocalNetezzaSqlParserProject>$(JustyBaseLibrariesRoot)JustyBase.NetezzaSql\JustyBase.NetezzaSqlParser.csproj</JustyBaseLocalNetezzaSqlParserProject>
     <JustyBaseLocalNetezzaDdlProject>$(JustyBaseLibrariesRoot)JustyBase.NetezzaSql\JustyBase.NetezzaDdl\JustyBase.NetezzaDdl.csproj</JustyBaseLocalNetezzaDdlProject>
     <JustyBaseLocalNetezzaCatalogSqlProject>$(JustyBaseLibrariesRoot)JustyBase.NetezzaSql\JustyBase.NetezzaCatalogSql\JustyBase.NetezzaCatalogSql.csproj</JustyBaseLocalNetezzaCatalogSqlProject>

@@ -134,7 +134,7 @@ dotnet test JustData.All.slnx -c Release --filter "Category!=Integration"
 
 ### Local JustyBase.Netezza* libraries
 
-When sibling folders `../JustyBase.Netezza` and `../JustyBase.NetezzaSql` exist (e.g. a `##justybase` multi-repo checkout), MSBuild automatically uses `ProjectReference` instead of NuGet for `JustyBase.Netezza`, `JustyBase.NetezzaDdl`, `JustyBase.NetezzaCatalogSql`, and `JustyBase.NetezzaSqlParser`. External clones without those siblings keep using NuGet (`*-*` = latest published, including previews). Force either mode with `-p:UseLocalJustyBaseLibraries=true|false`. Pin a NuGet version with `-p:JustyBaseNetezzaLibsPackageVersion=0.2.0-preview.6`.
+When sibling folder `../JustyBase.NetezzaSql` exists (e.g. a `##justybase` multi-repo checkout), MSBuild automatically uses `ProjectReference` instead of NuGet for `JustyBase.Netezza`, `JustyBase.NetezzaDdl`, `JustyBase.NetezzaCatalogSql`, and `JustyBase.NetezzaSqlParser`. External clones without that sibling keep using NuGet (`*-*` = latest published, including previews). Force either mode with `-p:UseLocalJustyBaseLibraries=true|false`. Pin a NuGet version with `-p:JustyBaseNetezzaLibsPackageVersion=0.2.0-preview.6`.
 
 Optional provider (example):
 

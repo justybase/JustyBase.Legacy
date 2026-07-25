@@ -16,5 +16,5 @@ The SQL editor needs autocomplete, signature help, hover info, semantic tokens, 
 + Single parser = no drift between editor highlights and actual execution semantics.
 + Engine is a class library — unit-testable with 1000s of cases, no UI.
 + `SqlAuthoringViewModel` stays thin (~200 lines), delegates to injected service.
-- External dependency (`JustyBase.NetezzaSqlParser` repo) must be checked out as sibling for local builds.
+- External dependency (`JustyBase.NetezzaSql` repo, including `JustyBase.NetezzaSqlParser`) must be checked out as sibling for local builds.
 - Legacy autocomplete path still exists for non-Netezza engines (General SQL) — tracked for future removal.
