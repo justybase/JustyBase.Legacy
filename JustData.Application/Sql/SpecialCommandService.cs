@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using JustyBase.Core.Scripting;
 
 namespace JustData.Application.Sql;
 
@@ -11,7 +12,8 @@ public sealed partial class SpecialCommandService : ISpecialCommandService
         if (string.IsNullOrWhiteSpace(sql) || sql.Length >= 120)
             return Task.FromResult(new SpecialCommandResult(null, WasHandled: false));
 
-        string trimmed = sql.Trim();
+        // Canonicalize Legacy sleep/session markers toward Avalonia dialect where applicable.
+        string trimmed = LegacyScriptDialectAdapter.Normalize(sql).Trim();
 
         Match m;
 
@@ -62,31 +64,47 @@ public sealed partial class SpecialCommandService : ISpecialCommandService
                 null, WasHandled: true, MaxRows: int.Parse(m.Groups["nums"].Value)));
         }
 
-        m = EchoRegex().Match(trimmed);
+        m = EchoQuotedRegex().Match(trimmed);
         if (m.Success)
         {
             return Task.FromResult(new SpecialCommandResult(
                 $"SELECT '{m.Groups["msg"].Value.Replace("'", "''")}'", WasHandled: true));
         }
 
-        m = EchoFileRegex().Match(trimmed);
+        m = EchoFileQuotedRegex().Match(trimmed);
         if (m.Success)
         {
-            string message = m.Groups["msg"].Value;
-            string filePath = m.Groups["filePath"].Value;
-            if (!string.IsNullOrWhiteSpace(filePath))
-            {
-                try
-                {
-                    File.AppendAllText(filePath, message + Environment.NewLine);
-                }
-                catch { }
-            }
+            return EchoToFile(m.Groups["msg"].Value, m.Groups["filePath"].Value);
+        }
+
+        m = EchoFileLegacyRegex().Match(trimmed);
+        if (m.Success)
+        {
+            return EchoToFile(m.Groups["msg"].Value, m.Groups["filePath"].Value);
+        }
+
+        m = EchoUnquotedRegex().Match(trimmed);
+        if (m.Success)
+        {
             return Task.FromResult(new SpecialCommandResult(
-                $"SELECT 'echoed to {filePath}'", WasHandled: true));
+                $"SELECT '{m.Groups["msg"].Value.Replace("'", "''")}'", WasHandled: true));
         }
 
         return Task.FromResult(new SpecialCommandResult(null, WasHandled: false));
+    }
+
+    private static Task<SpecialCommandResult> EchoToFile(string message, string filePath)
+    {
+        if (!string.IsNullOrWhiteSpace(filePath))
+        {
+            try
+            {
+                File.AppendAllText(filePath, message + Environment.NewLine);
+            }
+            catch { }
+        }
+        return Task.FromResult(new SpecialCommandResult(
+            $"SELECT 'echoed to {filePath}'", WasHandled: true));
     }
 
     [GeneratedRegex(@"^__create_directory\s+""(?<directory>.+)""__$")]
@@ -95,15 +113,24 @@ public sealed partial class SpecialCommandService : ISpecialCommandService
     [GeneratedRegex(@"^__delete_directory\s+""(?<directory>.+)""__$")]
     private static partial Regex DeleteDirectoryRegex();
 
-    [GeneratedRegex(@"^___sleep\s+(?<nums>\d+)$", RegexOptions.IgnoreCase)]
+    // Accepts both Legacy ___sleep N and Avalonia @sleep:N after Normalize.
+    [GeneratedRegex(@"^(?:___sleep\s+|@sleep\s*:)\s*(?<nums>\d+)\s*;?$", RegexOptions.IgnoreCase)]
     private static partial Regex SleepRegex();
 
-    [GeneratedRegex(@"^___max_rows\s+(?<nums>\d+)$", RegexOptions.IgnoreCase)]
+    // Legacy snippets use ___maxRows; Avalonia-style uses ___max_rows.
+    [GeneratedRegex(@"^___max_?rows\s+(?<nums>\d+)\s*;?$", RegexOptions.IgnoreCase)]
     private static partial Regex MaxRowsRegex();
 
-    [GeneratedRegex(@"^___echo\s+""(?<msg>[^""]*)""$", RegexOptions.IgnoreCase)]
-    private static partial Regex EchoRegex();
+    [GeneratedRegex(@"^___echo\s+""(?<msg>[^""]*)""\s*;?$", RegexOptions.IgnoreCase)]
+    private static partial Regex EchoQuotedRegex();
 
-    [GeneratedRegex(@"^___echo_file\s+""(?<msg>[^""]*)""\s+""(?<filePath>[^""]*)""$", RegexOptions.IgnoreCase)]
-    private static partial Regex EchoFileRegex();
+    [GeneratedRegex(@"^___echo\s+(?<msg>.+?)\s*;?$", RegexOptions.IgnoreCase)]
+    private static partial Regex EchoUnquotedRegex();
+
+    [GeneratedRegex(@"^___echo_file\s+""(?<msg>[^""]*)""\s+""(?<filePath>[^""]*)""\s*;?$", RegexOptions.IgnoreCase)]
+    private static partial Regex EchoFileQuotedRegex();
+
+    // Legacy snippet form: ___echoFile filepath:message
+    [GeneratedRegex(@"^___echoFile\s+(?<filePath>.{2}.*?):(?<msg>.+?)\s*;?$", RegexOptions.IgnoreCase)]
+    private static partial Regex EchoFileLegacyRegex();
 }

@@ -28,6 +28,7 @@
     <PackageReference Include="Hogimn.Sql.Formatter" />
     <PackageReference Include="SpreadSheetTasks" />
     <PackageReference Include="Sylvan.Data.Csv" />
+    <PackageReference Include="JustyBase.ImportExport" />
   </ItemGroup>
 
   <ItemGroup>

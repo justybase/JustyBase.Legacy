@@ -17,6 +17,8 @@
     <PackageVersion Include="JustyBase.NetezzaSqlParser" Version="$(JustyBaseNetezzaLibsPackageVersion)" />
     <PackageVersion Include="JustyBase.NetezzaDdl" Version="$(JustyBaseNetezzaLibsPackageVersion)" />
     <PackageVersion Include="JustyBase.NetezzaCatalogSql" Version="$(JustyBaseNetezzaLibsPackageVersion)" />
+    <PackageVersion Include="JustyBase.Core" Version="$(JustyBaseNetezzaLibsPackageVersion)" />
+    <PackageVersion Include="JustyBase.ImportExport" Version="$(JustyBaseNetezzaLibsPackageVersion)" />
     <PackageVersion Include="Hogimn.Sql.Formatter" Version="2.0.4" />
     <PackageVersion Include="SpreadSheetTasks" Version="1.0.0" />
     <PackageVersion Include="Sylvan.Data.Csv" Version="1.4.4" />

@@ -10,10 +10,21 @@
   <ItemGroup>
     <PackageReference Include="JustyBase.NetezzaDriver" />
     <PackageReference Include="Hogimn.Sql.Formatter" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' == 'true'">
+    <ProjectReference Include="$(JustyBaseLocalNetezzaProject)" />
+    <ProjectReference Include="$(JustyBaseLocalNetezzaSqlParserProject)" />
+    <ProjectReference Include="$(JustyBaseLocalNetezzaDdlProject)" />
+    <ProjectReference Include="$(JustyBaseLocalNetezzaCatalogSqlProject)" />
+    <ProjectReference Include="$(JustyBaseLocalImportExportProject)" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' != 'true'">
     <PackageReference Include="JustyBase.Netezza" />
     <PackageReference Include="JustyBase.NetezzaSqlParser" />
     <PackageReference Include="JustyBase.NetezzaDdl" />
     <PackageReference Include="JustyBase.NetezzaCatalogSql" />
+    <PackageReference Include="JustyBase.ImportExport" />
   </ItemGroup>
 
   <ItemGroup>

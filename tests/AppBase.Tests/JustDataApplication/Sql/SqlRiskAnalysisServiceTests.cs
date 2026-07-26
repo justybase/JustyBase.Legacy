@@ -88,15 +88,15 @@ public sealed class SqlRiskAnalysisServiceTests
         var risks = Service.Analyze("UPDATE users SET name = 'test'");
         var risk = Assert.Single(risks, r => r.Kind == SqlRiskKind.UnsafeUpdateDelete);
         Assert.Contains("WHERE", risk.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.False(risk.IsBlocking);
+        Assert.True(risk.IsBlocking);
     }
 
     [Fact]
-    public void Analyze_UPDATE_statement_starting_with_whitespace_not_detected()
+    public void Analyze_UPDATE_statement_starting_with_whitespace_is_detected()
     {
-        // Service uses StartsWith without trimming, so leading whitespace bypasses detection
+        // Shared Core trims / masks before matching — leading whitespace must not bypass.
         var risks = Service.Analyze("  UPDATE users SET name = 'test'");
-        Assert.DoesNotContain(risks, r => r.Kind == SqlRiskKind.UnsafeUpdateDelete);
+        Assert.Contains(risks, r => r.Kind == SqlRiskKind.UnsafeUpdateDelete);
     }
 
     // ──────────────────────────────────────────────
@@ -160,7 +160,7 @@ public sealed class SqlRiskAnalysisServiceTests
         var risks = Service.Analyze("CREATE TABLE my_table (id INT)", "NetezzaSQL");
         var risk = Assert.Single(risks, r => r.Kind == SqlRiskKind.MissingDistribute);
         Assert.Contains("DISTRIBUTE", risk.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.False(risk.IsBlocking);
+        Assert.True(risk.IsBlocking);
     }
 
     // ──────────────────────────────────────────────
@@ -183,11 +183,11 @@ public sealed class SqlRiskAnalysisServiceTests
     }
 
     [Fact]
-    public void Analyze_SELECT_INTO_without_FROM_or_trailing_space_does_not_detect()
+    public void Analyze_SELECT_INTO_without_FROM_still_detects()
     {
-        // No trailing whitespace means \s+ can't match before $
+        // Shared Core matches SELECT … INTO <ident> without requiring FROM.
         var risks = Service.Analyze("SELECT a INTO temp");
-        Assert.DoesNotContain(risks, r => r.Kind == SqlRiskKind.SelectInto);
+        Assert.Contains(risks, r => r.Kind == SqlRiskKind.SelectInto);
     }
 
     [Fact]
@@ -216,7 +216,7 @@ public sealed class SqlRiskAnalysisServiceTests
         var risks = Service.Analyze("SELECT * INTO t FROM s");
         var risk = Assert.Single(risks, r => r.Kind == SqlRiskKind.SelectInto);
         Assert.Contains("SELECT INTO", risk.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.False(risk.IsBlocking);
+        Assert.True(risk.IsBlocking);
     }
 
     [Fact]
@@ -250,9 +250,7 @@ public sealed class SqlRiskAnalysisServiceTests
     [Fact]
     public void Analyze_all_three_risks_together()
     {
-        // Service uses StartsWithAny on the entire SQL string, not per-statement.
-        // CREATE TABLE in the middle of a batch is NOT detected — only the first statement is checked.
-        // To trigger all three, test each risk pattern as the START of the SQL string.
+        // Shared Core splits on ';' and analyzes each statement.
         var sql = """
                   UPDATE users SET name = 'test';
                   CREATE TABLE t (id INT);
@@ -261,12 +259,8 @@ public sealed class SqlRiskAnalysisServiceTests
         var risks = Service.Analyze(sql, "NetezzaSQL");
 
         Assert.Contains(risks, r => r.Kind == SqlRiskKind.UnsafeUpdateDelete);
-        // MissingDistribute not detected because CREATE TABLE is not at the start
+        Assert.Contains(risks, r => r.Kind == SqlRiskKind.MissingDistribute);
         Assert.Contains(risks, r => r.Kind == SqlRiskKind.SelectInto);
-
-        // Verify that a standalone CREATE TABLE without DISTRIBUTE triggers MissingDistribute
-        var createRisks = Service.Analyze("CREATE TABLE t (id INT)", "NetezzaSQL");
-        Assert.Contains(createRisks, r => r.Kind == SqlRiskKind.MissingDistribute);
     }
 
     // ──────────────────────────────────────────────

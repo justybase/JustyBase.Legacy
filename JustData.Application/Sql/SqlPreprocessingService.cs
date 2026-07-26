@@ -1,5 +1,6 @@
 using System.Data;
 using System.Text.RegularExpressions;
+using JustyBase.Core.Scripting;
 
 namespace JustData.Application.Sql;
 
@@ -33,6 +34,14 @@ public sealed partial class SqlPreprocessingService : ISqlPreprocessingService
         string sql = request.SqlText ?? string.Empty;
         var updatedSession = new Dictionary<string, string>(StringComparer.Ordinal);
         var updatedGlobal = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        // Only canonicalize sleep markers here. Session/global vars keep Legacy
+        // SQL_RESULT / DataTable.Compute evaluation below.
+        // Skip matches inside quotes/comments so SQL literals stay intact.
+        sql = LegacySleepOnlyRegex().Replace(sql, match =>
+            IsInsideQuotedLiteral(sql, match.Index)
+                ? match.Value
+                : "@sleep:" + match.Groups[1].Value);
 
         // Step 1: Process __Let / __LetFor directives (synchronous)
         sql = ProcessLetDirectives(sql);
@@ -334,6 +343,9 @@ public sealed partial class SqlPreprocessingService : ISqlPreprocessingService
 
         return sql;
     }
+
+    [GeneratedRegex(@"___sleep\s*[: ]\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex LegacySleepOnlyRegex();
 
     [GeneratedRegex(@"\$(?<var>[a-zA-Z]\w*)", RegexOptions.IgnoreCase)]
     private static partial Regex VariableRefRegex();

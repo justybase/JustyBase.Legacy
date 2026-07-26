@@ -4,4 +4,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' == 'true'">
+    <ProjectReference Include="$(JustyBaseLocalCoreProject)" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' != 'true'">
+    <PackageReference Include="JustyBase.Core" />
+  </ItemGroup>
 </Project>

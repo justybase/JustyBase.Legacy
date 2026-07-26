@@ -1947,14 +1947,6 @@ namespace JustyBaseLegacy.UI
                     : SystemColorMode.Classic);
         }
 
-        [GeneratedRegex(@"\s*___sleep\s+(?<nums>\d{1,5})\s*", RegexOptions.IgnoreCase, "pl-PL")]
-        private static partial Regex RegexSleep();
-        [GeneratedRegex(@"\s*___maxRows\s+(?<nums>\d{1,7})\s*", RegexOptions.IgnoreCase, "pl-PL")]
-        private static partial Regex RegexMaxRows();
-        [GeneratedRegex(@"\s*___echo\s+(?<msg>.*)", RegexOptions.IgnoreCase, "pl-PL")]
-        private static partial Regex RegexEcho();
-        [GeneratedRegex(@"\s*___echoFile\s+(?<filePath>.{2}.*?):(?<msg>.+)", RegexOptions.IgnoreCase, "pl-PL")]
-        private static partial Regex RegexEchoFile();
         [GeneratedRegex(@"[a-zA-Z]")]
         private static partial Regex ContainsAZRegex();
 

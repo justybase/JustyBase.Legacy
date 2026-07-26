@@ -81,7 +81,6 @@ namespace JustyBaseLegacy.UI
             ImportToolStripMenuItem = new ToolStripMenuItem();
             XLSXtoolStripMenuItem = new ToolStripMenuItem();
             recentXlsx = new ToolStripMenuItem();
-            importCsvForceToolStripMenuItem = new ToolStripMenuItem();
             changeHotkeysToolStripMenuItem = new ToolStripMenuItem();
             optionsToolStripMenuItem = new ToolStripMenuItem();
             mapToolStripMenuItem = new ToolStripMenuItem();
@@ -533,7 +532,7 @@ namespace JustyBaseLegacy.UI
             // 
             // ImportToolStripMenuItem
             // 
-            ImportToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { XLSXtoolStripMenuItem, recentXlsx, importCsvForceToolStripMenuItem });
+            ImportToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { XLSXtoolStripMenuItem, recentXlsx });
             ImportToolStripMenuItem.ImageAlign = ContentAlignment.TopLeft;
             ImportToolStripMenuItem.ImageScaling = ToolStripItemImageScaling.None;
             ImportToolStripMenuItem.Name = "ImportToolStripMenuItem";
@@ -554,13 +553,6 @@ namespace JustyBaseLegacy.UI
             recentXlsx.Name = "recentXlsx";
             recentXlsx.Size = new Size(147, 22);
             recentXlsx.Text = "Recent file";
-            // 
-            // importCsvForceToolStripMenuItem
-            // 
-            importCsvForceToolStripMenuItem.Name = "importCsvForceToolStripMenuItem";
-            importCsvForceToolStripMenuItem.Size = new Size(147, 22);
-            importCsvForceToolStripMenuItem.Text = "Advanced csv";
-            importCsvForceToolStripMenuItem.Click += ImportCsvForceToolStripMenuItem_Click;
             // 
             // changeHotkeysToolStripMenuItem
             // 
@@ -1724,7 +1716,6 @@ namespace JustyBaseLegacy.UI
         private ToolStripMenuItem tcmViewsSearchNetezza;
 
         private ToolStripMenuItem tsmLicence;
-        private ToolStripMenuItem importCsvForceToolStripMenuItem;
         private Panel panel1;
         private TextBox cursorPositionTextBox;
         private TextBox mainTextBox;

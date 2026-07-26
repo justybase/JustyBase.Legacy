@@ -1,30 +1,18 @@
 using AppBase.Common.JsonContext;
+using JustyBase.ImportExport.Export;
 using System.Data;
-using System.Globalization;
 using System.Text.Json;
 
 namespace AppBase.Services;
 
 /// <summary>
 /// Database- and UI-independent formatting used by text exports.
+/// CSV escaping/writing delegates to <see cref="CsvExportWriter"/>.
 /// </summary>
 internal static class TabularTextExporter
 {
     internal static string EscapeCsvField(string? value, char delimiter)
-    {
-        value ??= string.Empty;
-        bool requiresQuotes = value.Contains(delimiter)
-            || value.Contains('"')
-            || value.Contains('\r')
-            || value.Contains('\n');
-
-        if (!requiresQuotes)
-        {
-            return value;
-        }
-
-        return $"\"{value.Replace("\"", "\"\"")}\"";
-    }
+        => CsvExportWriter.Escape(value, delimiter);
 
     internal static long WriteCsv(
         TextWriter writer,
@@ -34,28 +22,11 @@ internal static class TabularTextExporter
         bool includeHeader,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(writer);
-        ArgumentNullException.ThrowIfNull(reader);
-        ValidateNewLine(newLine);
-
-        if (includeHeader)
-        {
-            WriteCsvRow(writer, Enumerable.Range(0, reader.FieldCount).Select(reader.GetName), delimiter, newLine);
-        }
-
-        long rowCount = 0;
-        while (reader.Read())
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            IEnumerable<string?> values = Enumerable.Range(0, reader.FieldCount)
-                .Select(index => reader.IsDBNull(index)
-                    ? null
-                    : Convert.ToString(reader.GetValue(index), CultureInfo.InvariantCulture));
-            WriteCsvRow(writer, values, delimiter, newLine);
-            rowCount++;
-        }
-
-        return rowCount;
+        return CsvExportWriter.WriteFromDataReader(
+            writer,
+            reader,
+            new ExportOptions(Delimiter: delimiter, NewLine: newLine, IncludeHeaders: includeHeader),
+            cancellationToken: cancellationToken);
     }
 
     internal static long WriteJson(
@@ -81,7 +52,7 @@ internal static class TabularTextExporter
             {
                 values[index] = reader.IsDBNull(index)
                     ? null
-                    : Convert.ToString(reader.GetValue(index), CultureInfo.InvariantCulture);
+                    : Convert.ToString(reader.GetValue(index), System.Globalization.CultureInfo.InvariantCulture);
             }
 
             writer.Write(JsonSerializer.Serialize(values, MyJsonContextStringArray.Default.StringArray));
@@ -90,33 +61,5 @@ internal static class TabularTextExporter
         writer.Write(']');
 
         return rowCount;
-    }
-
-    private static void WriteCsvRow(
-        TextWriter writer,
-        IEnumerable<string?> values,
-        char delimiter,
-        string newLine)
-    {
-        bool first = true;
-        foreach (string? value in values)
-        {
-            if (!first)
-            {
-                writer.Write(delimiter);
-            }
-
-            writer.Write(EscapeCsvField(value, delimiter));
-            first = false;
-        }
-        writer.Write(newLine);
-    }
-
-    private static void ValidateNewLine(string newLine)
-    {
-        if (newLine is not ("\r" or "\n" or "\r\n"))
-        {
-            throw new ArgumentException("Newline must be CR, LF, or CRLF.", nameof(newLine));
-        }
     }
 }

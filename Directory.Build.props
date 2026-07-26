@@ -4,7 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <NoWarn>$(NoWarn);WFO1000</NoWarn>
-    <Version>1.0.0.1</Version>
+    <Version>1.0.0.2</Version>
     <Authors>Krzysztof Duśko</Authors>
     <PackageLicenseExpression>LGPL-3.0-or-later</PackageLicenseExpression>
     <Deterministic>true</Deterministic>
@@ -25,11 +25,15 @@
     <JustyBaseLocalNetezzaSqlParserProject>$(JustyBaseLibrariesRoot)JustyBase.NetezzaSql\JustyBase.NetezzaSqlParser.csproj</JustyBaseLocalNetezzaSqlParserProject>
     <JustyBaseLocalNetezzaDdlProject>$(JustyBaseLibrariesRoot)JustyBase.NetezzaSql\JustyBase.NetezzaDdl\JustyBase.NetezzaDdl.csproj</JustyBaseLocalNetezzaDdlProject>
     <JustyBaseLocalNetezzaCatalogSqlProject>$(JustyBaseLibrariesRoot)JustyBase.NetezzaSql\JustyBase.NetezzaCatalogSql\JustyBase.NetezzaCatalogSql.csproj</JustyBaseLocalNetezzaCatalogSqlProject>
+    <JustyBaseLocalCoreProject>$(JustyBaseLibrariesRoot)JustyBase.NetezzaSql\JustyBase.Core\JustyBase.Core.csproj</JustyBaseLocalCoreProject>
+    <JustyBaseLocalImportExportProject>$(JustyBaseLibrariesRoot)JustyBase.NetezzaSql\JustyBase.ImportExport\JustyBase.ImportExport.csproj</JustyBaseLocalImportExportProject>
     <UseLocalJustyBaseLibraries Condition="'$(UseLocalJustyBaseLibraries)' == ''
       and Exists('$(JustyBaseLocalNetezzaProject)')
       and Exists('$(JustyBaseLocalNetezzaSqlParserProject)')
       and Exists('$(JustyBaseLocalNetezzaDdlProject)')
-      and Exists('$(JustyBaseLocalNetezzaCatalogSqlProject)')">true</UseLocalJustyBaseLibraries>
+      and Exists('$(JustyBaseLocalNetezzaCatalogSqlProject)')
+      and Exists('$(JustyBaseLocalCoreProject)')
+      and Exists('$(JustyBaseLocalImportExportProject)')">true</UseLocalJustyBaseLibraries>
     <UseLocalJustyBaseLibraries Condition="'$(UseLocalJustyBaseLibraries)' == ''">false</UseLocalJustyBaseLibraries>
 
     <!-- NuGet path: always take newest published (incl. preview). Pin via -p:JustyBaseNetezzaLibsPackageVersion=0.2.0-preview.6 -->

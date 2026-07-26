@@ -16,7 +16,10 @@
     <ProjectReference Include="..\JustData.Application\JustData.Application.csproj" />
     <ProjectReference Include="..\JustData.ViewModels\JustData.ViewModels.csproj" />
   </ItemGroup>
-  <ItemGroup>
+  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' == 'true'">
+    <ProjectReference Include="$(JustyBaseLocalNetezzaDdlProject)" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' != 'true'">
     <PackageReference Include="JustyBase.NetezzaDdl" />
   </ItemGroup>
   <ItemGroup>
@@ -33,9 +36,6 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Update="CreateSequenceNz.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Update="CsvFastImport.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Update="CustomHint.cs">

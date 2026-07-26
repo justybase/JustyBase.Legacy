@@ -374,21 +374,57 @@ namespace JustyBaseLegacy.UI
                 return query;
 
             var result = await _specialCommandService.TryHandleAsync(query);
-            if (result.WasHandled)
-                return result.ReplacementSql ?? query;
+            if (!result.WasHandled)
+                return query;
 
-            return query;
+            if (result.SleepMilliseconds is int sleepMs)
+            {
+                await Task.Delay(sleepMs);
+                return string.Empty;
+            }
+
+            if (result.MaxRows is int maxRows)
+            {
+                _applicationSettingsContext.Config.ResultRowsLimit = maxRows;
+                return string.Empty;
+            }
+
+            return result.ReplacementSql ?? query;
         }
-
-        private static readonly Regex _rxSleep = RegexSleep();
-        private static readonly Regex _rxMaxRows = RegexMaxRows();
-        private static readonly Regex _rxEcho = RegexEcho();
-        private static readonly Regex _rxEchoFile = RegexEchoFile();
 
         private async Task<bool> DoSpecialTask(FastColoredTextBox fctb, string cmd, ISqlExecutionLog log, Stopwatch st, string connectionName = null)
         {
-            string NzConnString = "";
+            // Shared special-command path (sleep / max_rows / echo / directories helpers).
+            if (cmd.Length < 120)
+            {
+                var special = await _specialCommandService.TryHandleAsync(cmd);
+                if (special.WasHandled)
+                {
+                    if (special.SleepMilliseconds is int sleepMs)
+                    {
+                        log?.AppendEntry(DateTime.Now, st.Elapsed.TotalSeconds.ToString("F1"), SelectedConnectionName, SelectedDatabase, "sleep", cmd);
+                        await Task.Delay(sleepMs);
+                        return true;
+                    }
 
+                    if (special.MaxRows is int maxRows)
+                    {
+                        log?.AppendEntry(DateTime.Now, st.Elapsed.TotalSeconds.ToString("F1"), SelectedConnectionName, SelectedDatabase, "max rows", cmd);
+                        _applicationSettingsContext.Config.ResultRowsLimit = maxRows;
+                        return true;
+                    }
+
+                    if (special.ReplacementSql is not null
+                        && special.ReplacementSql.StartsWith("SELECT '", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Echo / directory helpers already applied side effects; log and stop.
+                        log?.AppendEntry(DateTime.Now, st.Elapsed.TotalSeconds.ToString("F1"), SelectedConnectionName, SelectedDatabase, "special", cmd);
+                        return true;
+                    }
+                }
+            }
+
+            string NzConnString = "";
 
             if (TabConnectionCache.Default.TryGet(fctb, out var connectionData))
             {
@@ -430,41 +466,6 @@ namespace JustyBaseLegacy.UI
                     if (_connectionSessions.TryGetValue(SelectedConnectionName, out var gdbForExport))
                         gdbForExport.DoCsvOrXlsxExport(cmd, log, st);
                 });
-                return true;
-            }
-            else if (_rxSleep.IsMatch(cmd))
-            {
-                log?.AppendEntry(DateTime.Now, st.Elapsed.TotalSeconds.ToString("F1"), SelectedConnectionName, SelectedDatabase, "sleep", cmd);
-
-                var m = _rxSleep.Match(cmd);
-                await Task.Delay(int.Parse(m.Groups["nums"].Value));
-                return true;
-            }
-            else if (_rxMaxRows.IsMatch(cmd))
-            {
-                var m = _rxMaxRows.Match(cmd);
-                log?.AppendEntry(DateTime.Now, st.Elapsed.TotalSeconds.ToString("F1"), SelectedConnectionName, SelectedDatabase, "max rows", cmd);
-                _applicationSettingsContext.Config.ResultRowsLimit = int.Parse(m.Groups["nums"].Value);
-                return true;
-            }
-            else if (_rxEcho.IsMatch(cmd))
-            {
-                var m = _rxEcho.Match(cmd);
-                log?.AppendEntry(DateTime.Now, st.Elapsed.TotalSeconds.ToString("F1"), SelectedConnectionName, SelectedDatabase, m.Groups["msg"].Value, cmd);
-                return true;
-            }
-            else if (_rxEchoFile.IsMatch(cmd))
-            {
-                var m = _rxEchoFile.Match(cmd);
-                string message = m.Groups["msg"].Value;
-                string filePath = m.Groups["filePath"].Value;
-
-                if (!string.IsNullOrWhiteSpace(filePath))
-                {
-                    using var sw = File.AppendText(filePath);
-                    sw.WriteLine(message);
-                }
-
                 return true;
             }
             else if (cmd.Trim() == "___window iconify")

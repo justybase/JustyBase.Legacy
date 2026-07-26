@@ -171,7 +171,9 @@ namespace JustyBaseLegacy.UI
 
         private void btGroom_Click(object sender, EventArgs e)
         {
-            doAction($"GROOM TABLE {_objectName} VERSIONS; GROOM TABLE {_objectName} RECLAIM BACKUPSET NONE;");
+            var versions = JustyBase.NetezzaDdl.NetezzaMaintenanceSql.BuildGroom(_objectName, "VERSIONS", "NONE");
+            var records = JustyBase.NetezzaDdl.NetezzaMaintenanceSql.BuildGroom(_objectName, "RECORDS ALL", "NONE");
+            doAction($"{versions} {records}");
         }
 
         private void jumpToBt_Click(object sender, EventArgs e) //go to

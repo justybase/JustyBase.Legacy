@@ -24,6 +24,29 @@ public sealed class SqlPreprocessingServiceTests
     }
 
     [Fact]
+    public async Task PreprocessAsync_canonicalizes_sleep_outside_literals()
+    {
+        var service = new SqlPreprocessingService();
+        var request = CreateRequest("___sleep 100;\nSELECT 1;");
+
+        var result = await service.PreprocessAsync(request);
+
+        Assert.Contains("@sleep:100", result.ProcessedSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("___sleep", result.ProcessedSql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PreprocessAsync_does_not_rewrite_sleep_inside_string_literal()
+    {
+        var service = new SqlPreprocessingService();
+        var request = CreateRequest("SELECT '___sleep 99' AS note;");
+
+        var result = await service.PreprocessAsync(request);
+
+        Assert.Equal("SELECT '___sleep 99' AS note;", result.ProcessedSql);
+    }
+
+    [Fact]
     public async Task PreprocessAsync_null_sql_becomes_empty()
     {
         var service = new SqlPreprocessingService();

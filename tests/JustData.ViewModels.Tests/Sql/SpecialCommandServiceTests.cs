@@ -22,12 +22,15 @@ public sealed class SpecialCommandServiceTests
     {
         SpecialCommandResult sleep = await _service.TryHandleAsync("___SLEEP 250");
         SpecialCommandResult maxRows = await _service.TryHandleAsync("___max_rows 50");
+        SpecialCommandResult maxRowsCamel = await _service.TryHandleAsync("___maxRows 10000;");
 
         Assert.True(sleep.WasHandled);
         Assert.Equal(250, sleep.SleepMilliseconds);
         Assert.Null(sleep.ReplacementSql);
         Assert.True(maxRows.WasHandled);
         Assert.Equal(50, maxRows.MaxRows);
+        Assert.True(maxRowsCamel.WasHandled);
+        Assert.Equal(10000, maxRowsCamel.MaxRows);
     }
 
     [Fact]
@@ -40,6 +43,15 @@ public sealed class SpecialCommandServiceTests
     }
 
     [Fact]
+    public async Task Echo_unquoted_legacy_snippet_form_is_accepted()
+    {
+        SpecialCommandResult result = await _service.TryHandleAsync("___echo message;");
+
+        Assert.True(result.WasHandled);
+        Assert.Equal("SELECT 'message'", result.ReplacementSql);
+    }
+
+    [Fact]
     public async Task Echo_file_writes_message_and_returns_replacement()
     {
         string path = Path.Combine(Path.GetTempPath(), $"justdata-echo-{Guid.NewGuid():N}.txt");
@@ -47,6 +59,25 @@ public sealed class SpecialCommandServiceTests
         {
             SpecialCommandResult result = await _service.TryHandleAsync(
                 $"___echo_file \"hello\" \"{path}\"");
+
+            Assert.True(result.WasHandled);
+            Assert.Equal($"SELECT 'echoed to {path}'", result.ReplacementSql);
+            Assert.Equal($"hello{Environment.NewLine}", await File.ReadAllTextAsync(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task Echo_file_legacy_path_colon_message_form_is_accepted()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"justdata-echo-{Guid.NewGuid():N}.txt");
+        try
+        {
+            SpecialCommandResult result = await _service.TryHandleAsync(
+                $"___echoFile {path}:hello;");
 
             Assert.True(result.WasHandled);
             Assert.Equal($"SELECT 'echoed to {path}'", result.ReplacementSql);
@@ -81,5 +112,14 @@ public sealed class SpecialCommandServiceTests
             if (Directory.Exists(path))
                 Directory.Delete(path, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task Avalonia_sleep_directive_is_accepted()
+    {
+        SpecialCommandResult sleep = await _service.TryHandleAsync("@sleep: 120");
+
+        Assert.True(sleep.WasHandled);
+        Assert.Equal(120, sleep.SleepMilliseconds);
     }
 }

@@ -491,24 +491,5 @@ namespace JustyBaseLegacy.UI
                 ".xlsb" => ImportFormat.Xlsb,
                 _ => ImportFormat.Csv
             };
-
-        private void ImportCsvForceToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            if (_connectionSessions.TryGetValue(SelectedConnectionName, out IGeneralDb value) && value is INetezza)
-            {
-                (new CsvFastImport(
-                    new FastNetezzaCsvImport(),
-                    value.ConnectionString,
-                    o => _colorTheme.ColorForm(o),
-                    f => _uiHelperService.DoubleBufDateGridView(f),
-                    (o) => new NzConnection(o),
-                    _applicationSettingsContext.ConfigDirectory
-                    )).Show();
-            }
-            else
-            {
-                OtherUtils.OnlyNzMesage(this);
-            }
-        }
     }
 }
