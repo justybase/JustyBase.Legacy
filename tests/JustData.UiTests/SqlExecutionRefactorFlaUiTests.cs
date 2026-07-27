@@ -17,6 +17,47 @@ public sealed class SqlExecutionRefactorFlaUiTests
     [Fact]
     [Trait("Category", "UI")]
     [Trait("Category", "SqlExecutionRefactor")]
+    [Trait("Category", "RefactorPhaseSpot")]
+    public void F5_on_default_tab_runs_via_document_pipeline()
+    {
+        UiTestHelpers.EnsureTestoweProfile();
+        using UiSession session = UiTestHelpers.LaunchAndLogin();
+        OpenResultsDockWindow(session);
+        AutomationElement editor = FindSqlEditor(session.MainWindow);
+
+        UiTestHelpers.SetSqlEditorText(editor, "select 1 as id;");
+        SelectAll(editor);
+        Keyboard.Press(VirtualKeyShort.F5);
+
+        WaitForLog(session.MainWindow, "SQL execution started.");
+        WaitForVisibleResultGrid(session);
+        AssertResultsTabsStartWithDiagnosticsAndLog(session.MainWindow);
+    }
+
+    [Fact]
+    [Trait("Category", "UI")]
+    [Trait("Category", "SqlExecutionRefactor")]
+    [Trait("Category", "RefactorPhaseSpot")]
+    public void RunSQL_after_new_tab_without_orphan_id()
+    {
+        UiTestHelpers.EnsureTestoweProfile();
+        using UiSession session = UiTestHelpers.LaunchAndLogin();
+        OpenResultsDockWindow(session);
+        Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_N);
+        Thread.Sleep(300);
+        AutomationElement editor = FindSqlEditor(session.MainWindow);
+
+        UiTestHelpers.SetSqlEditorText(editor, "select 1 as id;");
+        SelectAll(editor);
+        Keyboard.Press(VirtualKeyShort.F5);
+
+        WaitForVisibleResultGrid(session);
+    }
+
+    [Fact]
+    [Trait("Category", "UI")]
+    [Trait("Category", "SqlExecutionRefactor")]
+    [Trait("Category", "RefactorPhaseSpot")]
     public void Selected_select_creates_log_before_result_and_records_elapsed_time()
     {
         UiTestHelpers.EnsureTestoweProfile();
@@ -85,6 +126,7 @@ public sealed class SqlExecutionRefactorFlaUiTests
     [Fact]
     [Trait("Category", "UI")]
     [Trait("Category", "SqlExecutionRefactor")]
+    [Trait("Category", "RefactorPhaseSpot")]
     public void Keep_connection_open_preserves_a_temporary_table_across_two_F5_runs()
     {
         UiTestHelpers.EnsureTestoweProfile();
@@ -119,6 +161,7 @@ public sealed class SqlExecutionRefactorFlaUiTests
     [Fact]
     [Trait("Category", "UI")]
     [Trait("Category", "SqlExecutionRefactor")]
+    [Trait("Category", "RefactorPhaseSpot")]
     public void Continue_on_error_logs_the_failed_statement_and_continues_to_the_next_one()
     {
         UiTestHelpers.EnsureTestoweProfile();
@@ -144,6 +187,68 @@ public sealed class SqlExecutionRefactorFlaUiTests
         {
             if (restoreContinueOnErrorToggle)
                 ToggleToolStripButton(session.MainWindow, "tsbContinueOnError", "Continue On Error");
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "UI")]
+    [Trait("Category", "SqlExecutionRefactor")]
+    [Trait("Category", "RefactorPhaseSpot")]
+    public void Closing_document_clears_result_tabs()
+    {
+        UiTestHelpers.EnsureTestoweProfile();
+        using UiSession session = UiTestHelpers.LaunchAndLogin();
+        OpenResultsDockWindow(session);
+
+        Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_N);
+        Thread.Sleep(300);
+        AutomationElement editor = FindSqlEditor(session.MainWindow);
+
+        UiTestHelpers.SetSqlEditorText(editor, "select 1 as id;");
+        SelectAll(editor);
+        Keyboard.Press(VirtualKeyShort.F5);
+
+        WaitForVisibleResultGrid(session);
+        Assert.NotEmpty(FindResultTabs(session.MainWindow));
+
+        session.MainWindow.Focus();
+        Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_W);
+        DismissUnsavedCloseDialogIfPresent(session);
+        Thread.Sleep(500);
+
+        UiTestHelpers.WaitFor(
+            () => FindResultTabs(session.MainWindow),
+            "cleared SQL result tabs after closing the document",
+            tabs => tabs.Count == 0,
+            timeout: TimeSpan.FromSeconds(30));
+    }
+
+    private static void DismissUnsavedCloseDialogIfPresent(UiSession session)
+    {
+        try
+        {
+            AutomationElement? closeWithoutSaving = UiTestHelpers.WaitFor(
+                () =>
+                {
+                    foreach (Window window in session.Application.GetAllTopLevelWindows(session.Automation))
+                    {
+                        AutomationElement? button =
+                            window.FindFirstDescendant(cf => cf.ByName("close without saving"))
+                            ?? window.FindFirstDescendant(cf => cf.ByAutomationId("close without saving"));
+                        if (button is not null)
+                            return button;
+                    }
+
+                    return null;
+                },
+                "the unsaved-tab close dialog",
+                timeout: TimeSpan.FromSeconds(5));
+            closeWithoutSaving.AsButton()?.Invoke();
+            Thread.Sleep(200);
+        }
+        catch (TimeoutException)
+        {
+            // Tab may already be saved / empty enough that no dialog appears.
         }
     }
 
@@ -266,6 +371,41 @@ public sealed class SqlExecutionRefactorFlaUiTests
                 ?? mainWindow.FindFirstDescendant(cf => cf.ByName(displayName)),
             $"the {displayName} SQL toolbar button");
 
+    private static string ReadLog(Window mainWindow)
+    {
+        SelectLogTab(mainWindow);
+
+        try
+        {
+            AutomationElement? logControl = TryFindLogControl(mainWindow);
+            if (logControl is not null && !string.IsNullOrWhiteSpace(logControl.Name))
+                return logControl.Name;
+
+            AutomationElement? logText = TryFindLogTextEditor(mainWindow);
+            if (logText is not null && !string.IsNullOrWhiteSpace(logText.Name))
+                return logText.Name;
+
+            if (logText is not null)
+            {
+                // FastColoredTextBox accepts Ctrl+A/C only after a physical focus
+                // transition to its editing surface.
+                logText.Click();
+                Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_A);
+                Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_C);
+                Thread.Sleep(150);
+                string clipboard = UiTestHelpers.ReadClipboardText();
+                if (!string.IsNullOrWhiteSpace(clipboard))
+                    return clipboard;
+            }
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            // DockSuite can recreate log handles while an execution completes.
+        }
+
+        return string.Empty;
+    }
+
     private static void WaitForLog(Window mainWindow, string expectedText)
     {
         string lastLog = string.Empty;
@@ -276,7 +416,7 @@ public sealed class SqlExecutionRefactorFlaUiTests
                 {
                     lastLog = ReadLog(mainWindow);
                     return lastLog.Contains(expectedText, StringComparison.Ordinal)
-                        ? FindLogTextEditor(mainWindow)
+                        ? expectedText
                         : null;
                 },
                 $"Log entry '{expectedText}'",
@@ -293,36 +433,11 @@ public sealed class SqlExecutionRefactorFlaUiTests
         }
     }
 
-    private static string ReadLog(Window mainWindow)
-    {
-        SelectLogTab(mainWindow);
-        AutomationElement logControl = FindLogControl(mainWindow);
-        if (!string.IsNullOrWhiteSpace(logControl.Name))
-            return logControl.Name;
+    private static AutomationElement? TryFindLogTextEditor(Window mainWindow) =>
+        mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("sqlExecutionLogText"));
 
-        AutomationElement log = FindLogTextEditor(mainWindow);
-        if (!string.IsNullOrWhiteSpace(log.Name))
-            return log.Name;
-
-        // FastColoredTextBox accepts Ctrl+A/C only after a physical focus
-        // transition to its editing surface. Click mirrors the actual user
-        // interaction and is more reliable than the UIA Focus request here.
-        log.Click();
-        Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_A);
-        Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_C);
-        Thread.Sleep(150);
-        return UiTestHelpers.ReadClipboardText();
-    }
-
-    private static AutomationElement FindLogTextEditor(Window mainWindow) =>
-        UiTestHelpers.WaitFor(
-            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("sqlExecutionLogText")),
-            "the SQL execution log");
-
-    private static AutomationElement FindLogControl(Window mainWindow) =>
-        UiTestHelpers.WaitFor(
-            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("sqlExecutionLog")),
-            "the SQL execution log container");
+    private static AutomationElement? TryFindLogControl(Window mainWindow) =>
+        mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("sqlExecutionLog"));
 
     private static void SelectFirstResultTab(Window mainWindow)
     {

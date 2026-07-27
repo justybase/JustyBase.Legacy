@@ -187,6 +187,29 @@ public sealed class SqlExecutionViewModel : ObservableObject, IDisposable
         await _uiDispatcher.InvokeOnUiAsync(BeginRun, linkedCancellation.Token);
         SqlExecutionOutcome outcome = SqlExecutionOutcome.Failed;
         bool completionReceived = false;
+        // After the first ~500 rows drive the preview grid, coalesce further
+        // row batches and marshal them to the UI once (before the next
+        // non-Rows event / Completed) instead of ~N/500 UI hops.
+        const int previewRowThreshold = 500;
+        bool rowPreviewPublished = false;
+        var coalescedRows = new List<IReadOnlyList<object?>>();
+        string? coalescedResultSetId = null;
+        int coalescedStatementIndex = -1;
+        async Task FlushCoalescedRowsAsync(CancellationToken token)
+        {
+            if (coalescedRows.Count == 0)
+                return;
+
+            SqlExecutionEvent flush = SqlExecutionEvent.RowsBatch(
+                _documentId,
+                coalescedRows.ToArray(),
+                coalescedStatementIndex,
+                coalescedResultSetId);
+            coalescedRows.Clear();
+            await _uiDispatcher.InvokeOnUiAsync(
+                () => Apply(flush),
+                token);
+        }
         try
         {
             await foreach (SqlExecutionEvent executionEvent in _useCase
@@ -196,6 +219,44 @@ public sealed class SqlExecutionViewModel : ObservableObject, IDisposable
             {
                 if (executionEvent.DocumentId != _documentId)
                     continue;
+
+                if (executionEvent.Kind == SqlExecutionEventKind.Started)
+                {
+                    rowPreviewPublished = false;
+                    coalescedRows.Clear();
+                    coalescedResultSetId = null;
+                    coalescedStatementIndex = -1;
+                }
+
+                if (executionEvent.Kind == SqlExecutionEventKind.Rows)
+                {
+                    if (!rowPreviewPublished)
+                    {
+                        await _uiDispatcher.InvokeOnUiAsync(
+                            () => Apply(executionEvent),
+                            linkedCancellation.Token);
+                        if (RowCount >= previewRowThreshold)
+                            rowPreviewPublished = true;
+                    }
+                    else if (executionEvent.Rows is { Count: > 0 })
+                    {
+                        coalescedRows.AddRange(executionEvent.Rows);
+                        coalescedResultSetId = executionEvent.ResultSetId ?? coalescedResultSetId;
+                        if (executionEvent.StatementIndex >= 0)
+                            coalescedStatementIndex = executionEvent.StatementIndex;
+                    }
+                    else if (executionEvent.RowCount > 0)
+                    {
+                        // Metadata-only row observation — still apply so counters move.
+                        await _uiDispatcher.InvokeOnUiAsync(
+                            () => Apply(executionEvent),
+                            linkedCancellation.Token);
+                    }
+
+                    continue;
+                }
+
+                await FlushCoalescedRowsAsync(linkedCancellation.Token);
 
                 await _uiDispatcher.InvokeOnUiAsync(
                     () => Apply(executionEvent),
@@ -209,9 +270,13 @@ public sealed class SqlExecutionViewModel : ObservableObject, IDisposable
             }
 
             if (linkedCancellation.IsCancellationRequested)
+            {
+                await FlushCoalescedRowsAsync(CancellationToken.None);
                 outcome = SqlExecutionOutcome.Cancelled;
+            }
             else if (!completionReceived)
             {
+                await FlushCoalescedRowsAsync(CancellationToken.None);
                 outcome = SqlExecutionOutcome.Failed;
                 await _uiDispatcher.InvokeOnUiAsync(
                     () => Apply(new SqlExecutionEvent(SqlExecutionEventKind.Diagnostic, _documentId)
@@ -238,6 +303,7 @@ public sealed class SqlExecutionViewModel : ObservableObject, IDisposable
         }
         catch (OperationCanceledException) when (linkedCancellation.IsCancellationRequested)
         {
+            await FlushCoalescedRowsAsync(CancellationToken.None);
             const SqlExecutionOutcome cancelledOutcome = SqlExecutionOutcome.Cancelled;
             await _uiDispatcher.InvokeOnUiAsync(() =>
             {
@@ -248,6 +314,7 @@ public sealed class SqlExecutionViewModel : ObservableObject, IDisposable
         }
         catch (Exception exception)
         {
+            await FlushCoalescedRowsAsync(CancellationToken.None);
             // Keep provider exception details out of the VM state. Adapters
             // can publish a redacted diagnostic when a user-facing message is
             // appropriate.

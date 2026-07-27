@@ -47,6 +47,7 @@ using System.Xml;
 using AppBase.Services.Sql;
 using JustData.Application.Editor;
 using JustData.Application.Sql;
+using JustData.ViewModels.Editor;
 using JustyBaseLegacy.UI.Sql;
 
 namespace JustyBaseLegacy.UI
@@ -137,121 +138,6 @@ namespace JustyBaseLegacy.UI
             private readonly Func<IReadOnlyDictionary<string, string>, CancellationToken, Task<IReadOnlyDictionary<string, string>?>> _handler;
             public PromptAdapter(Func<IReadOnlyDictionary<string, string>, CancellationToken, Task<IReadOnlyDictionary<string, string>?>> handler) => _handler = handler;
             public Task<IReadOnlyDictionary<string, string>?> PromptAsync(IReadOnlyDictionary<string, string> unresolved, CancellationToken ct) => _handler(unresolved, ct);
-        }
-
-        private string ReplaceSessionVariables(string tabName, string query)
-        {
-            foreach (var item in _sessionVariableRuntimeContext.GetSessionVariables(tabName)
-                .OrderByDescending(o => o.Key.Length))
-            {
-                if (query.Contains(item.Key, StringComparison.OrdinalIgnoreCase))
-                {
-                    query = query.Replace(item.Key, item.Value, StringComparison.OrdinalIgnoreCase);
-                }
-            }
-
-            return query;
-        }
-
-        private object Evaluate(string expression)
-        {
-            object result = expression;
-            try
-            {
-                result = new DataTable().Compute(expression, "");
-            }
-            catch (Exception exception)
-            {
-                Trace.WriteLine($"Expression evaluation failed: {exception.GetType().Name}");
-            }
-
-            return result;
-        }
-
-        private async ValueTask<string> ReplaceAndSetSessionVariables(string queryOrg, string tabName, DbConnection conn = null)
-        {
-
-            string query = queryOrg;
-
-            var m1 = _rxSessionVariableDefine.Match(query);
-            var m2 = _rxGlobalVariableDefine.Match(query);
-
-            // to do evaluate
-            if (m1.Success || m2.Success)
-            {
-                Match m = null;
-                if (m1.Success)
-                {
-                    m = m1;
-                }
-                else
-                {
-                    m = m2;
-                }
-
-                string variableValue = m.Groups["sessionValue"].Value;
-                string val = _sessionVariableRuntimeContext.ReplaceGlobalVariables(ReplaceSessionVariables(tabName, variableValue));
-                object val2 = val;
-                try
-                {
-                    if (!val.StartsWith("SQL_"))
-                    {
-                        val2 = Evaluate(val);
-                    }
-                    else if (conn is not null)
-                    {
-                        if (val.StartsWith("SQL_RESULT["))
-                        {
-                            string sql = val["SQL_RESULT[".Length..^1];
-                            using (DbCommand cmd = conn.CreateCommand())
-                            {
-                                cmd.CommandText = sql;
-                                val2 = await Task.Run(() => cmd.ExecuteScalar());
-                            }
-                        }
-                        else if (val.StartsWith("SQL_RECORDS_AFFECTED["))
-                        {
-                            string sql = val["SQL_RECORDS_AFFECTED[".Length..^1];
-                            using (DbCommand cmd = conn.CreateCommand())
-                            {
-                                cmd.CommandText = sql;
-                                val2 = await Task.Run(() => cmd.ExecuteNonQuery());
-                            }
-                        }
-                    }
-
-                }
-                catch (Exception ex)
-                {
-                    _loggerLoud.MessageBox_Show(this, ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-
-                }
-
-                string name = m.Groups["sessionVar"].Value;
-
-                if (m1.Success)
-                {
-                    _sessionVariableRuntimeContext.SetSessionVariable(tabName, name, val2?.ToString());
-                    AddVariable(tabName, name, val2?.ToString());
-                }
-                else if (m2.Success)
-                {
-                    _sessionVariableRuntimeContext.SetGlobalVariable(name, val2?.ToString());
-                    AddVariable(tabName, null, null);
-                }
-                m = m.NextMatch();
-                query = "";
-            }
-            else
-            {
-                if (_sessionVariableRuntimeContext.GetSessionVariableCount(tabName) > 0)
-                {
-                    query = ReplaceSessionVariables(tabName, query);
-                }
-                query = _sessionVariableRuntimeContext.ReplaceGlobalVariables(query);
-            }
-
-            return query;
         }
 
         private TabPagePicture PrepareTab(SplitContainer container = null, bool enableDisable = false, bool isLogTab = false)
@@ -372,119 +258,6 @@ namespace JustyBaseLegacy.UI
         }
         private string HistoryDatFile => $"{_applicationSettingsContext.ConfigDirectory}\\history.dat";
 
-        private async Task<string> SpecialCommandsAsync(string query)
-        {
-            if (query.Length >= 120)
-                return query;
-
-            var result = await _specialCommandService.TryHandleAsync(query);
-            if (!result.WasHandled)
-                return query;
-
-            if (result.SleepMilliseconds is int sleepMs)
-            {
-                await Task.Delay(sleepMs);
-                return string.Empty;
-            }
-
-            if (result.MaxRows is int maxRows)
-            {
-                _applicationSettingsContext.Config.ResultRowsLimit = maxRows;
-                return string.Empty;
-            }
-
-            return result.ReplacementSql ?? query;
-        }
-
-        private async Task<bool> DoSpecialTask(FastColoredTextBox fctb, string cmd, ISqlExecutionLog log, Stopwatch st, string connectionName = null)
-        {
-            // Shared special-command path (sleep / max_rows / echo / directories helpers).
-            if (cmd.Length < 120)
-            {
-                var special = await _specialCommandService.TryHandleAsync(cmd);
-                if (special.WasHandled)
-                {
-                    if (special.SleepMilliseconds is int sleepMs)
-                    {
-                        log?.AppendEntry(DateTime.Now, st.Elapsed.TotalSeconds.ToString("F1"), SelectedConnectionName, SelectedDatabase, "sleep", cmd);
-                        await Task.Delay(sleepMs);
-                        return true;
-                    }
-
-                    if (special.MaxRows is int maxRows)
-                    {
-                        log?.AppendEntry(DateTime.Now, st.Elapsed.TotalSeconds.ToString("F1"), SelectedConnectionName, SelectedDatabase, "max rows", cmd);
-                        _applicationSettingsContext.Config.ResultRowsLimit = maxRows;
-                        return true;
-                    }
-
-                    if (special.ReplacementSql is not null
-                        && special.ReplacementSql.StartsWith("SELECT '", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Echo / directory helpers already applied side effects; log and stop.
-                        log?.AppendEntry(DateTime.Now, st.Elapsed.TotalSeconds.ToString("F1"), SelectedConnectionName, SelectedDatabase, "special", cmd);
-                        return true;
-                    }
-                }
-            }
-
-            string NzConnString = "";
-
-            if (TabConnectionCache.Default.TryGet(fctb, out var connectionData))
-            {
-                if (_connectionSessions.TryGetValue(connectionData.ConnectionName, out var generalDb) && generalDb is INetezza)
-                {
-                    NzConnString = _generalDbService.ConnectionStringForNz(_applicationSettingsContext.Config.ConnectionTimeout, connectionData.ConnectionName, SelectedDatabase);
-                }
-            }
-            else
-            {
-                NzConnString = "";
-            }
-
-            if (ImportExportTasks.rxImportXlsxTxt.IsMatch(cmd))
-            {
-                if (connectionName != null)
-                {
-                    OtherUtils.OnlyNzMesage(this);
-
-                    return true;
-                }
-                await Task.Run(() => _importExportTasks.DoXlsxTxtImportFromCodeAsync(_applicationSettingsContext, NzConnString, cmd, _applicationSettingsContext.ConfigDirectory, _applicationSettingsContext.Config, log, st));
-                return true;
-            }
-            else if (InlineCommandPattern.Regex().IsMatch(cmd))
-            {
-                if (connectionName != null && !cmd.StartsWith("___run"))
-                {
-                    OtherUtils.OnlyNzMesage(this);
-                    return true;
-                }
-                await _inlineCommandRunner.DoInlineCommandAsync(NzConnString, cmd, log, st);
-                return true;
-            }
-            else if (_databaseRuntimeContext.RxExportCsvXlsx.IsMatch(cmd))
-            {
-                await Task.Run(() =>
-                {
-                    if (_connectionSessions.TryGetValue(SelectedConnectionName, out var gdbForExport))
-                        gdbForExport.DoCsvOrXlsxExport(cmd, log, st);
-                });
-                return true;
-            }
-            else if (cmd.Trim() == "___window iconify")
-            {
-                _windowManagementService.FlashWindowEx(this);
-                return true;
-            }
-            else if (cmd.Trim() == "___window restore")
-            {
-                WindowState = FormWindowState.Normal;
-                return true;
-            }
-            return false;
-        }
-
         private async void FormatSQL_Click(object sender, EventArgs e)
         {
             try
@@ -533,27 +306,13 @@ namespace JustyBaseLegacy.UI
 
         private readonly Lock _sync = new Lock();
 
-        private bool RiskySqlCommand(string query, bool nz = false)
+        private bool RiskySqlCommand(string query, string? driverName = null)
         {
-            if (!_applicationSettingsContext.Config.DoNotWarnFullUpdateDelete)
-            {
-                string? driver = nz ? "NetezzaSQL" : null;
-                var risks = _sqlRiskAnalysisService.Analyze(query, driver);
-                foreach (var risk in risks)
-                {
-                    string caption = risk.Kind switch
-                    {
-                        SqlRiskKind.UnsafeUpdateDelete => "Update/delete warning",
-                        SqlRiskKind.MissingDistribute => "Create table warning",
-                        SqlRiskKind.SelectInto => "SELECT INTO warning",
-                        _ => "SQL risk warning"
-                    };
-                    var r = _loggerLoud.MessageBox_Show(this, risk.Message, caption, MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
-                    if (r == DialogResult.Cancel)
-                        return false;
-                }
-            }
-            return true;
+            return _sqlRiskGate.AllowExecution(
+                query,
+                driverName,
+                _applicationSettingsContext.Config.DoNotWarnFullUpdateDelete,
+                new WinFormsSqlRiskConfirmation(this, _loggerLoud));
         }
 
         private void RestyleCurrentTb()
@@ -643,50 +402,76 @@ namespace JustyBaseLegacy.UI
             }
         }
 
-        private void FinalizeSqlRun(TabPage currentMainTab, FastColoredTextBox fctbFromStart, TabPagePicture currentResultsTab)
+        private EditorDocumentViewModel? EnsureWorkspaceDocument(FastColoredTextBox editor)
         {
-            if (InvokeRequired)
+            return EditorWorkspaceDocumentEnsure.GetOrCreateByEditorKey(
+                _editorWorkspaceViewModel,
+                _documentIdsByEditor,
+                editor,
+                () => CreateAndAttachWorkspaceDocument(editor));
+        }
+
+        /// <summary>
+        /// Creates a workspace document and mirrors its id onto panel + DockSuite
+        /// projections. Workspace + <c>_documentIdsByEditor</c> remain the SSOT.
+        /// </summary>
+        private EditorDocumentViewModel? CreateAndAttachWorkspaceDocument(FastColoredTextBox editor)
+        {
+            if (!TryGetTabAndPanelForEditor(editor, out TabPage? ownerTab, out SQLUpperPanel? panel)
+                || ownerTab is null
+                || panel is null)
             {
-                BeginInvoke(() => FinalizeSqlRun(currentMainTab, fctbFromStart, currentResultsTab));
-                return;
+                return null;
             }
 
-            if (ActiveEditorTabPage != currentMainTab)
+            var editorDocument = _editorWorkspaceViewModel.AddDocumentFromView(
+                ownerTab.Text,
+                editor.Text,
+                (ownerTab.Tag as TabPageMainTag)?.Filename,
+                panel.SelectedConnectionName,
+                panel.SelectedDatabase,
+                panel.KeepConnectionOpen,
+                panel.ContinueOnError);
+            editorDocument.DiagnosticsChanged += OnDocumentDiagnosticsChanged;
+            editorDocument.SqlExecution.EventReceived += _sqlResultPresenter.Handle;
+            editorDocument.SqlExecution.EventReceived += PresentProviderExecutionLog;
+            _sqlResultPresenter.Attach(editorDocument.SqlExecution);
+
+            _documentIdsByTab[ownerTab] = editorDocument.Id;
+            _documentIdsByEditor[editor] = editorDocument.Id;
+            panel.SetDocumentId(editorDocument.Id);
+            if (_tabManager is DockSuiteTabManager dockSuiteTabManager)
+                dockSuiteTabManager.SetDocumentId(ownerTab, editorDocument.Id);
+            if (_tabManager.GetSplitContainerForTab(ownerTab) is { } splitContainer)
+                EnsureResultsTabControl(splitContainer);
+            RegisterDiagnosticsTarget(editorDocument.Id, editor);
+            return editorDocument;
+        }
+
+        /// <summary>Resolves the tab/panel that owns <paramref name="editor"/> (not merely the active tab).</summary>
+        private bool TryGetTabAndPanelForEditor(
+            FastColoredTextBox editor,
+            out TabPage? ownerTab,
+            out SQLUpperPanel? panel)
+        {
+            ownerTab = null;
+            panel = null;
+            if (editor is null)
+                return false;
+
+            foreach (TabPage candidate in EditorTabPages)
             {
-                (currentMainTab as TabPagePicture).FinishedInBackground = true;
-                _tabControlMain.Invalidate();
-                System.Media.SystemSounds.Hand.Play();
+                if (!ReferenceEquals(_tabManager.GetEditor(candidate), editor))
+                    continue;
+                if (_tabManager.GetEditorPanel(candidate) is not SQLUpperPanel ownerPanel)
+                    continue;
+
+                ownerTab = candidate;
+                panel = ownerPanel;
+                return true;
             }
 
-            var tab = currentResultsTab.Parent as TabControl;
-            if (tab is not null)
-            {
-                // On failure keep the Log tab selected so the error row stays visible.
-                // Selecting the last tab used to jump to an empty Result created before Read() failed.
-                if (LegacyNetezzaResultFetchSession.PreferLogTab(currentResultsTab.IsSuccess)
-                    && !currentResultsTab.IsDisposed)
-                    tab.SelectedTab = currentResultsTab;
-                else
-                    tab.SelectedIndex = tab.TabCount - 1;
-                UnPin(currentResultsTab, tab);
-            }
-
-            if (WindowState == FormWindowState.Minimized)
-            {
-                System.Media.SystemSounds.Hand.Play();
-            }
-
-            _windowManagementService.FlashWindowEx(this);
-
-            // Results are displayed in a separate dock window. Keep the SQL
-            // editor active so the user can correct and run another statement
-            // immediately. Do not steal focus from a different active document
-            // when this query was completed in the background.
-            if (fctbFromStart is not null && !fctbFromStart.IsDisposed
-                && _tabManager.CurrentEditor == fctbFromStart)
-            {
-                fctbFromStart.Focus();
-            }
+            return false;
         }
 
         public async Task RunSQL(int mode = 0, ExportOptions exportOption = ExportOptions.grid, bool explain = false, string filePath = null)
@@ -695,150 +480,108 @@ namespace JustyBaseLegacy.UI
             if (editor is null)
                 return;
 
-            if (_documentIdsByEditor.TryGetValue(editor, out var documentId))
+            EditorDocumentViewModel? document = EnsureWorkspaceDocument(editor);
+            if (document is null)
             {
-                var document = _editorWorkspaceViewModel.Documents
-                    .FirstOrDefault(item => item.Id == documentId);
-                document?.UpdateTextFromView(editor.Text);
+                _loggerLoud.MessageBox_Show(
+                    this,
+                    "SQL execution requires an editor document.",
+                    "SQL",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
 
-                if (document is not null)
+            document.UpdateTextFromView(editor.Text);
+
+            // Repeated keyboard input while a document is running is a
+            // no-op at the view boundary. The VM still rejects races
+            // between programmatic callers, but an async WinForms key
+            // handler must never surface that rejection as an
+            // unhandled application-closing exception.
+            if (document.SqlExecution.IsBusy)
+                return;
+
+            // The panel is an adapter. Capture its current execution
+            // options before building the immutable request so toggles
+            // such as Keep connection open select the intended route.
+            if (_tabManager.CurrentEditorPanel is { } panel)
+            {
+                document.ConnectionName = panel.SelectedConnectionName;
+                document.DatabaseName = panel.SelectedDatabase;
+                document.KeepConnectionOpen = panel.KeepConnectionOpen;
+                document.ContinueOnError = panel.ContinueOnError;
+            }
+
+            JustData.Application.Sql.SqlExecutionMode executionMode = mode switch
+            {
+                4 => JustData.Application.Sql.SqlExecutionMode.RunToCursor,
+                1 => JustData.Application.Sql.SqlExecutionMode.SingleBatch,
+                _ => JustData.Application.Sql.SqlExecutionMode.Selection
+            };
+            JustData.Application.Sql.SqlOutputMode outputMode = exportOption switch
+            {
+                ExportOptions.csv => JustData.Application.Sql.SqlOutputMode.Csv,
+                ExportOptions.xlsx => JustData.Application.Sql.SqlOutputMode.Xlsx,
+                ExportOptions.xlsb => JustData.Application.Sql.SqlOutputMode.Xlsb,
+                ExportOptions.onlyLog => JustData.Application.Sql.SqlOutputMode.LogOnly,
+                _ => JustData.Application.Sql.SqlOutputMode.Grid
+            };
+            if (outputMode is JustData.Application.Sql.SqlOutputMode.Csv
+                or JustData.Application.Sql.SqlOutputMode.Xlsx
+                or JustData.Application.Sql.SqlOutputMode.Xlsb)
+            {
+                if (string.IsNullOrWhiteSpace(filePath))
                 {
-                    // Repeated keyboard input while a document is running is a
-                    // no-op at the view boundary. The VM still rejects races
-                    // between programmatic callers, but an async WinForms key
-                    // handler must never surface that rejection as an
-                    // unhandled application-closing exception.
-                    if (document.SqlExecution.IsBusy)
+                    SaveFileDialog dialog = outputMode == JustData.Application.Sql.SqlOutputMode.Csv
+                        ? saveFileCSV
+                        : saveFileXlsx;
+                    if (outputMode == JustData.Application.Sql.SqlOutputMode.Xlsb)
+                        dialog.Filter = dialog.Filter.Replace("xlsx", "xlsb", StringComparison.OrdinalIgnoreCase);
+                    if (dialog.ShowDialog() != DialogResult.OK)
                         return;
-
-                    // The panel is an adapter. Capture its current execution
-                    // options before building the immutable request so toggles
-                    // such as Keep connection open select the intended route.
-                    if (_tabManager.CurrentEditorPanel is { } panel)
-                    {
-                        document.ConnectionName = panel.SelectedConnectionName;
-                        document.DatabaseName = panel.SelectedDatabase;
-                        document.KeepConnectionOpen = panel.KeepConnectionOpen;
-                        document.ContinueOnError = panel.ContinueOnError;
-                    }
-
-                    JustData.Application.Sql.SqlExecutionMode executionMode = mode switch
-                    {
-                        4 => JustData.Application.Sql.SqlExecutionMode.RunToCursor,
-                        1 => JustData.Application.Sql.SqlExecutionMode.SingleBatch,
-                        _ => JustData.Application.Sql.SqlExecutionMode.Selection
-                    };
-                    JustData.Application.Sql.SqlOutputMode outputMode = exportOption switch
-                    {
-                        ExportOptions.csv => JustData.Application.Sql.SqlOutputMode.Csv,
-                        ExportOptions.xlsx => JustData.Application.Sql.SqlOutputMode.Xlsx,
-                        ExportOptions.xlsb => JustData.Application.Sql.SqlOutputMode.Xlsb,
-                        ExportOptions.onlyLog => JustData.Application.Sql.SqlOutputMode.LogOnly,
-                        _ => JustData.Application.Sql.SqlOutputMode.Grid
-                    };
-                    if (outputMode is JustData.Application.Sql.SqlOutputMode.Csv
-                        or JustData.Application.Sql.SqlOutputMode.Xlsx
-                        or JustData.Application.Sql.SqlOutputMode.Xlsb)
-                    {
-                        if (string.IsNullOrWhiteSpace(filePath))
-                        {
-                            SaveFileDialog dialog = outputMode == JustData.Application.Sql.SqlOutputMode.Csv
-                                ? saveFileCSV
-                                : saveFileXlsx;
-                            if (outputMode == JustData.Application.Sql.SqlOutputMode.Xlsb)
-                                dialog.Filter = dialog.Filter.Replace("xlsx", "xlsb", StringComparison.OrdinalIgnoreCase);
-                            if (dialog.ShowDialog() != DialogResult.OK)
-                                return;
-                            filePath = dialog.FileName;
-                        }
-                    }
-
-                    string sqlText = SelectSqlTextForExecution(editor, mode);
-                    (string preparedSql, string preparedFilePath, ExportOptions directiveOutput) =
-                        await PrepareSQLAsync(sqlText);
-                    if (string.IsNullOrWhiteSpace(preparedSql))
-                        return;
-
-                    sqlText = preparedSql;
-                    if (directiveOutput != ExportOptions.noInfo)
-                    {
-                        outputMode = directiveOutput switch
-                        {
-                            ExportOptions.csv => JustData.Application.Sql.SqlOutputMode.Csv,
-                            ExportOptions.xlsx => JustData.Application.Sql.SqlOutputMode.Xlsx,
-                            ExportOptions.xlsb => JustData.Application.Sql.SqlOutputMode.Xlsb,
-                            ExportOptions.onlyLog => JustData.Application.Sql.SqlOutputMode.LogOnly,
-                            _ => outputMode
-                        };
-                        if (!string.IsNullOrWhiteSpace(preparedFilePath))
-                            filePath = preparedFilePath;
-                    }
-
-                    string executionDriver = _generalDbService.DriverName(document.ConnectionName);
-                    if (!RiskySqlCommand(sqlText,
-                        string.Equals(executionDriver, "NetezzaSQL", StringComparison.OrdinalIgnoreCase)))
-                        return;
-
-                    document.UpdateEditorSelection(editor.SelectionStart, editor.SelectionLength, editor.SelectionStart);
-
-                    await document.SqlExecution.RunAsync(
-                        document.BuildExecutionRequest(executionMode, outputMode, filePath) with
-                        {
-                            SqlText = sqlText,
-                            Explain = explain,
-                            CommandTimeoutSeconds = _applicationSettingsContext.Config.CommandTimeout,
-                            RowLimit = _applicationSettingsContext.Config.ResultRowsLimit
-                        });
-                    SynchronizeSelectedResult(document.Id);
-                    return;
+                    filePath = dialog.FileName;
                 }
             }
 
-            string driver = _generalDbService.DriverName(SelectedConnectionName);
+            string sqlText = SelectSqlTextForExecution(editor, mode);
+            (string preparedSql, string preparedFilePath, ExportOptions directiveOutput) =
+                await PrepareSQLAsync(sqlText);
+            if (string.IsNullOrWhiteSpace(preparedSql))
+                return;
+
+            sqlText = preparedSql;
+            if (directiveOutput != ExportOptions.noInfo)
+            {
+                outputMode = directiveOutput switch
+                {
+                    ExportOptions.csv => JustData.Application.Sql.SqlOutputMode.Csv,
+                    ExportOptions.xlsx => JustData.Application.Sql.SqlOutputMode.Xlsx,
+                    ExportOptions.xlsb => JustData.Application.Sql.SqlOutputMode.Xlsb,
+                    ExportOptions.onlyLog => JustData.Application.Sql.SqlOutputMode.LogOnly,
+                    _ => outputMode
+                };
+                if (!string.IsNullOrWhiteSpace(preparedFilePath))
+                    filePath = preparedFilePath;
+            }
+
+            string executionDriver = _generalDbService.DriverName(document.ConnectionName);
+            if (!RiskySqlCommand(sqlText, executionDriver))
+                return;
+
+            document.UpdateEditorSelection(editor.SelectionStart, editor.SelectionLength, editor.SelectionStart);
+            await document.SqlExecution.RunAsync(
+                document.BuildExecutionRequest(executionMode, outputMode, filePath) with
+                {
+                    SqlText = sqlText,
+                    Explain = explain,
+                    CommandTimeoutSeconds = _applicationSettingsContext.Config.CommandTimeout,
+                    RowLimit = _applicationSettingsContext.Config.ResultRowsLimit
+                });
+            SynchronizeSelectedResult(document.Id);
             if (_completionContext.SelectedConnectionName != SelectedConnectionName)
             {
                 _completionRuntimeContext.SelectedConnectionName = SelectedConnectionName;
-            }
-
-            if (!editor.Name.StartsWith(driver))
-                editor.Name = $"{driver}_addedFastColored";
-
-            switch (driver)
-            {
-                case "NetezzaSQL":
-                    _loggerLoud.MessageBox_Show(this,
-                        "SQL execution requires an editor document.",
-                        "SQL",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information);
-                    break;
-                case "DB2":
-                case "Microsoft.ACE.OLEDB.12.0":
-                case "Oracle":
-                case "Postgres":
-                case "MySql":
-                case "SQLite":
-                case "MsSqlStd":
-                case "MsSqlTrusted":
-                    if (exportOption != ExportOptions.grid && exportOption != ExportOptions.xlsx
-                        && exportOption != ExportOptions.csv
-                        && exportOption != ExportOptions.onlyLog
-                        || explain != false || filePath != null)
-                    {
-                        _loggerLoud.MessageBox_Show(this, "Not implemented for this database.", "Not implemented", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
-                    else
-                    {
-                        _loggerLoud.MessageBox_Show(this,
-                            "SQL execution requires an editor document.",
-                            "SQL",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Information);
-                    }
-                    break;
-                default:
-                    _loggerLoud.MessageBox_Show(this, "Run SQL is not implemented yet.", "Not implemented", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    break;
             }
         }
 
@@ -888,22 +631,6 @@ namespace JustyBaseLegacy.UI
             _editorWorkspaceViewModel.Documents
                 .FirstOrDefault(document => document.Id == documentId)
                 ?.SqlExecution.SelectResultKey(key);
-        }
-
-        private void RegisterLegacyResultGrid(TabPage tab, CustomDataGridView grid)
-        {
-            if (tab?.Tag is not TabPageResultsTag tag || string.IsNullOrWhiteSpace(tag.ResultSetId))
-                return;
-
-            if (tag.DocumentId is not { } documentId)
-                return;
-
-            string resultSetId = tag.ResultSetId;
-            if (_resultGridRegistry.TryGet(new ResultSetKey(documentId, resultSetId), out _))
-                resultSetId = Guid.NewGuid().ToString("N");
-            tag.ResultSetId = resultSetId;
-            _resultGridRegistry.Register(new ResultSetKey(documentId, resultSetId), grid);
-            PrepareDocumentationShowcaseAfterFirstResult();
         }
 
     }
