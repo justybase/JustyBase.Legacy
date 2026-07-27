@@ -48,13 +48,13 @@ public partial class GeneralDbService : IGeneralDbService
     private DateTime _dateTimeValue;
 
     private readonly ILogger _logger;
+    private readonly IConnectionCredentialLookup _credentials;
     private readonly IDatabaseProviderFactory _providerFactory;
 
-    public Dictionary<string, LoginData> LoginDataDic { get; set; } = [];
-
-    public GeneralDbService(ILogger logger, IDatabaseProviderFactory providerFactory = null)
+    public GeneralDbService(ILogger logger, IConnectionCredentialLookup credentials, IDatabaseProviderFactory providerFactory = null)
     {
         _logger = logger;
+        _credentials = credentials ?? throw new ArgumentNullException(nameof(credentials));
         _providerFactory = providerFactory ?? new DatabaseProviderFactory();
         _nfi.NumberDecimalDigits = MinimumNumericPrecision;
         RelatedDatabaseType = DatabaseTypeEnum.Netezza;
@@ -210,14 +210,16 @@ public partial class GeneralDbService : IGeneralDbService
 
     public string DBname(string connectionName)
     {
-        return LoginDataDic[connectionName].Database;
+        if (!_credentials.TryGet(connectionName, out ConnectionCredential credential))
+            throw new KeyNotFoundException(connectionName);
+        return credential.Database;
     }
 
     public string DriverName(string connectionName)
     {
-        if (!LoginDataDic.ContainsKey(connectionName))
+        if (!_credentials.TryGet(connectionName, out ConnectionCredential credential))
             return null;
-        return LoginDataDic[connectionName].Driver;
+        return credential.Driver;
     }
 
 
@@ -257,10 +259,10 @@ public partial class GeneralDbService : IGeneralDbService
 
     public string? Password(string connectionName)
     {
-        if (!LoginDataDic.TryGetValue(connectionName, out LoginData? value))
+        if (!_credentials.TryGet(connectionName, out ConnectionCredential credential))
             return null;
 
-        return value.Password;
+        return credential.Password;
     }
 
     public string PrepareValue(out DatabaseColumnType nz, string text, bool typeAdn = true, string textQualifier = "'", bool doTrim = true, bool forceTimestamp = true)
@@ -352,9 +354,9 @@ public partial class GeneralDbService : IGeneralDbService
 
     public string? Server(string connectionName)
     {
-        if (!LoginDataDic.ContainsKey(connectionName))
+        if (!_credentials.TryGet(connectionName, out ConnectionCredential credential))
             return null;
-        return LoginDataDic[connectionName].Server;
+        return credential.Server;
     }
 
     public string SqlLitePath(IDatabaseRuntimeContext databaseRuntimeContext, string connectionName)
@@ -396,9 +398,9 @@ public partial class GeneralDbService : IGeneralDbService
 
     public string UserName(string connectionName)
     {
-        if (!LoginDataDic.TryGetValue(connectionName, out LoginData? value))
+        if (!_credentials.TryGet(connectionName, out ConnectionCredential credential))
             return null;
-        return value.UserName;
+        return credential.UserName;
     }
 
 }

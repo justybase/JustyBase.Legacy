@@ -23,6 +23,13 @@ namespace AppBase.Services;
 
 public sealed class DatabaseProviderFactory : IDatabaseProviderFactory
 {
+    private readonly INetezzaHelperService? _netezzaHelperService;
+
+    public DatabaseProviderFactory(INetezzaHelperService? netezzaHelperService = null)
+    {
+        _netezzaHelperService = netezzaHelperService;
+    }
+
     public DatabaseProviderFactoryResult Create(
         IDatabaseRuntimeContext databaseRuntimeContext,
         ILogger logger,
@@ -35,7 +42,16 @@ public sealed class DatabaseProviderFactory : IDatabaseProviderFactory
 
         if (driverName == "NetezzaSQL")
         {
-            IGeneralDb database = new Netezza(databaseRuntimeContext, logger, importExportTasks, databaseService)
+            INetezzaHelperService helper = _netezzaHelperService
+                ?? throw new InvalidOperationException(
+                    "INetezzaHelperService is required to create Netezza database providers.");
+
+            IGeneralDb database = new Netezza(
+                databaseRuntimeContext,
+                logger,
+                importExportTasks,
+                databaseService,
+                helper)
             {
                 LogErrorStdColor = logErrorStdColor,
                 ConnectionName = connectionName,

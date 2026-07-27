@@ -34,7 +34,6 @@ internal sealed class AppBootstrapper
     private readonly IApplicationSettingsPersistence _settingsPersistence;
     private readonly IUiHelperService _uiHelperService;
     private readonly IApplicationSession _applicationSession;
-    private readonly GeneralDbSessionAdapter _sessionAdapter;
     private readonly LoginFormFactory _loginFormFactory;
     private readonly INetezzaAutocompleteState _netezzaAutocompleteState;
 
@@ -46,7 +45,6 @@ internal sealed class AppBootstrapper
         IApplicationSettingsPersistence settingsPersistence,
         IUiHelperService uiHelperService,
         IApplicationSession applicationSession,
-        GeneralDbSessionAdapter sessionAdapter,
         LoginFormFactory loginFormFactory,
         INetezzaAutocompleteState netezzaAutocompleteState)
     {
@@ -57,7 +55,6 @@ internal sealed class AppBootstrapper
         _settingsPersistence = settingsPersistence ?? throw new ArgumentNullException(nameof(settingsPersistence));
         _uiHelperService = uiHelperService ?? throw new ArgumentNullException(nameof(uiHelperService));
         _applicationSession = applicationSession ?? throw new ArgumentNullException(nameof(applicationSession));
-        _sessionAdapter = sessionAdapter ?? throw new ArgumentNullException(nameof(sessionAdapter));
         _loginFormFactory = loginFormFactory ?? throw new ArgumentNullException(nameof(loginFormFactory));
         _netezzaAutocompleteState = netezzaAutocompleteState ?? throw new ArgumentNullException(nameof(netezzaAutocompleteState));
     }
@@ -164,7 +161,6 @@ internal sealed class AppBootstrapper
         LoginSelection selection = loginForm.Result
             ?? throw new InvalidOperationException("A login selection is required before opening the main window.");
         _applicationSession.SetLogin(selection, loginForm.Profiles);
-        _sessionAdapter.Apply(_applicationSession);
 
         using IServiceScope scope = _scopeFactory.CreateScope();
         Program.LogStartup("Resolving main window");

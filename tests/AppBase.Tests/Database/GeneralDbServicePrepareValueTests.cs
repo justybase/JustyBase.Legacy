@@ -1,5 +1,7 @@
 using AppBase.Common;
 using AppBase.Common.Enums;
+using AppBase.Common.Interfaces;
+using AppBase.Data.Core.Interfaces;
 using AppBase.Services;
 using System.Globalization;
 using System.Reflection;
@@ -71,7 +73,19 @@ public sealed class GeneralDbServicePrepareValueTests
         Assert.Equal(DatabaseColumnType.nvarchar, type);
     }
 
-    private static GeneralDbService CreateService() => new(CreateProxy<ILogger>());
+    private static GeneralDbService CreateService() =>
+        new(CreateProxy<ILogger>(), EmptyCredentialLookup.Instance);
+
+    private sealed class EmptyCredentialLookup : IConnectionCredentialLookup
+    {
+        public static EmptyCredentialLookup Instance { get; } = new();
+
+        public bool TryGet(string connectionName, out ConnectionCredential credential)
+        {
+            credential = null!;
+            return false;
+        }
+    }
 
     private static T CreateProxy<T>() where T : class =>
         DispatchProxy.Create<T, NullDispatchProxy>();

@@ -81,7 +81,6 @@ ORDER BY
 
     int MinimumNumericPrecision { get; }
     HashSet<string> ReservedWords { get; }
-    Dictionary<string, LoginData> LoginDataDic { get; set; }
     string[]? ClipToLines(char sepInClipboard, ref string clip, char escapechar);
 
     string ConnectionStringForDB2(string connectionName);

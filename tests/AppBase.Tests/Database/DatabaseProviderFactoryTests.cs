@@ -15,7 +15,7 @@ public sealed class DatabaseProviderFactoryTests
     public void UnknownDriverReturnsProblemResultWithoutCreatingAProvider()
     {
         IGeneralDbService databaseService = CreateProxy<IGeneralDbService>();
-        DatabaseProviderFactory factory = new();
+        DatabaseProviderFactory factory = new(CreateProxy<INetezzaHelperService>());
 
         DatabaseProviderFactoryResult result = factory.Create(
             null!,
@@ -35,7 +35,7 @@ public sealed class DatabaseProviderFactoryTests
     {
         IGeneralDb expectedDatabase = CreateProxy<IGeneralDb>();
         RecordingProviderFactory providerFactory = new(expectedDatabase);
-        GeneralDbService databaseService = new(CreateProxy<ILogger>(), providerFactory);
+        GeneralDbService databaseService = new(CreateProxy<ILogger>(), EmptyCredentialLookup.Instance, providerFactory);
 
         IGeneralDb actualDatabase = databaseService.GetGeneralDb(
             null!,
@@ -48,6 +48,17 @@ public sealed class DatabaseProviderFactoryTests
         Assert.Equal("test", databaseName);
         Assert.Equal(DatabaseTypeEnum.Postgres, databaseService.RelatedDatabaseType);
         Assert.Equal("reporting", providerFactory.ConnectionName);
+    }
+
+    private sealed class EmptyCredentialLookup : IConnectionCredentialLookup
+    {
+        public static EmptyCredentialLookup Instance { get; } = new();
+
+        public bool TryGet(string connectionName, out ConnectionCredential credential)
+        {
+            credential = null!;
+            return false;
+        }
     }
 
     private static T CreateProxy<T>() where T : class

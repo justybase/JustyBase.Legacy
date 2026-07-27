@@ -1,5 +1,4 @@
 using AppBase.Common;
-using AppBase.Data.Core.Interfaces;
 using AppBase.Services;
 using JustyBaseLegacy.UI.Login;
 using NSubstitute;
@@ -57,26 +56,6 @@ public sealed class LegacyConnectionProfileRepositoryTests : IDisposable
 
         Assert.Equal(source.Name, roundTrip.Name); Assert.Equal(source.Driver, roundTrip.Driver); Assert.Equal(source.Server, roundTrip.Server);
         Assert.Equal(source.UserName, roundTrip.UserName); Assert.Equal(source.Password, roundTrip.Password); Assert.Equal(source.Database, roundTrip.Database);
-    }
-
-    [Fact]
-    public void Session_adapter_replaces_the_legacy_dictionary_from_session_profiles()
-    {
-        var service = Substitute.For<IGeneralDbService>();
-        var dictionary = new Dictionary<string, LoginData>
-        {
-            ["stale"] = new LoginData { Name = "stale" }
-        };
-        service.LoginDataDic.Returns(dictionary);
-        var session = new JustData.Application.Login.ApplicationSession();
-        session.SetLogin(
-            new JustData.Application.Login.LoginSelection(new JustData.Application.Login.ConnectionProfile { Name = "selected" }, false),
-            [new JustData.Application.Login.ConnectionProfile { Name = "selected", Driver = "NetezzaSQL", Password = "secret" }]);
-
-        new GeneralDbSessionAdapter(service).Apply(session);
-
-        Assert.DoesNotContain("stale", dictionary.Keys);
-        Assert.Equal("secret", dictionary["selected"].Password);
     }
 
     [Fact]

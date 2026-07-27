@@ -1,7 +1,8 @@
 using AppBase.Common;
-using AppBase.Data;
+using AppBase.Common.Interfaces;
 using AppBase.Data.Core.Core;
 using AppBase.Data.Core.Enums;
+using AppBase.Data.Core.Interfaces;
 using AppBase.Services;
 using System.Reflection;
 
@@ -115,17 +116,30 @@ public sealed class GeneralDbServiceConnectionStringTests
 
     private static GeneralDbService CreateService(string server)
     {
-        GeneralDbService service = new(CreateProxy<ILogger>());
-        service.LoginDataDic["development"] = new LoginData
+        var lookup = new StaticCredentialLookup(new ConnectionCredential
         {
-            Name = "development",
             Driver = "NetezzaSQL",
             Server = server,
             UserName = "test-user",
             Password = "test-password",
             Database = "DEV_DB"
-        };
-        return service;
+        });
+        return new GeneralDbService(CreateProxy<ILogger>(), lookup);
+    }
+
+    private sealed class StaticCredentialLookup(ConnectionCredential development) : IConnectionCredentialLookup
+    {
+        public bool TryGet(string connectionName, out ConnectionCredential credential)
+        {
+            if (string.Equals(connectionName, "development", StringComparison.OrdinalIgnoreCase))
+            {
+                credential = development;
+                return true;
+            }
+
+            credential = null!;
+            return false;
+        }
     }
 
     private static T CreateProxy<T>() where T : class =>
