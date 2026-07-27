@@ -24,8 +24,9 @@ namespace JustyBaseLegacy.UI;
 /// Editor tabs are created as <see cref="EditorDockContent"/> documents
 /// inside the DockPanel instead of TabPage+TabControl.
 ///
-/// An inner <see cref="TabManagerService"/> is kept for backward-compatible
-/// TabPage-based lookups required by legacy code paths.
+/// An inner <see cref="TabManagerService"/> remains as an accepted ADR-004
+/// compatibility shim for TabPage-based lookups. Collapsing it is deferred to
+/// a later shell cleanup wave — it is not a second editor host.
 /// </summary>
 internal sealed class DockSuiteTabManager : ITabManager, IDisposable
 {
@@ -202,6 +203,12 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
     }
 
     /// <summary>Associates a DockSuite document with its clean-layer identity.</summary>
+    /// <summary>
+    /// Projects the workspace document id onto DockSuite tab maps.
+    /// Source of truth for get-or-create remains
+    /// <c>EditorWorkspaceViewModel</c> + BaseWindow <c>_documentIdsByEditor</c>;
+    /// this map is only for DockPane ↔ tab lookups.
+    /// </summary>
     public void SetDocumentId(TabPage tabPage, EditorDocumentId documentId)
     {
         if (!_tabToDockContent.TryGetValue(tabPage, out var dockContent))
@@ -264,40 +271,14 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
             : null;
     }
 
-    public FastColoredTextBox? CurrentEditor
-    {
-        get
-        {
-            // Try DockSuite first.
-            if (ResolveCurrentEditorContent() is { } editorContent)
-                return editorContent.Fctb;
+    public FastColoredTextBox? CurrentEditor =>
+        ResolveCurrentEditorContent()?.Fctb;
 
-            // Fallback to inner (TabControl) for any tabs not yet migrated.
-            return _inner.CurrentEditor;
-        }
-    }
+    public IEditorPanel? CurrentEditorPanel =>
+        ResolveCurrentEditorContent()?.EditorPanel;
 
-    public IEditorPanel? CurrentEditorPanel
-    {
-        get
-        {
-            if (ResolveCurrentEditorContent() is { } editorContent)
-                return editorContent.EditorPanel;
-
-            return _inner.CurrentEditorPanel;
-        }
-    }
-
-    public SplitContainer? CurrentSplitContainer
-    {
-        get
-        {
-            if (ResolveCurrentEditorContent() is { } editorContent)
-                return editorContent.SplitContainer;
-
-            return _inner.CurrentSplitContainer;
-        }
-    }
+    public SplitContainer? CurrentSplitContainer =>
+        ResolveCurrentEditorContent()?.SplitContainer;
 
     public SplitContainer? GetSplitContainerForTab(TabPage tabPage)
     {

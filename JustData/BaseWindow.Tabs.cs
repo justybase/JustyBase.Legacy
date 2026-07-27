@@ -19,6 +19,7 @@ using FastColoredTextBoxNS;
 using FastColoredTextBoxNS.Helpers;
 using JustDataAdditionalForms;
 using JustData.Application.Editor;
+using JustData.ViewModels.Editor;
 using JustyBase.NetezzaDriver;
 using System.Drawing;
 using JustyBase.NetezzaSqlParser.Linter;
@@ -57,13 +58,23 @@ namespace JustyBaseLegacy.UI
             var editorForRelease = _tabManager.GetEditor(tabPage);
             if (editorForRelease is not null)
             {
-                EditorDocumentId lintDocumentId = EnsureEditorDocumentId(editorForRelease);
-                _editorWorkspaceViewModel.Documents
-                    .FirstOrDefault(document => document.Id == lintDocumentId)
-                    ?.DiagnosticsChanged -= OnDocumentDiagnosticsChanged;
-                _lintDiagnosticsTargets.Remove(lintDocumentId);
+                EditorDocumentViewModel? lintDocument = EditorWorkspaceDocumentEnsure.TryGetByEditorKey(
+                    _editorWorkspaceViewModel,
+                    _documentIdsByEditor,
+                    editorForRelease);
+                if (lintDocument is not null)
+                {
+                    lintDocument.DiagnosticsChanged -= OnDocumentDiagnosticsChanged;
+                    _lintDiagnosticsTargets.Remove(lintDocument.Id);
+                    _cachedDiagnostics.Remove(lintDocument.Id);
+                }
+                else if (_documentIdsByEditor.TryGetValue(editorForRelease, out var orphanDocumentId))
+                {
+                    _lintDiagnosticsTargets.Remove(orphanDocumentId);
+                    _cachedDiagnostics.Remove(orphanDocumentId);
+                }
+
                 _lintIssuesByEditor.Remove(editorForRelease);
-                _cachedDiagnostics.Remove(lintDocumentId);
                 _lightbulbManager.ClearLightbulbs(editorForRelease);
             }
 

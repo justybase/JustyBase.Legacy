@@ -16,6 +16,8 @@ using AppBase.Services.Helpers;
 using AppBase.Services.Sql;
 using JustyBaseLegacy.UI.Sql;
 using JustData.Application.History;
+using JustData.Application.Editor;
+using JustData.ViewModels.Editor;
 using DatabaseDataGridView.WinForms;
 using DatabaseDataGridView.WinForms.Coloring;
 using FastColoredTextBoxNS;
@@ -168,14 +170,13 @@ namespace JustyBaseLegacy.UI
             string newConnectionName = selection.Profile.Name;
 
             _applicationSession.SetLogin(selection, loginForm.Profiles);
-            _sessionAdapter.Apply(_applicationSession);
 
-            // Credentials live in LoginDataDic, but live sessions freeze ConnectionString at creation.
+            // Live sessions freeze ConnectionString at creation.
             // Evict so CbConnectionsSelectedIndexChanged rebuilds the provider and re-downloads schema.
             // Only treat as rename when the previous name is gone from profiles (not add/switch).
             bool previousRenamedAway = !string.IsNullOrEmpty(previousConnectionName)
                 && !string.Equals(previousConnectionName, newConnectionName, StringComparison.OrdinalIgnoreCase)
-                && !_generalDbService.LoginDataDic.ContainsKey(previousConnectionName);
+                && !_connectionProfileCatalog.TryGetProfile(previousConnectionName, out _);
 
             if (previousRenamedAway)
             {
@@ -344,7 +345,11 @@ namespace JustyBaseLegacy.UI
                     && (signatureEditor.Name.StartsWith("NetezzaSQL", StringComparison.Ordinal)
                         || _generalDbService.DriverName(SelectedConnectionName) == "NetezzaSQL"))
                 {
-                    string documentUri = EnsureEditorDocumentId(signatureEditor).ToString();
+                    EditorDocumentViewModel? signatureDocument = EnsureWorkspaceDocument(signatureEditor);
+                    if (signatureDocument is null)
+                        return;
+
+                    string documentUri = signatureDocument.Id.ToString();
                     var help = _legacySqlAuthoringServices.GetSignatureHelp(signatureEditor.Text, signatureEditor.SelectionStart, documentUri);
                     if (help is null)
                         _signaturePopup.Hide();
