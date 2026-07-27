@@ -185,7 +185,7 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
                     basicHint, text + _state.CurrentColumn);
             }
 
-            AliasHints.Sort(DynamicCollectionForNettezaHelpers.SortMethodAliases(_keyValuePairsForAutocomplete));
+            AliasHints.Sort(NetezzaLegacyCompletionHelpers.SortMethodAliases(_keyValuePairsForAutocomplete));
         }
 
         var engineItems = _completionEngine.GetCompletions(sql, cursorOffset).ToList();

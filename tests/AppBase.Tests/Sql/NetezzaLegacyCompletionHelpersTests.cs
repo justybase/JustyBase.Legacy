@@ -2,7 +2,7 @@ using AppBase.Data;
 
 namespace AppBase.Tests.Sql;
 
-public sealed class DynamicCollectionForNettezaHelpersTests
+public sealed class NetezzaLegacyCompletionHelpersTests
 {
     [Theory]
     [InlineData("col=1", "col", "=", "1")]
@@ -14,7 +14,7 @@ public sealed class DynamicCollectionForNettezaHelpersTests
         string expectedOp,
         string expectedRhs)
     {
-        var match = DynamicCollectionForNettezaHelpers.RegexSpace3().Match(input);
+        var match = NetezzaLegacyCompletionHelpers.RegexSpace3().Match(input);
 
         Assert.True(match.Success);
         Assert.Equal(expectedLhs, match.Groups[1].Value);
@@ -25,7 +25,7 @@ public sealed class DynamicCollectionForNettezaHelpersTests
     [Fact]
     public void RegexSpace3_fails_for_plain_identifier()
     {
-        Assert.DoesNotMatch(DynamicCollectionForNettezaHelpers.RegexSpace3(), "EMPLOYEES");
+        Assert.DoesNotMatch(NetezzaLegacyCompletionHelpers.RegexSpace3(), "EMPLOYEES");
     }
 
     [Fact]
@@ -38,7 +38,7 @@ public sealed class DynamicCollectionForNettezaHelpersTests
             ["beta"] = 10,
             ["gamma"] = 11
         };
-        var comparer = DynamicCollectionForNettezaHelpers.SortMethodAliases(ranks);
+        var comparer = NetezzaLegacyCompletionHelpers.SortMethodAliases(ranks);
         var items = new List<(string, string)>
         {
             ("gamma", "g"),

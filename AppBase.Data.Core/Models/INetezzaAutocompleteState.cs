@@ -2,7 +2,7 @@ namespace AppBase.Data.Core.Models;
 
 /// <summary>
 /// Per-application Netezza editor state used by the legacy authoring adapter.
-/// It replaces the former process-wide DynamicCollectionForNettezaHelpers store.
+/// Per-application replacement for the former process-wide snippet/keyword store.
 /// </summary>
 public interface INetezzaAutocompleteState
 {

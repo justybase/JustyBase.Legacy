@@ -17,7 +17,7 @@ public sealed class LegacySnippetsProvider
     private readonly IApplicationSettingsContext _applicationSettingsContext;
     private readonly ISessionVariableStore _sessionVariableStore;
     private readonly INetezzaAutocompleteState _state;
-    private readonly Regex _space3 = DynamicCollectionForNettezaHelpers.RegexSpace3();
+    private readonly Regex _space3 = NetezzaLegacyCompletionHelpers.RegexSpace3();
     private readonly string _desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
 
     public LegacySnippetsProvider(

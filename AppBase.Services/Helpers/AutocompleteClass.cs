@@ -21,7 +21,8 @@ public partial class AutocompleteClass : IAutocompleteClass
     private readonly IEditorHost _editorHost;
     private readonly IConnectionSessionRegistry _connectionSessions;
     private readonly INetezzaSchemaTableCatalog _schemaTables;
-    private readonly Action<string, bool, string> _loadSchemaPhase2Invoked;
+    private readonly INetezzaHelperService _netezzaHelperService;
+    private readonly Action<string, string>? _onOneDatabaseAttached;
 
     public AutocompleteClass(
         INetezzaCompletionContext completionContext,
@@ -29,14 +30,16 @@ public partial class AutocompleteClass : IAutocompleteClass
         IEditorHost editorHost,
         IConnectionSessionRegistry connectionSessions,
         INetezzaSchemaTableCatalog schemaTables,
-        Action<string, bool, string> loadSchemaPhase2Invoked)
+        INetezzaHelperService netezzaHelperService,
+        Action<string, string>? onOneDatabaseAttached = null)
     {
         _completionContext = completionContext;
         _applicationSettingsContext = applicationSettingsContext;
         _editorHost = editorHost;
         _connectionSessions = connectionSessions ?? throw new ArgumentNullException(nameof(connectionSessions));
         _schemaTables = schemaTables ?? throw new ArgumentNullException(nameof(schemaTables));
-        _loadSchemaPhase2Invoked = loadSchemaPhase2Invoked;
+        _netezzaHelperService = netezzaHelperService ?? throw new ArgumentNullException(nameof(netezzaHelperService));
+        _onOneDatabaseAttached = onOneDatabaseAttached;
     }
 
     public async Task AddAutocompleteForNZ(int selectionStart, string cleanSqlText)
@@ -274,7 +277,7 @@ public partial class AutocompleteClass : IAutocompleteClass
                 {
                     if (value4.ContainsKey(table))
                     {
-                        if (!NetezzaHelpers.SqliteInProgress && _completionContext.SchemaRefreshed && _applicationSettingsContext.Config.RefreshMode != 1 && _connectionSessions.TryGetValue(selConnName, out var gdb) && gdb.DatabaseType == DatabaseTypeEnum.Netezza
+                        if (!_netezzaHelperService.SqliteInProgress && _completionContext.SchemaRefreshed && _applicationSettingsContext.Config.RefreshMode != 1 && _connectionSessions.TryGetValue(selConnName, out var gdb) && gdb.DatabaseType == DatabaseTypeEnum.Netezza
                         && gdb is INetezza netezza)
                         {
                             if (netezza.AttachedDbsToSchema.Count != netezza.DatabasesCount && !netezza.AttachedDbsToSchema.ContainsKey(database)
@@ -294,7 +297,7 @@ public partial class AutocompleteClass : IAutocompleteClass
 
                                 if (success)
                                 {
-                                    _loadSchemaPhase2Invoked?.Invoke(selConnName, true, database);
+                                    _onOneDatabaseAttached?.Invoke(selConnName, database);
                                 }
                             }
                         }

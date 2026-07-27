@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace AppBase.Data;
 
-public static partial class DynamicCollectionForNettezaHelpers
+public static partial class NetezzaLegacyCompletionHelpers
 {
 
     [GeneratedRegex("([\\w\\.]+)([=<>!:]+)('?\\w+'?)$", RegexOptions.Compiled)]
