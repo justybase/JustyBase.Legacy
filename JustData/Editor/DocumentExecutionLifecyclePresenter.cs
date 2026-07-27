@@ -29,6 +29,11 @@ internal sealed class DocumentExecutionLifecyclePresenter : IDisposable
     {
         try { await _sessions.CancelAsync(documentId); }
         finally { _sessions.Cleanup(documentId); }
+
+        // Finalized result tabs live in the grid registry (not presenter _pending).
+        foreach (DocumentResultGrid item in _grids.GetDocument(documentId))
+            _results.RemovePendingResult(item.Key);
+
         _results.RemoveDocument(documentId);
         _grids.RemoveDocument(documentId);
     }

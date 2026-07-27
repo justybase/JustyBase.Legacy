@@ -155,6 +155,8 @@ public static class Program
         services.AddSingleton<IUiHelperService, UiHelperService>();
         services.AddSingleton<ICredentialStore, CredentialStore>();
         services.AddSingleton<IApplicationSession, ApplicationSession>();
+        services.AddSingleton<IConnectionProfileCatalog, ApplicationSessionConnectionProfileCatalog>();
+        services.AddSingleton<IConnectionCredentialLookup, ConnectionProfileCatalogCredentialLookup>();
         services.AddSingleton<LoginFormFactory>();
         services.AddSingleton<LegacyApplicationSettingsContext>();
         services.AddSingleton<IApplicationSettingsContext>(sp =>
@@ -223,7 +225,6 @@ public static class Program
         services.AddScoped<DatabaseExplorerViewModel>();
         services.AddScoped<ObjectExplorerViewModel>();
         services.AddSingleton<IMessenger, WeakReferenceMessenger>();
-        services.AddSingleton<GeneralDbSessionAdapter>();
         services.AddScoped<ExternalOpenRequestRouter>();
         services.AddScoped<IExternalOpenRequestRouter>(sp =>
             sp.GetRequiredService<ExternalOpenRequestRouter>());
@@ -238,10 +239,12 @@ public static class Program
         services.AddSingleton<ISqlPreprocessingService, SqlPreprocessingService>();
         services.AddSingleton<ISpecialCommandService, SpecialCommandService>();
         services.AddSingleton<ISqlRiskAnalysisService, SqlRiskAnalysisService>();
+        services.AddSingleton<SqlExecutionRiskGate>();
         services.AddSingleton<AppBase.Data.Completion.NetezzaSqlCompletionServices>();
         services.AddSingleton<AppBase.Data.Completion.LegacySqlAuthoringServices>();
 
         services.AddScoped<ITabManager, DockSuiteTabManager>();
+        services.AddScoped<EditorCatalogProjection>();
         services.AddSingleton<IHistoryStore, HistoryFileStore>();
         services.AddSingleton<JustData.Application.QueryWatch.IQueryWatchService, JustyBaseLegacy.UI.Services.LegacyQueryWatchService>();
         services.AddScoped<BaseWindow>();
@@ -273,6 +276,15 @@ public static class Program
 
     private static void ReportUnhandledException(Exception exception, bool showMessage)
     {
+        if (exception is OperationCanceledException or TaskCanceledException)
+        {
+            // Cancelled schema refresh / UI ops must not tear down the process.
+            LogToFile(ErrorLogPath, $"CANCELLED: {SanitizeException(exception)}");
+            FileDiagnosticLog.WriteError("Cancelled operation (ignored)", exception);
+            Interlocked.Exchange(ref _handlingUnhandledException, 0);
+            return;
+        }
+
         if (Interlocked.Exchange(ref _handlingUnhandledException, 1) != 0)
         {
             return;

@@ -1236,7 +1236,7 @@ namespace JustyBaseLegacy.UI
         {
             _saveConfig();
             _saveRecentFiles();
-            DynamicCollectionForNettezaHelpers.SaveSnipets(_applicationSettingsContext, _netezzaAutocompleteState);
+            NetezzaLegacyCompletionHelpers.SaveSnipets(_applicationSettingsContext, _netezzaAutocompleteState);
             _saveManySqlToDisk();
         }
     }

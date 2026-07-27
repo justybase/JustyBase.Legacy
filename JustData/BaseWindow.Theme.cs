@@ -459,7 +459,6 @@ namespace JustyBaseLegacy.UI
             }
 
             _variablesControl?.ApplyDpiMetrics();
-            _objectExplorerControl?.ApplyDpiMetrics();
             _mvvmObjectExplorerControl?.ApplyDpiMetrics();
             _gitControl?.ApplyDpiMetrics();
             _filesControl?.ApplyDpiMetrics();

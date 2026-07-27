@@ -166,12 +166,12 @@ namespace JustyBaseLegacy.UI
                 dsm.SaveLayout(layoutPath);
             }
 
-            DynamicCollectionForNettezaHelpers.SaveSnipets(_applicationSettingsContext, _netezzaAutocompleteState);
+            NetezzaLegacyCompletionHelpers.SaveSnipets(_applicationSettingsContext, _netezzaAutocompleteState);
             _connectionSessions.Clear();
 
             try
             {
-                if (!_completionContext.SchemaRefreshed || NetezzaHelpers.SqliteInProgress)
+                if (!_completionContext.SchemaRefreshed || _netezzaHelperService.SqliteInProgress)
                 {
                     _applicationSettingsContext.Config.ResetSchema = true;
                 }

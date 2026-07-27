@@ -40,6 +40,7 @@ using JustData.Application.Communication;
 using JustData.Application;
 using JustData.Application.Editor;
 using JustData.Application.Files;
+using JustData.Application.Login;
 using JustData.Application.Variables;
 using JustData.Application.Schema;
 using JustData.Application.Startup;
@@ -263,7 +264,6 @@ namespace JustyBaseLegacy.UI
         private readonly IConnectionSessionRegistry _connectionSessions;
         private readonly INetezzaSchemaTableCatalogWriter _schemaTables;
         private readonly JustData.Application.Login.IApplicationSession _applicationSession;
-        private readonly GeneralDbSessionAdapter _sessionAdapter;
         private readonly IFormatterService _formatter;
         private readonly ShellViewModel _shellViewModel;
         private readonly VariablesViewModel _variablesViewModel;
@@ -306,9 +306,11 @@ namespace JustyBaseLegacy.UI
         private readonly LoginFormFactory _loginFormFactory;
         private readonly ISqlPreprocessingService _sqlPreprocessingService;
         private readonly ISpecialCommandService _specialCommandService;
-        private readonly ISqlRiskAnalysisService _sqlRiskAnalysisService;
+        private readonly SqlExecutionRiskGate _sqlRiskGate;
         private readonly ISchemaDdlService _ddlService;
         private readonly ISchemaRefreshCoordinator _schemaRefreshCoordinator;
+        private readonly IConnectionProfileCatalog _connectionProfileCatalog;
+        private readonly EditorCatalogProjection _editorCatalogProjection;
         private readonly IFileSearchEngine _fileSearchEngine;
         private readonly ILoginDataValidator _loginDataValidator;
         private readonly ICodeActionProvider _codeActionProvider;
@@ -389,7 +391,6 @@ namespace JustyBaseLegacy.UI
             LegacySqlAuthoringServices legacySqlAuthoringServices,
             ITabManager tabManager,
             JustData.Application.Login.IApplicationSession applicationSession,
-            GeneralDbSessionAdapter sessionAdapter,
             IFormatterService formatter,
             ShellViewModel shellViewModel,
             IExternalOpenRequestRouter externalOpenRequestRouter,
@@ -408,7 +409,7 @@ namespace JustyBaseLegacy.UI
             , ICodeActionProvider codeActionProvider
             , ISqlPreprocessingService sqlPreprocessingService
             , ISpecialCommandService specialCommandService
-            , ISqlRiskAnalysisService sqlRiskAnalysisService
+            , SqlExecutionRiskGate sqlRiskGate
             , ISchemaDdlService ddlService
             , ISchemaRefreshCoordinator schemaRefreshCoordinator
             , IHistoryStore historyStore
@@ -416,6 +417,8 @@ namespace JustyBaseLegacy.UI
             , ISqlExecutionSessionRegistry sqlExecutionSessionRegistry
             , IDocumentResultGridRegistry resultGridRegistry
             , IEditorCatalogState editorCatalogState
+            , IConnectionProfileCatalog connectionProfileCatalog
+            , EditorCatalogProjection editorCatalogProjection
             , IUiDispatcher? uiDispatcher = null
             )
         {
@@ -450,7 +453,6 @@ namespace JustyBaseLegacy.UI
             _netezzaSqlCompletionServices = netezzaSqlCompletionServices ?? throw new ArgumentNullException(nameof(netezzaSqlCompletionServices));
             _legacySqlAuthoringServices = legacySqlAuthoringServices ?? throw new ArgumentNullException(nameof(legacySqlAuthoringServices));
             _applicationSession = applicationSession ?? throw new ArgumentNullException(nameof(applicationSession));
-            _sessionAdapter = sessionAdapter ?? throw new ArgumentNullException(nameof(sessionAdapter));
             _formatter = formatter ?? throw new ArgumentNullException(nameof(formatter));
             _shellViewModel = shellViewModel ?? throw new ArgumentNullException(nameof(shellViewModel));
             _variablesViewModel = variablesViewModel ?? throw new ArgumentNullException(nameof(variablesViewModel));
@@ -473,11 +475,13 @@ namespace JustyBaseLegacy.UI
             _loginFormFactory = loginFormFactory ?? throw new ArgumentNullException(nameof(loginFormFactory));
             _sqlPreprocessingService = sqlPreprocessingService ?? throw new ArgumentNullException(nameof(sqlPreprocessingService));
             _specialCommandService = specialCommandService ?? throw new ArgumentNullException(nameof(specialCommandService));
-            _sqlRiskAnalysisService = sqlRiskAnalysisService ?? throw new ArgumentNullException(nameof(sqlRiskAnalysisService));
+            _sqlRiskGate = sqlRiskGate ?? throw new ArgumentNullException(nameof(sqlRiskGate));
             _ddlService = ddlService ?? throw new ArgumentNullException(nameof(ddlService));
             _schemaRefreshCoordinator = schemaRefreshCoordinator ?? throw new ArgumentNullException(nameof(schemaRefreshCoordinator));
             _historyStore = historyStore ?? throw new ArgumentNullException(nameof(historyStore));
             _queryWatchService = queryWatchService ?? throw new ArgumentNullException(nameof(queryWatchService));
+            _connectionProfileCatalog = connectionProfileCatalog ?? throw new ArgumentNullException(nameof(connectionProfileCatalog));
+            _editorCatalogProjection = editorCatalogProjection ?? throw new ArgumentNullException(nameof(editorCatalogProjection));
             _uiDispatcher = uiDispatcher ?? new JustData.Mvvm.WindowsFormsUiDispatcher(this);
             _fileSearchEngine = fileSearchEngine ?? throw new ArgumentNullException(nameof(fileSearchEngine));
             _loginDataValidator = loginDataValidator ?? throw new ArgumentNullException(nameof(loginDataValidator));
@@ -507,6 +511,7 @@ namespace JustyBaseLegacy.UI
             _sqlResultPresenter = new WinFormsSqlResultPresenter(this);
             _documentExecutionLifecyclePresenter = new DocumentExecutionLifecyclePresenter(
                 _editorWorkspaceViewModel, _sqlExecutionSessionRegistry, _sqlResultPresenter, _resultGridRegistry);
+            _editorCatalogProjection.SeedFromProfiles(_connectionProfileCatalog);
             _lightbulbManager = new Sql.LightbulbManager(_lintIssuesByEditor, _codeActionProvider);
             _autocompleteClass = new AutocompleteClass(
                 _completionContext,
@@ -514,7 +519,9 @@ namespace JustyBaseLegacy.UI
                 this,
                 _connectionSessions,
                 _schemaTables,
-                NetezzaLoadSchemaTreeViewPhaseInvoked);
+                _netezzaHelperService,
+                (connectionName, databaseName) =>
+                    _ = OnNetezzaOneDatabaseAttachedAsync(connectionName, databaseName));
             _tabControlDrawingHandler = new TabControlDrawingHandler(_colorTheme, _applicationSettingsContext, this.Font
                 , JustData.Properties.Resources.close, JustData.Properties.Resources.closeJasne
                 , JustData.Properties.Resources.gray_pin, JustData.Properties.Resources.gray_pin_selected
@@ -542,8 +549,8 @@ namespace JustyBaseLegacy.UI
                 dsm.ApplyTheme(_applicationSettingsContext.Config.UseSpecialColoring);
                 RegisterLeftPanelTools(dsm);
 
-                // Phase 3a: create the Results tool window (DockBottom) alongside
-                // the existing DraggableTabControl. Results will be migrated in Phase 3b.
+                // Results live in the DockBottom Results tool (EnsureSqlResultsToolWindow /
+                // ShowResultsForTab / WinFormsSqlResultPresenter) — the only results path.
                 dsm.EnsureResultsToolWindow();
 
                 // ── DockSuite layout fixes ────────────────────────────
@@ -1025,11 +1032,6 @@ namespace JustyBaseLegacy.UI
                     AddMainTab(null);
             }
         }
-
-        private static readonly Regex _rxVariable = RegexVariable();
-        private static readonly Regex _rxSessionVariableDefine = RegexSessionVariableDefine();
-        private static readonly Regex _rxGlobalVariableDefine = RegexGlobalVariableDefine();
-
 
         private FilesControl? _filesControl;
         private readonly FilesViewModel _filesViewModel;
@@ -1848,16 +1850,6 @@ namespace JustyBaseLegacy.UI
         //[GeneratedRegex("\\b(create\\s+temp\\s+table|create\\s+table)\\s+(?<aliasWithaTabeli>(\\w|\\.)+?)\\b\\s*as\\b\\s*\\({0,1}", RegexOptions.IgnoreCase | RegexOptions.Compiled, "pl-PL")]
         //private static partial Regex RegexTable2();
 
-        [GeneratedRegex("(?<zmienna>\\$[a-zA-Z]{1}[a-zA-Z_\\d]*)", RegexOptions.IgnoreCase | RegexOptions.Compiled, "pl-PL")]
-        private static partial Regex RegexVariable();
-
-        [GeneratedRegex("^\\s*declare\\s+(?<sessionVar>&[a-z]{1}[a-z_\\d]*)\\s*=\\s*(?<sessionValue>[^;]+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled, "pl-PL")]
-        private static partial Regex RegexSessionVariableDefine();
-        [GeneratedRegex("^\\s*declare global\\s+(?<sessionVar>&[a-z]{1}[a-z_\\d]*)\\s*=\\s*(?<sessionValue>[^;]+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled, "pl-PL")]
-        private static partial Regex RegexGlobalVariableDefine();
-
-
-
         private void QueryWatchToolStripMenuItem_Click(object sender, EventArgs e)
         {
             int databaseType = (int)_generalDbService.RelatedDatabaseType;
@@ -1940,17 +1932,6 @@ namespace JustyBaseLegacy.UI
 
         [GeneratedRegex(@"[a-zA-Z]")]
         private static partial Regex ContainsAZRegex();
-
-        private EditorDocumentId EnsureEditorDocumentId(FastColoredTextBox editor)
-        {
-            if (!_documentIdsByEditor.TryGetValue(editor, out var documentId))
-            {
-                documentId = EditorDocumentId.New();
-                _documentIdsByEditor[editor] = documentId;
-            }
-
-            return documentId;
-        }
 
         private EditorDocumentId? CurrentEditorDocumentId
         {

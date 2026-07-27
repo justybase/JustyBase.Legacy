@@ -4,7 +4,7 @@
 
 ## Context
 
-Unit coverage numbers alone do not make the legacy WinForms host easier to change. The expensive parts were process-wide static catalogs (`NetezzaHelpers.baseTableDictionary`, `IGeneralDbService.ConnectionSessions`, `DynamicCollectionForNettezaHelpers`) and logic trapped inside `BaseWindow` partials. Clean layers (ADR-001) and engine-first completion (ADR-002) already show the winning pattern: move decisions behind injectable ports and keep WinForms as an adapter. Catalog and session registry ownership have moved to DI; `DynamicCollectionForNettezaHelpers` is the remaining global cache.
+Unit coverage numbers alone do not make the legacy WinForms host easier to change. The expensive parts were process-wide static catalogs (`NetezzaHelpers.baseTableDictionary`, `IGeneralDbService.ConnectionSessions`, former `DynamicCollectionForNettezaHelpers` snippet store) and logic trapped inside `BaseWindow` partials. Clean layers (ADR-001) and engine-first completion (ADR-002) already show the winning pattern: move decisions behind injectable ports and keep WinForms as an adapter. Catalog, session registry, and Netezza editor snippet state (`INetezzaAutocompleteState`) are owned by DI.
 
 ## Decision
 
@@ -24,7 +24,7 @@ Do **not** prioritize first: thin provider stubs, full `BaseWindow` unit suites,
 + Gradual migration: existing static writers keep working while call sites switch to ports.
 + Architecture tests fail PRs that reintroduce global mutable state.
 - Session registry is a DI singleton (`ConnectionSessionRegistry`); the old `IGeneralDbService.ConnectionSessions` / `GeneralDic` statics have been removed.
-- `DynamicCollectionForNettezaHelpers` remains process-wide until a dedicated completion-cache port exists.
+- Netezza editor snippets/keywords live in injected `INetezzaAutocompleteState`; persistence helpers are `NetezzaLegacyCompletionHelpers` (no process-wide mutable completion store).
 - The Netezza table catalog is owned by `LegacyDatabaseRuntimeContext` / `INetezzaSchemaTableCatalog` — `NetezzaHelpers.baseTableDictionary` has been removed.
 - Call-site migrations must update constructors and DI registrations carefully.
 - Legacy `DatabaseExplorerControl` was removed after MVVM replacement; do not revive static-coupled WinForms explorers.
