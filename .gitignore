@@ -412,3 +412,7 @@ connectionstrings.local.json
 
 # Strong-name key for JustyBase.Legacy.TextBox (required by SignAssembly)
 !JustyBase.Legacy.TextBox/source/FCTB_key.snk
+
+# Local live-test / gallery automation run logs (never commit)
+# Example: pictures/live/last-gallery-run.txt
+**/pictures/live/last-*-run.txt
