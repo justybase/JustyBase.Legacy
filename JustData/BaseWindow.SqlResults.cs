@@ -122,6 +122,11 @@ namespace JustyBaseLegacy.UI
                     executionEvent.StatementText;
             }
 
+            // Rows batches never produce log text — avoid flooding the UI queue
+            // with ~N/500 no-op BeginInvokes during large result loads.
+            if (executionEvent.Kind is SqlExecutionEventKind.Rows or SqlExecutionEventKind.Truncated)
+                return;
+
             BeginInvoke(() =>
             {
                 if (IsDisposed || Disposing)
@@ -404,9 +409,18 @@ namespace JustyBaseLegacy.UI
 
         internal void RegisterPresentedResultGrid(TabPage tab, CustomDataGridView grid)
         {
-            RegisterLegacyResultGrid(tab, grid);
-            if (tab.Tag is TabPageResultsTag { DocumentId: { } documentId, ResultSetId: { Length: > 0 } resultSetId })
-                _resultGridRegistry.Register(new ResultSetKey(documentId, resultSetId), grid);
+            if (tab?.Tag is not TabPageResultsTag tag || string.IsNullOrWhiteSpace(tag.ResultSetId))
+                return;
+
+            if (tag.DocumentId is not { } documentId)
+                return;
+
+            string resultSetId = tag.ResultSetId;
+            if (_resultGridRegistry.TryGet(new ResultSetKey(documentId, resultSetId), out _))
+                resultSetId = Guid.NewGuid().ToString("N");
+            tag.ResultSetId = resultSetId;
+            _resultGridRegistry.Register(new ResultSetKey(documentId, resultSetId), grid);
+            PrepareDocumentationShowcaseAfterFirstResult();
         }
 
         internal void RemovePresentedResult(

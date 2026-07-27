@@ -556,8 +556,10 @@ dataGridView1.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
                         _workingRowsList.Add(item);
                     }
                     lbCnt.Text = WorkingRowsList.Count.ToString("N0");
-                    dataGridView1.RowCount = WorkingRowsList.Count;
+                    // Apply metrics while RowCount is still 0 so DPI/layout work
+                    // never walks tens of thousands of virtual rows.
                     ApplyDpiMetrics();
+                    dataGridView1.RowCount = WorkingRowsList.Count;
                 }
 
                 DgvPaintStart();
@@ -1003,9 +1005,15 @@ dataGridView1.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
             grid.RowHeadersWidth = ScaleDpi(50, dpi);
             grid.DefaultCellStyle.Padding = new Padding(cellPadX, cellPadY, cellPadX, cellPadY);
 
-            for (int i = 0; i < grid.Rows.Count; i++)
+            // VirtualMode shares row objects. Touching Rows[i].Height unshares every
+            // row and freezes/flickers the UI for large result sets. RowTemplate is
+            // enough; only patch tiny non-virtual grids (e.g. summaries).
+            if (VirtualGridRowMetricsPolicy.ShouldAssignIndividualRowHeights(grid.VirtualMode, grid.Rows.Count))
             {
-                grid.Rows[i].Height = rowHeight;
+                for (int i = 0; i < grid.Rows.Count; i++)
+                {
+                    grid.Rows[i].Height = rowHeight;
+                }
             }
         }
 

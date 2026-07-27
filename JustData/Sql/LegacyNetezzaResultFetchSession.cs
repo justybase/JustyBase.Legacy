@@ -160,7 +160,7 @@ public sealed class LegacyNetezzaResultFetchSession
     public bool ShouldCloseReaderAfterLoop() => !StopResultSets && !FetchFailed;
 
     /// <summary>
-    /// When the Log tab's IsSuccess is false, FinalizeSqlRun must keep Log selected.
+    /// When the Log tab's IsSuccess is false, keep Log selected instead of jumping to an empty Result.
     /// </summary>
     public static bool PreferLogTab(bool isSuccess) => !isSuccess;
 }

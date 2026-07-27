@@ -115,7 +115,14 @@ internal sealed class WinFormsSqlResultPresenter : IDisposable
             execution.ResultAdded -= OnResultAdded;
         }
 
-        RemovePending(documentId);
+        foreach (ResultSetKey key in _pending
+            .Where(pair => pair.Value.DocumentId == documentId)
+            .Select(pair => pair.Key)
+            .ToArray())
+        {
+            RemovePendingResult(key);
+        }
+
         _removedResults.RemoveWhere(key => key.DocumentId == documentId);
     }
 
@@ -131,10 +138,15 @@ internal sealed class WinFormsSqlResultPresenter : IDisposable
         }
 
         _removedResults.Add(key);
+        TabPage? pendingTab = null;
+        CustomDataGridView? pendingGrid = null;
         if (_pending.Remove(key, out PendingResult? pending))
         {
-            _view.RemovePresentedResult(key, pending.Tab, pending.Grid);
+            pendingTab = pending.Tab;
+            pendingGrid = pending.Grid;
         }
+
+        _view.RemovePresentedResult(key, pendingTab, pendingGrid);
     }
 
     private void RemovePending(EditorDocumentId documentId)
@@ -203,11 +215,11 @@ internal sealed class WinFormsSqlResultPresenter : IDisposable
         if (_disposed)
             return;
 
-        // Result-close originates from both a WinForms click and the clean VM
-        // (for example ClearResults at the start of a new run). Always queue
-        // the view update to avoid re-entering legacy TabControl handlers that
-        // are currently removing the same page.
-        _view.BeginInvoke(() =>
+        // Result-close originates from both a WinForms click and ClearResults at
+        // the start of a new run. When already on the UI thread, apply immediately:
+        // deferring via BeginInvoke races Started (which clears _removedResults)
+        // and then re-tombstones the reused ResultSetId, so run #2 never creates a grid.
+        void ApplyRemoval()
         {
             if (_disposed)
                 return;
@@ -222,7 +234,12 @@ internal sealed class WinFormsSqlResultPresenter : IDisposable
             }
 
             _view.RemovePresentedResult(key, pendingTab, pendingGrid);
-        });
+        }
+
+        if (_view.InvokeRequired)
+            _view.BeginInvoke(ApplyRemoval);
+        else
+            ApplyRemoval();
     }
 
     private void OnResultAdded(ResultSetKey key, ResultSetDescriptor descriptor)
