@@ -86,52 +86,6 @@ public sealed class AotLaunchSmokeTests
         }
     }
 
-    [Fact(Skip = "Login automation IDs are covered by LoginUiTests; retain one AOT launch smoke test.")]
-    [Trait("Category", "AOT")]
-    public void Aot_published_exe_shows_all_login_automation_ids()
-    {
-        AssertSkipIfAotExeMissing();
-
-        UiTestHelpers.KillExistingInstances();
-        using var application = FlaUI.Core.Application.Launch(new ProcessStartInfo
-        {
-            FileName = AotExePath,
-            UseShellExecute = false
-        });
-        using var automation = new UIA3Automation();
-        using var process = Process.GetProcessById(application.ProcessId);
-
-        try
-        {
-            Window login = WaitFor(
-                () => application.GetAllTopLevelWindows(automation)
-                    .FirstOrDefault(window => window.FindFirstDescendant(
-                        cf => cf.ByAutomationId("connectionSelectorComboBox")) is not null),
-                "the Login window from the AOT-compiled exe");
-
-            // All stable AutomationIds that LoginUiTests checks
-            foreach (var id in new[]
-            {
-                "userNameTextBox", "passwordTextBox", "serverTextBox", "connectionSelectorComboBox",
-                "selectDatabaseButton", "saveBt", "addNewButton", "deleteButton", "nameTextBox",
-                "checkBoxFastLogin", "xButton", "btReorder", "checkBox1", "databaseComboBox",
-                "DriverComboBox", "rememberAsDefaultCheckBox"
-            })
-            {
-                Assert.NotNull(login.FindFirstDescendant(cf => cf.ByAutomationId(id)));
-            }
-        }
-        finally
-        {
-            if (!process.HasExited)
-            {
-                try { application.Kill(); }
-                catch (InvalidOperationException) { }
-                process.WaitForExit(10_000);
-            }
-        }
-    }
-
     private static void AssertSkipIfAotExeMissing()
     {
         if (!File.Exists(AotExePath))

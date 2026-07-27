@@ -79,6 +79,7 @@ public sealed class Phase8WorkflowUiTests : IDisposable
 
     [Fact]
     [Trait("Category", "UI")]
+    [Trait("Category", "RefactorPhaseSpot")]
     public void Query_export_streams_csv_and_xlsx_and_preserves_import_entry_point()
     {
         UiTestHelpers.EnsureTestoweProfile();

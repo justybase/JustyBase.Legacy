@@ -19,6 +19,7 @@ public sealed class SqlAutocompleteUiTests
 
     [Fact]
     [Trait("Category", "UI")]
+    [Trait("Category", "RefactorPhaseSpot")]
     public void TestoweConnection_CompletesDimDateAliasedColumnInWhere()
     {
         UiTestHelpers.EnsureTestoweProfile();

@@ -6,6 +6,7 @@ public sealed class Phase9SmokeUiTests
 {
     [Fact]
     [Trait("Category", "Smoke")]
+    [Trait("Category", "RefactorPhaseSpot")]
     public void Login_and_core_panels_are_available()
     {
         using var session = UiTestHelpers.LaunchAndLogin();
