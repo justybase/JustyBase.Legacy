@@ -1,10 +1,12 @@
 using AppBase.Common.Enums;
 using AppBase.Common;
 using AppBase.Common.Configuration;
+using AppBase.Common.Interfaces;
 using AppBase.Data;
 using AppBase.Data.Core.Core;
 using AppBase.Data.Core.Interfaces;
 using AppBase.Data.Core.Models;
+using JustData.Application.Login;
 using JustData.Application.Schema;
 using System.Collections.Concurrent;
 
@@ -19,26 +21,32 @@ public sealed class LegacySchemaRepository : ISchemaRepository
 {
     private readonly IGeneralDbService _generalDbService;
     private readonly AppBase.Common.Interfaces.IDatabaseRuntimeContext _databaseRuntimeContext;
+    private readonly INetezzaCompletionRuntimeContext _completionRuntime;
     private readonly IConnectionSessionRegistry _connectionSessions;
-    private readonly INetezzaSchemaTableCatalog _schemaTables;
+    private readonly INetezzaSchemaTableCatalogWriter _schemaTables;
+    private readonly IConnectionProfileCatalog _profiles;
     private readonly ConcurrentDictionary<string, Task> _refreshes = new(StringComparer.OrdinalIgnoreCase);
 
     public LegacySchemaRepository(
         IGeneralDbService generalDbService,
         AppBase.Common.Interfaces.IDatabaseRuntimeContext databaseRuntimeContext,
+        INetezzaCompletionRuntimeContext completionRuntime,
         IConnectionSessionRegistry connectionSessions,
-        INetezzaSchemaTableCatalog schemaTables)
+        INetezzaSchemaTableCatalogWriter schemaTables,
+        IConnectionProfileCatalog profiles)
     {
         _generalDbService = generalDbService ?? throw new ArgumentNullException(nameof(generalDbService));
         _databaseRuntimeContext = databaseRuntimeContext ?? throw new ArgumentNullException(nameof(databaseRuntimeContext));
+        _completionRuntime = completionRuntime ?? throw new ArgumentNullException(nameof(completionRuntime));
         _connectionSessions = connectionSessions ?? throw new ArgumentNullException(nameof(connectionSessions));
         _schemaTables = schemaTables ?? throw new ArgumentNullException(nameof(schemaTables));
+        _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
     }
 
     public Task<IReadOnlyList<SchemaNode>> GetRootsAsync(string? connectionName = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        IEnumerable<string> names = _generalDbService.LoginDataDic.Keys;
+        IEnumerable<string> names = _profiles.ConnectionNames;
         if (string.IsNullOrWhiteSpace(connectionName))
             names = names.Concat(_connectionSessions.Keys).Distinct(StringComparer.OrdinalIgnoreCase);
         else
@@ -57,11 +65,12 @@ public sealed class LegacySchemaRepository : ISchemaRepository
         cancellationToken.ThrowIfCancellationRequested();
         if (!_connectionSessions.TryGetValue(parent.Path.Connection, out var database))
         {
-            if (parent.Kind == SchemaNodeKind.Connection && _generalDbService.LoginDataDic.TryGetValue(parent.Path.Connection, out var login))
+            if (parent.Kind == SchemaNodeKind.Connection
+                && _profiles.TryGetProfile(parent.Path.Connection, out ConnectionProfile profile))
             {
                 return [
-                    new SchemaNode($"{parent.Id}/{login.Database}", login.Database, SchemaNodeKind.Database,
-                        new(parent.Path.Connection, login.Database), true)];
+                    new SchemaNode($"{parent.Id}/{profile.Database}", profile.Database, SchemaNodeKind.Database,
+                        new(parent.Path.Connection, profile.Database), true)];
             }
 
             return [];
@@ -100,7 +109,7 @@ public sealed class LegacySchemaRepository : ISchemaRepository
         if (query.Length == 0) return new SchemaSearchResult([]);
 
         List<SchemaNode> matches = [];
-        foreach (string connection in _generalDbService.LoginDataDic.Keys.Concat(_connectionSessions.Keys).Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (string connection in _profiles.ConnectionNames.Concat(_connectionSessions.Keys).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (!string.IsNullOrWhiteSpace(request.Connection) && !connection.Equals(request.Connection, StringComparison.OrdinalIgnoreCase)) continue;
             if (!_connectionSessions.TryGetValue(connection, out var database)) continue;
@@ -219,8 +228,12 @@ public sealed class LegacySchemaRepository : ISchemaRepository
         return Task.FromResult(LegacySqlReferenceParser.Parse(sql));
     }
 
-    public async Task RefreshAsync(string? connectionName = null, CancellationToken cancellationToken = default)
+    public async Task RefreshAsync(
+        string? connectionName = null,
+        CancellationToken cancellationToken = default,
+        SchemaRefreshRequest? request = null)
     {
+        SchemaRefreshRequest effective = request ?? new SchemaRefreshRequest();
         IEnumerable<string> names = string.IsNullOrWhiteSpace(connectionName)
             ? _connectionSessions.Keys
             : [connectionName];
@@ -228,13 +241,73 @@ public sealed class LegacySchemaRepository : ISchemaRepository
         {
             if (!_connectionSessions.TryGetValue(name, out var database)) continue;
             cancellationToken.ThrowIfCancellationRequested();
-            Task refresh = _refreshes.GetOrAdd(name, _ => RefreshDatabaseAsync(name, database, cancellationToken));
-            try { await refresh.WaitAsync(cancellationToken).ConfigureAwait(false); }
-            finally { _refreshes.TryRemove(name, out _); }
+
+            // Single-flight per connection. The in-flight work must NOT be tied to a
+            // caller's CT: rapid UI refresh cancels the waiter, and a shared cancelled
+            // task was poisoning later waiters with TaskCanceledException (app crash)
+            // while finally{TryRemove} allowed overlapping DownloadSchemaNetezza runs
+            // ("Collection was modified").
+            Task refresh = _refreshes.GetOrAdd(name, _ => RunRefreshAndClearAsync(name, database, effective));
+            try
+            {
+                await refresh.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
         }
     }
 
-    private async Task RefreshDatabaseAsync(string connectionName, IGeneralDb database, CancellationToken cancellationToken)
+    public async Task<bool> AttachDatabaseAsync(
+        string connectionName,
+        string databaseName,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionName))
+            throw new ArgumentException("A connection name is required.", nameof(connectionName));
+        if (string.IsNullOrWhiteSpace(databaseName))
+            throw new ArgumentException("A database name is required.", nameof(databaseName));
+        if (!_connectionSessions.TryGetValue(connectionName, out var database) || database is not INetezza netezza)
+            return false;
+
+        cancellationToken.ThrowIfCancellationRequested();
+        bool success = await netezza.DownloadOneDb(connectionName, databaseName)
+            .WaitAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (!success)
+            return false;
+
+        ClearConnectionSchemaCaches(connectionName);
+        string? userName = _profiles.TryGetProfile(connectionName, out ConnectionProfile profile)
+            ? profile.UserName
+            : null;
+        NetezzaHelpers.InitializeConnectionSchemaData(
+            _databaseRuntimeContext,
+            _connectionSessions,
+            _schemaTables,
+            userName,
+            connectionName);
+        return true;
+    }
+
+    private async Task RunRefreshAndClearAsync(string connectionName, IGeneralDb database, SchemaRefreshRequest request)
+    {
+        try
+        {
+            await RefreshDatabaseAsync(connectionName, database, request, CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            _refreshes.TryRemove(connectionName, out _);
+        }
+    }
+
+    private async Task RefreshDatabaseAsync(
+        string connectionName,
+        IGeneralDb database,
+        SchemaRefreshRequest request,
+        CancellationToken cancellationToken)
     {
         await Task.Run(database.InitDb, cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
@@ -245,21 +318,46 @@ public sealed class LegacySchemaRepository : ISchemaRepository
         // MVVM tree can load schemas/tables without relying on a hidden TreeView.
         if (database is INetezza netezza)
         {
+            NetezzaRefreshMode mode = MapMode(request.Mode);
+            List<string>? dbsToRefresh = request.DatabasesToRefresh is { Count: > 0 }
+                ? request.DatabasesToRefresh.ToList()
+                : null;
+
             bool downloaded = await netezza.DownloadSchemaNetezza(
                 connectionName,
-                NetezzaRefreshMode.partial,
-                dbsToRefresh: null,
-                loadSources: false,
+                mode,
+                dbsToRefresh,
+                loadSources: request.LoadSources,
                 showInUiExtra: null).WaitAsync(cancellationToken).ConfigureAwait(false);
-            if (downloaded)
-            {
-                string? userName = _generalDbService.LoginDataDic.TryGetValue(connectionName, out var login)
-                    ? login.UserName
-                    : null;
-                NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, _connectionSessions, _schemaTables, userName, connectionName);
-            }
+            if (!downloaded)
+                throw new InvalidOperationException($"Failed to refresh schema for connection '{connectionName}'.");
+
+            ClearConnectionSchemaCaches(connectionName);
+            string? userName = _profiles.TryGetProfile(connectionName, out ConnectionProfile profile)
+                ? profile.UserName
+                : null;
+            NetezzaHelpers.InitializeConnectionSchemaData(
+                _databaseRuntimeContext,
+                _connectionSessions,
+                _schemaTables,
+                userName,
+                connectionName);
         }
     }
+
+    private void ClearConnectionSchemaCaches(string connectionName)
+    {
+        _schemaTables.ClearConnection(connectionName);
+        _completionRuntime.ClearSchemaLookup(connectionName);
+        _completionRuntime.ClearDatabaseOwners(connectionName);
+    }
+
+    private static NetezzaRefreshMode MapMode(SchemaRefreshMode mode) => mode switch
+    {
+        SchemaRefreshMode.Full => NetezzaRefreshMode.full,
+        SchemaRefreshMode.PartialOnlyTables => NetezzaRefreshMode.partialOnlyTables,
+        _ => NetezzaRefreshMode.partial
+    };
 
     private IReadOnlyList<SchemaNode> MapDatabases(SchemaNode parent, IGeneralDb database)
     {
@@ -289,10 +387,10 @@ public sealed class LegacySchemaRepository : ISchemaRepository
         // their first schema refresh. Keep the logged-in profile database visible
         // while that refresh is still in progress instead of rendering a dead root.
         if (!names.Any()
-            && _generalDbService.LoginDataDic.TryGetValue(parent.Path.Connection, out var login)
-            && !string.IsNullOrWhiteSpace(login.Database))
+            && _profiles.TryGetProfile(parent.Path.Connection, out ConnectionProfile profile)
+            && !string.IsNullOrWhiteSpace(profile.Database))
         {
-            names = [login.Database];
+            names = [profile.Database];
         }
 
         return names.Select(name => new SchemaNode($"{parent.Id}/{name}", name, SchemaNodeKind.Database,

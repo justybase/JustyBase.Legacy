@@ -89,18 +89,6 @@ namespace JustyBaseLegacy.UI
         public TextBox TbFastSchemaSearch { get => _mvvmDatabaseExplorerControl?.TbFastSchemaSearch; }
         public DataGridView DgvFastDbBrowser { get => _mvvmDatabaseExplorerControl?.DgvFastDbBrowser; }
 
-
-        public void EnsureNetezzaLoadSchemaTreeViewPhaseInvoked(string selConnName)
-        {
-            if (InvokeRequired)
-            {
-                Invoke(() => NetezzaLoadSchemaTreeViewPhase(selConnName, addToExisting: true));
-            }
-            else
-            {
-                NetezzaLoadSchemaTreeViewPhase(selConnName, addToExisting: true);
-            }
-        }
         public async Task CbConnectionsSelectedIndexChanged(Action<bool> chageEnableStateOfNotAddedTab)
         {
             //SelectedConnectionName = cbConnections.SelectedItem as string;
@@ -125,7 +113,12 @@ namespace JustyBaseLegacy.UI
 
                     SchemaRefreshOptionEnable(false);
                     chageEnableStateOfNotAddedTab(false);
-                    var nz = new Netezza(_databaseRuntimeContext, _loggerLoud, _importExportTasks, _generalDbService)
+                    var nz = new Netezza(
+                        _databaseRuntimeContext,
+                        _loggerLoud,
+                        _importExportTasks,
+                        _generalDbService,
+                        _netezzaHelperService)
                     {
                         ConnectionString = _generalDbService.ConnectionStringForNz(_applicationSettingsContext.Config.ConnectionTimeout, selConnName),
                         ConnectionName = selConnName,
@@ -144,13 +137,21 @@ namespace JustyBaseLegacy.UI
                         _completionRuntimeContext.ReplaceDatabaseDictionary(_applicationSettingsContext.Config.CachedDatabaseDictionary);
                     }
 
-                    // Skip legacy NetezzaLoadSchemaTreeViewPhase before download — no data yet.
-                    // The callback inside DownloadSchemaNetezza provides progress, and the
-                    // final MVVM InitializeAsync(selConnName) renders the tree correctly.
                     _completionRuntimeContext.ClearDatabaseDictionary(); // to avoid keeping dummy data in memory
 
-                    schemaDownloadSucceeded = await nz.DownloadSchemaNetezza(selConnName, NetezzaRefreshMode.partial, null, false,
-                        () => EnsureNetezzaLoadSchemaTreeViewPhaseInvoked(selConnName));
+                    try
+                    {
+                        await _schemaRefreshCoordinator.RefreshAsync(
+                            selConnName,
+                            new JustData.Application.Schema.SchemaRefreshRequest(
+                                JustData.Application.Schema.SchemaRefreshMode.Partial));
+                        schemaDownloadSucceeded = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        schemaDownloadSucceeded = false;
+                        _loggerLoud.LogError("Error while downloading Netezza schema for {ConnectionName}", ex);
+                    }
              
                     if (!schemaDownloadSucceeded)
                     {
@@ -175,7 +176,9 @@ namespace JustyBaseLegacy.UI
 
                     if (schemaDownloadSucceeded)
                     {
-                        await RefreshTableListInternalAsync(selConnName, false);
+                        // Partial download seeds the catalog; full refresh populates every
+                        // database (legacy RefreshTableListInternalAsync after first connect).
+                        await RefreshTableListInternalAsync(selConnName, disableInUi: false);
                         statusTextBox.Text = $"Schema downloaded";
                     }
                    
@@ -197,7 +200,7 @@ namespace JustyBaseLegacy.UI
                     _netezzaSqlCompletionServices.EnsureSchemaForConnection(_completionContext, selConnName);
                 }
             }
-            else if (_generalDbService.LoginDataDic.ContainsKey(selConnName)
+            else if (_connectionProfileCatalog.TryGetProfile(selConnName, out _)
                 && (_generalDbService.DriverName(selConnName) == "DB2"
                     || _generalDbService.DBname(selConnName).EndsWith("accdb", StringComparison.OrdinalIgnoreCase)
                     || _generalDbService.DriverName(selConnName) == "Oracle"
@@ -273,7 +276,7 @@ namespace JustyBaseLegacy.UI
                 }
 
             }
-            else if (!_generalDbService.LoginDataDic.ContainsKey(selConnName))
+            else if (!_connectionProfileCatalog.TryGetProfile(selConnName, out _))
             {
                 _loggerLoud.MessageBox_Show(this, $"{selConnName} was not found.", "Connection not found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
@@ -301,59 +304,6 @@ namespace JustyBaseLegacy.UI
                 }
             }
         }
-        private static void CopyTree(TreeView source, TreeView destination, bool addToExisting = false)
-        {
-            if (source.InvokeRequired)
-            {
-                source.Invoke(() =>
-                {
-                    doCopy(source, destination, addToExisting);
-                });
-            }
-            else
-            {
-                doCopy(source, destination, addToExisting);
-            }
-
-            static void doCopy(TreeView cel, TreeView zrodlo, bool addToExisting)
-            {
-                cel.BeginUpdate();
-                cel.ShowNodeToolTips = true;
-                int index = -1;
-
-                // Snapshot source nodes to guard against concurrent modification.
-                TreeNode[] sourceNodes = zrodlo.Nodes.Cast<TreeNode>().ToArray();
-                if (sourceNodes.Length == 0)
-                {
-                    cel.EndUpdate();
-                    return;
-                }
-
-                if (!addToExisting)
-                {
-                    cel.Nodes.Clear();
-                }
-                else if (cel.Nodes.ContainsKey(sourceNodes[0].Name))
-                {
-                    index = cel.Nodes[sourceNodes[0].Name].Index;
-                    cel.Nodes.RemoveAt(cel.Nodes.IndexOfKey(sourceNodes[0].Name));
-                }
-
-                if (addToExisting && index != -1 && sourceNodes.Length == 1 && cel.Nodes.Count >= index)
-                {
-                    cel.Nodes.Insert(index, (TreeNode)sourceNodes[0].Clone());
-                }
-                else
-                {
-                    foreach (TreeNode node in sourceNodes)
-                    {
-                        cel.Nodes.Add((TreeNode)node.Clone());
-                    }
-                }
-                cel.EndUpdate();
-            }
-        }
-
         private void CollapseDatabaseMenuItem_Click(object sender, EventArgs e)
         {
             _mvvmDatabaseExplorerControl?.DatabaseTreeView?.CollapseAll();
@@ -373,286 +323,8 @@ namespace JustyBaseLegacy.UI
             });
         }
 
-        private void SwapTreeViewNodes(bool addToExisting, string connectionName, TreeView auxiliaryDatabaseTreeView, List<(TreeNode, string, List<string> names)> tvl)
-        {
-            if (CurrentUpper is not null && _completionContext.DatabaseDictionary.ContainsKey(connectionName))
-            {
-                CurrentUpper.ExtendDatabasesList(_completionContext.DatabaseDictionary[connectionName].Values.Select(arg => arg.DatabaseName).ToArray());
-                _mvvmDatabaseExplorerControl.CbWhatDb.Items.Clear();
-                _mvvmDatabaseExplorerControl.CbWhatDb.Items.Add("all");
-                _mvvmDatabaseExplorerControl.CbWhatDb.Items.AddRange(_completionContext.DatabaseDictionary[connectionName].Values.ToArray().Select(arg => arg.DatabaseName).ToArray());
-                _mvvmDatabaseExplorerControl.CbWhatDb.SelectedIndex = 0;
-            }
-            _mvvmDatabaseExplorerControl?.DatabaseTreeView?.BeginUpdate();
+        private ContextMenuStrip _emptyContextMenuStrip = new ContextMenuStrip();
 
-            var selNode = _mvvmDatabaseExplorerControl?.DatabaseTreeView?.SelectedNode;
-
-            string selNodeName = "";
-            string selNodeFullPath = "";
-            if (selNode != null)
-            {
-                selNodeName = selNode.Name;
-                selNodeFullPath = _mvvmDatabaseExplorerControl?.DatabaseTreeView?.SelectedNode?.FullPath ?? "";
-            }
-            BuildExpandedFullPath(_mvvmDatabaseExplorerControl?.DatabaseTreeView, tvl);
-            CopyTree(_mvvmDatabaseExplorerControl?.DatabaseTreeView, auxiliaryDatabaseTreeView, addToExisting);
-
-            _completionRuntimeContext.SchemaRefreshed = true;
-
-            try
-            {
-                // ExpandLastKnownFull removed with old DatabaseExplorerControl
-                TryExpandTreeNodes(_mvvmDatabaseExplorerControl?.DatabaseTreeView, tvl);
-            }
-            catch (Exception exception)
-            {
-                Trace.WriteLine($"Restoring the schema tree expansion failed: {exception.GetType().Name}");
-            }
-
-            if (selNode != null)
-            {
-                var nodesArray = _mvvmDatabaseExplorerControl?.DatabaseTreeView?.Nodes.Find(selNodeName, true);
-                if (nodesArray is not null)
-                {
-                    for (int i = 0; i < nodesArray.Length; i++)
-                    {
-                        if (nodesArray[i].FullPath == selNodeFullPath)
-                        {
-                            _mvvmDatabaseExplorerControl.DatabaseTreeView.SelectedNode = nodesArray[i];
-                            break;
-                        }
-                    }
-                }
-            }
-            _completionRuntimeContext.SchemaRefreshed = false;
-            _mvvmDatabaseExplorerControl?.DatabaseTreeView?.EndUpdate();
-        }
-
-        private void NetezzaLoadSchemaTreeViewPhaseInvoked(string connectionName, bool addToExisting = false, string swapOnlyDbName = null)
-        {
-            Invoke(() => NetezzaLoadSchemaTreeViewPhase(connectionName, addToExisting, swapOnlyDbName));
-        }
-
-        public void NetezzaLoadSchemaTreeViewPhase(string connectionName, bool addToExisting = false, string swapOnlyDbName = null)
-        {
-            connectionName = string.Intern(connectionName);
-            if (_completionContext.SchemaRefreshed)
-            {
-                _completionRuntimeContext.SchemaRefreshed = false;
-                if (_mvvmDatabaseExplorerControl is not null)
-                    _mvvmDatabaseExplorerControl.DatabaseTreeView.Enabled = false;
-                TreeView auxiliaryDatabaseTreeView = new TreeView();
-
-                try
-                {
-                    statusTextBox.Text = $"schema loading";
-                    try
-                    {
-                        _schemaTables.ClearConnection(connectionName);
-                        _completionRuntimeContext.ClearSchemaLookup(connectionName);
-                        _completionRuntimeContext.ClearDatabaseOwners(connectionName);
-
-                        TreeNode root = auxiliaryDatabaseTreeView.Nodes.Add(connectionName, connectionName);
-
-                        root.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.server, OBJECT_ID = 0 };
-                        root.ToolTipText = _generalDbService.Server(connectionName);
-                        root.ImageIndex = 25;
-                        root.SelectedImageIndex = 25;
-
-                        if (_completionContext.DatabaseDictionary.TryGetValue(connectionName, out var pairs))
-                        {
-                            foreach (var database in pairs)
-                            {
-                                //pod tree view
-                                var dbNode = root.Nodes.Add(database.Value.DatabaseName);
-                                dbNode.Name = database.Value.DatabaseName;
-                                dbNode.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.dbase, OBJECT_ID = database.Key };
-                                dbNode.ImageIndex = 0;
-                                dbNode.SelectedImageIndex = 0;
-
-                                var n1 = dbNode.Nodes.Add("Tables", "Tables");
-                                n1.ContextMenuStrip = cmAllTables;
-                                n1.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.baseTables, OBJECT_ID = database.Key };
-                                n1.Nodes.Add("fool", "Loading…");
-                                n1.ImageIndex = 1;
-                                n1.SelectedImageIndex = 1;
-
-                                var n7 = dbNode.Nodes.Add("External Tables", "External Tables");
-                                n7.ContextMenuStrip = _emptyContextMenuStrip;
-                                n7.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.baseExternals, OBJECT_ID = database.Key };
-                                n7.Nodes.Add("fool", "Loading…");
-                                n7.ImageIndex = 10;
-                                n7.SelectedImageIndex = 10;
-
-                                var n2 = dbNode.Nodes.Add("Views", "Views");
-                                n2.ContextMenuStrip = cmAllViews;
-                                n2.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.baseViews, OBJECT_ID = database.Key };
-                                n2.Nodes.Add("fool", "Loading…");
-                                n2.ImageIndex = 2;
-                                n2.SelectedImageIndex = 2;
-
-                                var n3 = dbNode.Nodes.Add("Procedures", "Procedures");
-                                n3.ContextMenuStrip = cmAllProcsNetezza;
-                                n3.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.baseProcedures, OBJECT_ID = database.Key };
-                                n3.Nodes.Add("fool", "Loading…");
-                                n3.ImageIndex = 5;
-                                n3.SelectedImageIndex = 5;
-
-                                var n4 = dbNode.Nodes.Add("Sequences", "Sequences");
-                                n4.ContextMenuStrip = contextMenuStripNetezzaSequences;
-                                n4.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.baseSequence, OBJECT_ID = database.Key };
-                                n4.Nodes.Add("fool", "Loading…");
-                                n4.ImageIndex = 7;
-                                n4.SelectedImageIndex = 7;
-
-                                var n5 = dbNode.Nodes.Add("Functions", "Functions");
-                                n5.ContextMenuStrip = _emptyContextMenuStrip;
-                                n5.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.baseFunctions, OBJECT_ID = database.Key };
-                                n5.Nodes.Add("fool", "Loading…");
-                                n5.ImageIndex = 15;
-                                n5.SelectedImageIndex = 15;
-
-                                var n6 = dbNode.Nodes.Add("Synonyms", "Synonyms");
-                                n6.ContextMenuStrip = cmSynonyms;
-                                n6.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.baseSynonyms, OBJECT_ID = database.Key };
-                                n6.Nodes.Add("fool", "Loading…");
-                                n6.ImageIndex = 17;
-                                n6.SelectedImageIndex = 17;
-
-                                var n8 = dbNode.Nodes.Add("Aggregate", "Aggregate");
-                                n8.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.baseAggregates, OBJECT_ID = database.Key };
-                                n8.Nodes.Add("fool", "Loading…");
-                                n8.ImageIndex = 16;
-                                n8.SelectedImageIndex = 16;
-
-                                var n9 = dbNode.Nodes.Add("Fluid Query Data Sources", "Fluid Query Data Sources");
-                                n9.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.baseFluides, OBJECT_ID = database.Key };
-                                n9.ImageIndex = 35;
-                                n9.SelectedImageIndex = 35;
-                                n9.Nodes.Add("fool", "Loading…");
-                            }
-                        }
-                        var treeNode = root.Nodes.Add("Server Info");
-                        treeNode.Name = "Server Info";
-                        treeNode.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.serverInfo, OBJECT_ID = -1 };
-                        treeNode.ImageIndex = 21;
-                        treeNode.SelectedImageIndex = 21;
-                        treeNode.ContextMenuStrip = _emptyContextMenuStrip;
-
-                        var nx = treeNode.Nodes.Add("Server");
-                        nx.Name = "Server";
-                        nx.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.serverInfoNext, OBJECT_ID = -2 };
-                        nx.ImageIndex = treeNode.ImageIndex;
-                        nx.SelectedImageIndex = treeNode.ImageIndex;
-                        nx.ContextMenuStrip = _emptyContextMenuStrip;
-
-                        var nn = nx.Nodes.Add(NetezzaSystemSql.ServerInformation, NetezzaHelpers.ServerVersion);
-                        nn.ToolTipText = "Double click for more info";
-                        nn.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.serverInfo, OBJECT_ID = -3 };
-                        nn.ImageIndex = nx.ImageIndex;
-                        nn.SelectedImageIndex = nx.SelectedImageIndex;
-                        nn.ContextMenuStrip = _emptyContextMenuStrip;
-
-                        nn = nx.Nodes.Add(NetezzaSystemSql.EnvironmentInformation, "Environment Variables");
-                        nn.ToolTipText = "Double click for more info";
-                        nn.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.serverInfo, OBJECT_ID = -4 };
-                        nn.ImageIndex = nx.ImageIndex;
-                        nn.SelectedImageIndex = nx.SelectedImageIndex;
-                        nn.ContextMenuStrip = _emptyContextMenuStrip;
-
-                        nn = nx.Nodes.Add(NetezzaSystemSql.HardwareInformation, "SPU Units");
-                        nn.ToolTipText = "Double click for more info";
-                        nn.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.serverInfo, OBJECT_ID = -5 };
-                        nn.ImageIndex = nx.ImageIndex;
-                        nn.SelectedImageIndex = nx.SelectedImageIndex;
-                        nn.ContextMenuStrip = _emptyContextMenuStrip;
-
-                        nx = treeNode.Nodes.Add("Security");
-                        nx.Name = "Security";
-                        nx.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.serverInfoNext, OBJECT_ID = -6 };
-                        nx.ImageIndex = 22;
-                        nx.SelectedImageIndex = 22;
-                        nx.ContextMenuStrip = _emptyContextMenuStrip;
-
-                        nn = nx.Nodes.Add(NetezzaSystemSql.Users, "_v_user");
-                        nn.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.serverInfo, OBJECT_ID = -7 };
-                        nn.ToolTipText = "Double click for more info";
-                        nn.ImageIndex = nx.ImageIndex;
-                        nn.SelectedImageIndex = nx.SelectedImageIndex;
-                        nn.ContextMenuStrip = contextMenuStripNetezzaUsersOrGroups;
-
-                        nn = nx.Nodes.Add(NetezzaSystemSql.GroupUsers, "_v_groupusers");
-                        nn.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.serverInfo, OBJECT_ID = -8 };
-                        nn.ToolTipText = "Double click for more info";
-                        nn.ImageIndex = nx.ImageIndex;
-                        nn.SelectedImageIndex = nx.SelectedImageIndex;
-                        nn.ContextMenuStrip = contextMenuStripNetezzaUsersOrGroups;
-
-
-                        nn = nx.Nodes.Add(NetezzaSystemSql.UserSecurity, "_v_user_security");
-                        nn.Tag = new DatabaseTag() { KIND_ID = TypeInDatabase.serverInfo, OBJECT_ID = -9 };
-                        nn.ToolTipText = "Double click for more info";
-                        nn.ImageIndex = nx.ImageIndex;
-                        nn.SelectedImageIndex = nx.SelectedImageIndex;
-                        nn.ContextMenuStrip = _emptyContextMenuStrip;
-
-                        List<(TreeNode, string, List<string>)> tvl = new List<(TreeNode, string, List<string>)>();
-                        string userName = _applicationSession.CurrentLogin?.Profile.UserName ?? string.Empty;
-                        bool flowControl = NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, _connectionSessions, _schemaTables, userName, connectionName);
-                        //if (!flowControl)
-                        //{
-                        //    return;
-                        //}
-
-                        if (!string.IsNullOrWhiteSpace(swapOnlyDbName))
-                        {
-                            // SwapTreeViewNodesOnDb removed with old DatabaseExplorerControl
-                            _ = _mvvmDatabaseExplorerControl?.RefreshAsync();
-                        }
-                        else
-                        {
-                            SwapTreeViewNodes(addToExisting, connectionName, auxiliaryDatabaseTreeView, tvl);
-                        }
-
-                        _completionRuntimeContext.SchemaRefreshed = true;
-                    }
-                    catch (Exception e)
-                    {
-                        _loggerLoud.MessageBox_Show(this, e.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        var action = () =>
-                        {
-                            if (InvokeRequired)
-                            {
-                                Invoke(() => Application.Restart());
-                            }
-                            else
-                            {
-                                Application.Restart();
-                            }
-                        };
-                        NetezzaHelpers.OnSchemaProblemNetezzaAskForRestart(_databaseRuntimeContext, _loggerLoud, connectionName, action);
-                    }
-
-                }
-                catch (Exception)
-                {
-                    NetezzaSchemaRefreshErrorInfo();
-                }
-                finally
-                {
-                    if (_mvvmDatabaseExplorerControl is not null)
-                        _mvvmDatabaseExplorerControl.DatabaseTreeView.Enabled = true;
-                    _completionRuntimeContext.SchemaRefreshed = true;
-                    _netezzaSqlCompletionServices.InvalidateSchema();
-                    ResetAutocompleteCachesForAllEditors();
-                    _netezzaSqlCompletionServices.EnsureSchemaForConnection(_completionContext, connectionName);
-                }
-            }
-            else
-            {
-                System.Diagnostics.Trace.WriteLine("problem NetezzaLoadSchemaFromSqliteDb");
-            }
-        }
         private bool _refreshTableListInProgress;
 
         public bool RefreshTableListInProgress => _refreshTableListInProgress;
@@ -758,17 +430,17 @@ namespace JustyBaseLegacy.UI
             string conName = null;
             var treeView = _mvvmDatabaseExplorerControl?.DatabaseTreeView;
             if (treeView?.SelectedNode is not null &&
-                treeView.SelectedNode.Level == 0 && _generalDbService.LoginDataDic.ContainsKey(treeView.SelectedNode.Name))
+                treeView.SelectedNode.Level == 0 && _connectionProfileCatalog.TryGetProfile(treeView.SelectedNode.Name, out _))
             {
                 conName = treeView.SelectedNode.Name;
             }
             else if (treeView?.SelectedNode is not null &&
-                treeView.SelectedNode.Level == 1 && _generalDbService.LoginDataDic.ContainsKey(treeView.SelectedNode.Parent.Name))
+                treeView.SelectedNode.Level == 1 && _connectionProfileCatalog.TryGetProfile(treeView.SelectedNode.Parent.Name, out _))
             {
                 conName = treeView.SelectedNode.Parent.Name;
             }
             else if (treeView?.SelectedNode is not null &&
-            treeView.SelectedNode.Level == 2 && _generalDbService.LoginDataDic.ContainsKey(treeView.SelectedNode.Parent.Parent.Name))
+            treeView.SelectedNode.Level == 2 && _connectionProfileCatalog.TryGetProfile(treeView.SelectedNode.Parent.Parent.Name, out _))
             {
                 conName = treeView.SelectedNode.Parent.Parent.Name;
             }
@@ -793,41 +465,56 @@ namespace JustyBaseLegacy.UI
             }
             try
             {
-                // index was consumed by legacy InitSchema; MVVM manages its own tree
-
-                if (_generalDbService.DriverName(conName) == "NetezzaSQL")
+                if (_generalDbService.DriverName(conName) != "NetezzaSQL"
+                    && (!_connectionSessions.TryGetValue(conName, out var generalDb) || generalDb is null))
                 {
-                    await nzNodeRefresh(conName, refreshMode);
+                    IGeneralDb gdb = _generalDbService.GetGeneralDb(_databaseRuntimeContext, _loggerLoud, _importExportTasks, conName, out string dbName);
+                    gdb.Username = _generalDbService.UserName(conName);
+                    CurrentUpper.ExtendDatabasesList(new string[] { _generalDbService.DBname(conName) });
+                    statusTextBox.Text = $"{dbName} schema refreshing";
+                    _connectionSessions.Set(conName, gdb);
                 }
-                else
+
+                JustData.Application.Schema.SchemaRefreshMode mode = refreshMode switch
                 {
-                    try
+                    NetezzaRefreshMode.full => JustData.Application.Schema.SchemaRefreshMode.Full,
+                    NetezzaRefreshMode.partialOnlyTables => JustData.Application.Schema.SchemaRefreshMode.PartialOnlyTables,
+                    _ => JustData.Application.Schema.SchemaRefreshMode.Partial
+                };
+
+                List<string> dbsToRefresh = null;
+                if (refreshMode == NetezzaRefreshMode.partialOnlyTables
+                    && _mvvmDatabaseExplorerControl?.DatabaseTreeView?.Nodes.ContainsKey(conName) == true)
+                {
+                    dbsToRefresh = new List<string>();
+                    foreach (TreeNode node in _mvvmDatabaseExplorerControl.DatabaseTreeView.Nodes[conName].Nodes)
                     {
-                        if (!_connectionSessions.TryGetValue(conName, out var generalDb) || generalDb is null)
-                        {
-                            IGeneralDb gdb = _generalDbService.GetGeneralDb(_databaseRuntimeContext, _loggerLoud, _importExportTasks, conName, out string dbName);
-                            gdb.Username = _generalDbService.UserName(conName);
-
-                            CurrentUpper.ExtendDatabasesList(new string[] { _generalDbService.DBname(conName) });
-
-                            SchemaRefreshOptionEnable(false);
-                            //await refreshSecond();
-                            statusTextBox.Text = $"{dbName} schema refreshing";
-
-                            _connectionSessions.Set(conName, gdb);
-                        }
-
-                        await _schemaRefreshCoordinator.RefreshAsync(conName);
-                        // Schema refreshed via MVVM ViewModel instead of legacy InitSchema
-                        if (_mvvmDatabaseExplorerControl is not null)
-                        {
-                            await _mvvmDatabaseExplorerControl.RefreshAsync();
-                        }
+                        if (node.IsExpanded && node.Tag is DatabaseTag dlaBazy && dlaBazy.KIND_ID == TypeInDatabase.dbase)
+                            dbsToRefresh.Add(node.Text);
                     }
-                    catch (Exception ex)
-                    {
+                }
+
+                InvokeOnMainWindow(() => statusTextBox.Text = "Schema downloading");
+                try
+                {
+                    await _schemaRefreshCoordinator.RefreshAsync(
+                        conName,
+                        new JustData.Application.Schema.SchemaRefreshRequest(mode, dbsToRefresh));
+                    InvokeOnMainWindow(() => statusTextBox.Text = "Schema downloaded");
+
+                    _netezzaSqlCompletionServices.InvalidateSchema();
+                    ResetAutocompleteCachesForAllEditors();
+                    _netezzaSqlCompletionServices.EnsureSchemaForConnection(_completionContext, conName);
+
+                    if (_mvvmDatabaseExplorerControl is not null)
+                        await _mvvmDatabaseExplorerControl.InitializeAsync(conName);
+                }
+                catch (Exception ex)
+                {
+                    if (_generalDbService.DriverName(conName) == "NetezzaSQL")
+                        NetezzaSchemaRefreshErrorInfo();
+                    else
                         _loggerLoud.MessageBox_Show(this, ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
                 }
             }
             finally
@@ -839,53 +526,6 @@ namespace JustyBaseLegacy.UI
             }
         }
 
-        private async Task nzNodeRefresh(string conName, NetezzaRefreshMode refreshMode = NetezzaRefreshMode.full)
-        {
-            InvokeOnMainWindow(() =>
-            {
-                statusTextBox.Text = $"Schema downloading";
-            });
-
-            List<string> dbsToRefresh = null;
-            if (refreshMode == NetezzaRefreshMode.partialOnlyTables && _mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes.ContainsKey(conName) == true)
-            {
-                dbsToRefresh = new List<string>();
-                foreach (TreeNode node in _mvvmDatabaseExplorerControl.DatabaseTreeView.Nodes[conName].Nodes)
-                {
-                    if (node.IsExpanded && node.Tag is DatabaseTag dlaBazy && dlaBazy.KIND_ID == TypeInDatabase.dbase)
-                    {
-                        dbsToRefresh.Add(node.Text);
-                    }
-                }
-            }
-
-            bool res = await (_connectionSessions[conName] as INetezza).DownloadSchemaNetezza(conName, refreshMode, dbsToRefresh);
-            InvokeOnMainWindow(() =>
-            {
-                statusTextBox.Text = $"Schema downloaded";
-            });
-            if (!res)
-            {
-                NetezzaSchemaRefreshErrorInfo();
-                return;
-            }
-
-            // After a full refresh, run the schema-data side effects that legacy
-            // NetezzaLoadSchemaTreeViewPhase would have done. Clear dictionaries first
-            // so InitializeConnectionSchemaData starts from a clean state.
-            _schemaTables.ClearConnection(conName);
-            _completionRuntimeContext.ClearSchemaLookup(conName);
-            _completionRuntimeContext.ClearDatabaseOwners(conName);
-
-            string userName = _applicationSession.CurrentLogin?.Profile.UserName ?? string.Empty;
-            NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, _connectionSessions, _schemaTables, userName, conName);
-            _netezzaSqlCompletionServices.InvalidateSchema();
-            ResetAutocompleteCachesForAllEditors();
-            _netezzaSqlCompletionServices.EnsureSchemaForConnection(_completionContext, conName);
-
-            // The MVVM tree is rendered by InitializeAsync(selConnName) at the end of
-            // CbConnectionsSelectedIndexChanged — no legacy tree building needed here.
-        }
         private async void TcmChangeSorting_Click(object sender, EventArgs e)
         {
             SchemaRefreshOptionEnable(false);
@@ -911,6 +551,7 @@ namespace JustyBaseLegacy.UI
 
                             string userName = _applicationSession.CurrentLogin?.Profile.UserName ?? string.Empty;
                             NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, _connectionSessions, _schemaTables, userName, connName);
+                            await _schemaRefreshCoordinator.NotifyRefreshedAsync(connName);
                             _completionRuntimeContext.SchemaRefreshed = true;
                             _netezzaSqlCompletionServices.InvalidateSchema();
                             ResetAutocompleteCachesForAllEditors();
@@ -942,84 +583,47 @@ namespace JustyBaseLegacy.UI
             }
         }
 
-        private static void BuildExpandedFullPath(TreeView treeView, List<(TreeNode, string, List<string>)> expandedItems)
-        {
-            expandedItems.Clear();
-            if (treeView is null) return;
-
-            // Snapshot to prevent "Collection was modified" when CopyTree/SwapTreeViewNodes
-            // re-enter the same TreeView during the same UI-thread operation.
-            TreeNode[] roots = treeView.Nodes.Cast<TreeNode>().ToArray();
-            foreach (TreeNode item in roots)
-            {
-                if (item.IsExpanded)
-                {
-                    expandedItems.Add((item, item.FullPath, new List<string>() { item.Name }));
-                }
-            }
-
-            int i = 0;
-            while (i < expandedItems.Count)
-            {
-                TreeNode node = expandedItems[i++].Item1;
-                // Snapshot child nodes to avoid modification during enumeration
-                TreeNode[] children = node.Nodes.Cast<TreeNode>().ToArray();
-                foreach (TreeNode item in children)
-                {
-                    if (item.IsExpanded)
-                    {
-                        string fullPath = item.FullPath;
-                        expandedItems.Add((item, fullPath, new List<string>()));
-                    }
-                }
-            }
-        }
-        /// <summary>Simple helper to expand tree nodes by path — replaces old ExpandLastKnownFull.</summary>
-        private static void TryExpandTreeNodes(TreeView? treeView, List<(TreeNode, string, List<string>)> expandedItems)
-        {
-            if (treeView is null) return;
-            // Snapshot root nodes to prevent "Collection was modified" during re-entrant
-            // BeforeExpand/OnChildrenAppended mutations of treeView.Nodes.
-            TreeNode[] roots = treeView.Nodes.Cast<TreeNode>().ToArray();
-            foreach (var (_, fullPath, _) in expandedItems)
-            {
-                foreach (TreeNode node in roots)
-                {
-                    if (node.FullPath == fullPath)
-                    {
-                        node.Expand();
-                        break;
-                    }
-                }
-            }
-        }
-
-        private ContextMenuStrip _emptyContextMenuStrip = new ContextMenuStrip();
-
         public async Task AddOneDbToNetezzaSchemaTree(string connectionName, IDatabaseDownloader dbObject, string dbName)
         {
-            bool success = await dbObject.DownloadOneDb(connectionName, dbName);
-            if (success)
+            try
             {
-                // Clear dictionaries so InitializeConnectionSchemaData starts from a clean state
-                _schemaTables.ClearConnection(connectionName);
-                _completionRuntimeContext.ClearSchemaLookup(connectionName);
-                _completionRuntimeContext.ClearDatabaseOwners(connectionName);
-
-                string userName = _applicationSession.CurrentLogin?.Profile.UserName ?? string.Empty;
-                NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, _connectionSessions, _schemaTables, userName, connectionName);
+                await _schemaRefreshCoordinator.AttachDatabaseAsync(connectionName, dbName);
                 _completionRuntimeContext.SchemaRefreshed = true;
                 _netezzaSqlCompletionServices.InvalidateSchema();
                 ResetAutocompleteCachesForAllEditors();
                 _netezzaSqlCompletionServices.EnsureSchemaForConnection(_completionContext, connectionName);
-
-                // MVVM tree re-renders from refreshed data — skip legacy auxiliary tree building
                 if (_mvvmDatabaseExplorerControl is not null)
-                    await _mvvmDatabaseExplorerControl.RefreshAsync();
+                    await _mvvmDatabaseExplorerControl.InitializeAsync(connectionName);
             }
-            else
+            catch (Exception ex)
             {
+                _loggerLoud.LogError("Error while attaching Netezza database {Database} on {ConnectionName}", ex);
                 NetezzaSchemaRefreshErrorInfo();
+            }
+        }
+
+        /// <summary>Called after autocomplete lazily downloads one database catalog.</summary>
+        public async Task OnNetezzaOneDatabaseAttachedAsync(string connectionName, string databaseName)
+        {
+            try
+            {
+                // Download already completed in AutocompleteClass; publish + re-init caches/UI.
+                _schemaTables.ClearConnection(connectionName);
+                _completionRuntimeContext.ClearSchemaLookup(connectionName);
+                _completionRuntimeContext.ClearDatabaseOwners(connectionName);
+                string userName = _applicationSession.CurrentLogin?.Profile.UserName ?? string.Empty;
+                NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, _connectionSessions, _schemaTables, userName, connectionName);
+                await _schemaRefreshCoordinator.NotifyRefreshedAsync(connectionName);
+                _completionRuntimeContext.SchemaRefreshed = true;
+                _netezzaSqlCompletionServices.InvalidateSchema();
+                ResetAutocompleteCachesForAllEditors();
+                _netezzaSqlCompletionServices.EnsureSchemaForConnection(_completionContext, connectionName);
+                if (_mvvmDatabaseExplorerControl is not null)
+                    await _mvvmDatabaseExplorerControl.InitializeAsync(connectionName);
+            }
+            catch (Exception ex)
+            {
+                _loggerLoud.LogError("Error while applying attached Netezza database {Database}", ex);
             }
         }
 

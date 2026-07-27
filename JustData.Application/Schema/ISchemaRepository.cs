@@ -25,6 +25,14 @@ public interface ISchemaRepository
 
     Task RefreshAsync(
         string? connectionName = null,
+        CancellationToken cancellationToken = default,
+        SchemaRefreshRequest? request = null);
+
+    /// <summary>Downloads a single database catalog entry and merges it into the connection schema.</summary>
+    /// <returns><c>true</c> when the database was attached successfully.</returns>
+    Task<bool> AttachDatabaseAsync(
+        string connectionName,
+        string databaseName,
         CancellationToken cancellationToken = default);
 }
 

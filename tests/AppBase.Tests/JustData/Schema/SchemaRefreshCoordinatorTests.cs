@@ -18,7 +18,7 @@ public sealed class SchemaRefreshCoordinatorTests
 
         IReadOnlyList<SchemaNode> roots = await coordinator.RefreshAsync("warehouse");
 
-        Assert.Equal(["refresh:warehouse", "roots:warehouse"], repository.Calls);
+        Assert.Equal(["refresh:warehouse:default", "roots:warehouse"], repository.Calls);
         Assert.Single(roots);
         Assert.Equal("warehouse", received?.ConnectionName);
     }
@@ -31,14 +31,68 @@ public sealed class SchemaRefreshCoordinatorTests
         await Assert.ThrowsAsync<ArgumentException>(() => coordinator.RefreshAsync(" "));
     }
 
+    [Fact]
+    public async Task RefreshAsync_forwards_mode_to_repository_and_publishes_message()
+    {
+        var repository = new RecordingSchemaRepository();
+        var messenger = new WeakReferenceMessenger();
+        SchemaRefreshedMessage? received = null;
+        messenger.Register<SchemaRefreshedMessage>(this, (_, message) => received = message);
+        var coordinator = new SchemaRefreshCoordinator(repository, messenger);
+
+        await coordinator.RefreshAsync(
+            "warehouse",
+            new SchemaRefreshRequest(SchemaRefreshMode.Full));
+
+        Assert.Equal(["refresh:warehouse:Full", "roots:warehouse"], repository.Calls);
+        Assert.Equal("warehouse", received?.ConnectionName);
+    }
+
+    [Fact]
+    public async Task AttachDatabaseAsync_publishes_message_after_attach()
+    {
+        var repository = new RecordingSchemaRepository();
+        var messenger = new WeakReferenceMessenger();
+        SchemaRefreshedMessage? received = null;
+        messenger.Register<SchemaRefreshedMessage>(this, (_, message) => received = message);
+        var coordinator = new SchemaRefreshCoordinator(repository, messenger);
+
+        await coordinator.AttachDatabaseAsync("warehouse", "SALES");
+
+        Assert.Equal(["attach:warehouse:SALES", "roots:warehouse"], repository.Calls);
+        Assert.Equal("warehouse", received?.ConnectionName);
+    }
+
+    [Fact]
+    public async Task NotifyRefreshedAsync_publishes_message_without_provider_refresh()
+    {
+        var repository = new RecordingSchemaRepository();
+        var messenger = new WeakReferenceMessenger();
+        SchemaRefreshedMessage? received = null;
+        messenger.Register<SchemaRefreshedMessage>(this, (_, message) => received = message);
+        var coordinator = new SchemaRefreshCoordinator(repository, messenger);
+
+        IReadOnlyList<SchemaNode> roots = await coordinator.NotifyRefreshedAsync("warehouse");
+
+        Assert.Equal(["roots:warehouse"], repository.Calls);
+        Assert.Single(roots);
+        Assert.Equal("warehouse", received?.ConnectionName);
+    }
+
     private sealed class RecordingSchemaRepository : ISchemaRepository
     {
         public List<string> Calls { get; } = [];
 
-        public Task RefreshAsync(string? connectionName = null, CancellationToken cancellationToken = default)
+        public Task RefreshAsync(string? connectionName = null, CancellationToken cancellationToken = default, SchemaRefreshRequest? request = null)
         {
-            Calls.Add($"refresh:{connectionName}");
+            Calls.Add($"refresh:{connectionName}:{request?.Mode.ToString() ?? "default"}");
             return Task.CompletedTask;
+        }
+
+        public Task<bool> AttachDatabaseAsync(string connectionName, string databaseName, CancellationToken cancellationToken = default)
+        {
+            Calls.Add($"attach:{connectionName}:{databaseName}");
+            return Task.FromResult(true);
         }
 
         public Task<IReadOnlyList<SchemaNode>> GetRootsAsync(string? connectionName = null, CancellationToken cancellationToken = default)

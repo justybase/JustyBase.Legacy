@@ -229,8 +229,11 @@ public sealed class DatabaseExplorerViewModel : ObservableObject, IDisposable
             () => IsBusy = true,
             cancellationToken);
         try { await operation(linked.Token).ConfigureAwait(false); }
-        catch (OperationCanceledException) when (linked.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
+            // Cancellation is normal when the user hammers Refresh: the previous
+            // operation's token is cancelled. Never rethrow — async WinForms
+            // click handlers treat that as an unhandled exception and close the app.
             if (IsCurrentOperation(linked, operationVersion))
             {
                 await _uiDispatcher.InvokeOnUiAsync(

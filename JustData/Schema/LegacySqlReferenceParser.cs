@@ -10,7 +10,7 @@ public static partial class LegacySqlReferenceParser
         if (string.IsNullOrWhiteSpace(sql)) return [];
         List<SchemaReference> references = [];
         Add(references, RegexTempTable(), sql, SchemaNodeKind.Table, "tableAlias", IsCommented);
-        Add(references, RegexWith(), sql, SchemaNodeKind.Table, "tableAlias", IsCommented);
+        Add(references, RegexWith(), sql, SchemaNodeKind.Alias, "tableAlias", IsCommented);
         Add(references, RegexInsert(), sql, SchemaNodeKind.Table, "table_name", IsCommented);
         Add(references, RegexDelete(), sql, SchemaNodeKind.Table, "table_name", IsCommented);
         Add(references, RegexDrop(), sql, SchemaNodeKind.Table, "table_name", IsCommented);
@@ -27,6 +27,20 @@ public static partial class LegacySqlReferenceParser
             AddKeyword(references, sql, match, keyword.Equals("GROUP BY", StringComparison.OrdinalIgnoreCase) ? "Group By" : keyword, SchemaNodeKind.Unknown);
         }
 
+        return references.OrderBy(reference => reference.Position).ToArray();
+    }
+
+    /// <summary>
+    /// Outline definitions used by F4 / Ctrl+click navigation (temp tables, CTEs, DROP TABLE).
+    /// Excludes INSERT/DELETE targets so catalog lookup remains the fallback for those names.
+    /// </summary>
+    public static IReadOnlyList<SchemaReference> ParseNavigableDefinitions(string sql)
+    {
+        if (string.IsNullOrWhiteSpace(sql)) return [];
+        List<SchemaReference> references = [];
+        Add(references, RegexTempTable(), sql, SchemaNodeKind.Table, "tableAlias", IsCommented);
+        Add(references, RegexWith(), sql, SchemaNodeKind.Alias, "tableAlias", IsCommented);
+        Add(references, RegexDrop(), sql, SchemaNodeKind.Table, "table_name", IsCommented);
         return references.OrderBy(reference => reference.Position).ToArray();
     }
 
