@@ -51,8 +51,8 @@ public sealed class NetezzaHelperService : INetezzaHelperService
 
     private IReadOnlyDictionary<string, Dictionary<int, NetezzaTableInfo>> BaseTableDictionary => _schemaTables.TablesByConnection;
 
-    public string ServerVersion = "";
-    public bool SqliteInProgress = false;
+    public string ServerVersion { get; set; } = "";
+    public bool SqliteInProgress { get; set; }
 
     public string DatabaseTablesSql(string dbName, bool ownerMode = true, bool noDescMode = false)
         => NetezzaHelpers.DatabaseTablesSql(dbName, ownerMode, noDescMode);

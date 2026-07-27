@@ -6,6 +6,12 @@ namespace AppBase.Common;
 
 public interface INetezzaHelperService
 {
+    /// <summary>Last observed Netezza server version from a schema download.</summary>
+    string ServerVersion { get; set; }
+
+    /// <summary>True while a Netezza schema/SQLite cache refresh is in progress.</summary>
+    bool SqliteInProgress { get; set; }
+
     string DatabaseTablesSql(string dbName, bool ownerMode = true, bool noDescMode = false);
     string GetDescSql(string dbName);
     string NzProcReturnFix(string procReturns);

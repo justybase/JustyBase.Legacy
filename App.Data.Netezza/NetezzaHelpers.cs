@@ -36,8 +36,6 @@ public static class NetezzaHelpers
 
     public static readonly string USER_GROUPS = NetezzaSystemSql.UserGroupsSql;
 
-    public static string ServerVersion = "";
-    public static bool SqliteInProgress = false;
     static string msg = "";
 
     public static string DatabaseTablesSql(string dbName, bool ownerMode = true, bool noDescMode = false)

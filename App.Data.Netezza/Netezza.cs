@@ -22,12 +22,22 @@ namespace AppBase.Data;
 public sealed class Netezza : GeneralDb, INetezza
 {
     private readonly IDatabaseRuntimeCatalogWriter _catalogWriter;
+    private readonly INetezzaHelperService _netezzaHelperService;
+    private readonly SemaphoreSlim _schemaDownloadGate = new(1, 1);
 
     public override DatabaseTypeEnum DatabaseType => DatabaseTypeEnum.Netezza;
-    public Netezza(IDatabaseRuntimeContext databaseRuntimeContext, ILogger logger, IImportExportTasks importExportTasks, IGeneralDbService generalDbService) : base(databaseRuntimeContext, logger, importExportTasks, generalDbService)
+    public Netezza(
+        IDatabaseRuntimeContext databaseRuntimeContext,
+        ILogger logger,
+        IImportExportTasks importExportTasks,
+        IGeneralDbService generalDbService,
+        INetezzaHelperService netezzaHelperService)
+        : base(databaseRuntimeContext, logger, importExportTasks, generalDbService)
     {
         _catalogWriter = databaseRuntimeContext as IDatabaseRuntimeCatalogWriter
             ?? throw new InvalidOperationException("Netezza requires the schema catalog write port.");
+        _netezzaHelperService = netezzaHelperService
+            ?? throw new ArgumentNullException(nameof(netezzaHelperService));
     }
 
     public static List<string> GetDatabaseList(int connectionTimeout, string server, string user, string port, string pass)
@@ -334,7 +344,24 @@ public sealed class Netezza : GeneralDb, INetezza
     public async Task<bool> DownloadSchemaNetezza(string connectionName, NetezzaRefreshMode netezzaRefresh, List<string> dbsToRefresh, bool loadSources = false,
         Action showInUiExtra = null)
     {
-        NetezzaHelpers.SqliteInProgress = true;
+        // Serialize schema downloads on this provider instance — overlapping refreshes
+        // mutate shared ColumnList / DatabaseIdToName / caches and throw
+        // "Collection was modified; enumeration operation may not execute."
+        await _schemaDownloadGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            return await DownloadSchemaNetezzaCore(connectionName, netezzaRefresh, dbsToRefresh, loadSources, showInUiExtra).ConfigureAwait(false);
+        }
+        finally
+        {
+            _schemaDownloadGate.Release();
+        }
+    }
+
+    private async Task<bool> DownloadSchemaNetezzaCore(string connectionName, NetezzaRefreshMode netezzaRefresh, List<string> dbsToRefresh, bool loadSources = false,
+        Action showInUiExtra = null)
+    {
+        _netezzaHelperService.SqliteInProgress = true;
         bool returnValue = true;
         try
         {
@@ -352,7 +379,7 @@ public sealed class Netezza : GeneralDb, INetezza
                 netezzaConnection.Open();
                 lock (string.Intern(connectionName))
                 {
-                    NetezzaHelpers.ServerVersion = netezzaConnection.ServerVersion;
+                    _netezzaHelperService.ServerVersion = netezzaConnection.ServerVersion;
                     defaultDatabase = netezzaConnection.Database;
 
                     if (!BasesTablesList.ContainsKey(connectionName))
@@ -475,7 +502,7 @@ public sealed class Netezza : GeneralDb, INetezza
             });
             if (!res)
             {
-                NetezzaHelpers.SqliteInProgress = false;
+                _netezzaHelperService.SqliteInProgress = false;
                 return res;
             }
 
@@ -518,7 +545,7 @@ public sealed class Netezza : GeneralDb, INetezza
         }
         finally
         {
-            NetezzaHelpers.SqliteInProgress = false;
+            _netezzaHelperService.SqliteInProgress = false;
         }
 
 
@@ -529,7 +556,7 @@ public sealed class Netezza : GeneralDb, INetezza
     public async Task<bool> DownloadOneDb(string connectionName, string databaseName)
     {
         SetDbInProgress(databaseName);
-        NetezzaHelpers.SqliteInProgress = true;
+        _netezzaHelperService.SqliteInProgress = true;
         try
         {
             await Task.Run(() =>
@@ -540,13 +567,13 @@ public sealed class Netezza : GeneralDb, INetezza
         }
         catch (Exception)
         {
-            NetezzaHelpers.SqliteInProgress = false;
+            _netezzaHelperService.SqliteInProgress = false;
             throw;
         }
         finally
         {
             RemoveDbFromProgress(databaseName);
-            NetezzaHelpers.SqliteInProgress = false;
+            _netezzaHelperService.SqliteInProgress = false;
         }
         return true;
     }
@@ -1388,7 +1415,7 @@ USING(
         {
             try
             {
-                Parallel.ForEach(DatabaseIdToName, new ParallelOptions { MaxDegreeOfParallelism = _databaseRuntimeContext.Config.MaxSchemaParallelism }, dbX =>
+                Parallel.ForEach(DatabaseIdToName.ToArray(), new ParallelOptions { MaxDegreeOfParallelism = _databaseRuntimeContext.Config.MaxSchemaParallelism }, dbX =>
                 {
                     string db = dbX.Value;
                     using var conn = GetConnection(db, usePool: false) as NzConnection;

@@ -14,8 +14,6 @@ public sealed class StaticStateFenceTests
 {
     private static readonly HashSet<string> AllowedNetezzaStaticMutables = new(StringComparer.Ordinal)
     {
-        "AppBase.Data.NetezzaHelpers.ServerVersion",
-        "AppBase.Data.NetezzaHelpers.SqliteInProgress",
     };
 
     private static readonly HashSet<string> AllowedServicesStaticMutables = new(StringComparer.Ordinal)
