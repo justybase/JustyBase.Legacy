@@ -204,7 +204,7 @@ public sealed class ExplorerViewModelTests
         private static SchemaNode Root => new("local", "local", SchemaNodeKind.Connection, new("local"), true);
         private static SchemaNode Table => new("local/orders", "orders", SchemaNodeKind.Table, new("local", "SYSTEM", "APP", "orders"), false);
 
-        public async Task RefreshAsync(string? connectionName = null, CancellationToken cancellationToken = default)
+        public async Task RefreshAsync(string? connectionName = null, CancellationToken cancellationToken = default, SchemaRefreshRequest? request = null)
         {
             if (BlockRefresh) await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             if (BlockFirstRefresh && Interlocked.Increment(ref _refreshCalls) == 1)
@@ -213,6 +213,9 @@ public sealed class ExplorerViewModelTests
                 await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             }
         }
+
+        public Task<bool> AttachDatabaseAsync(string connectionName, string databaseName, CancellationToken cancellationToken = default) =>
+            Task.FromResult(true);
 
         public Task<IReadOnlyList<SchemaNode>> GetRootsAsync(string? connectionName = null, CancellationToken cancellationToken = default)
         {

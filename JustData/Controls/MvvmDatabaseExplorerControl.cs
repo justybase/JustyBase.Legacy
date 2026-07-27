@@ -1,5 +1,6 @@
 using JustData.ViewModels.Explorer;
 using AppBase.Common;
+using AppBase.Services;
 using System.Drawing;
 using System.Windows.Forms;
 using JustData.Application.Schema;
@@ -79,7 +80,21 @@ public sealed class MvvmDatabaseExplorerControl : UserControl
             UseVisualStyleBackColor = true,
             Cursor = Cursors.Hand
         };
-        _refreshButton.Click += async (_, _) => await RefreshAsync();
+        _refreshButton.Click += async (_, _) =>
+        {
+            try
+            {
+                await RefreshAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                // Superseded refresh — ignore.
+            }
+            catch (Exception ex)
+            {
+                FileDiagnosticLog.WriteError("Schema refresh button failed", ex);
+            }
+        };
 
         _collapseAllButton = new Button
         {

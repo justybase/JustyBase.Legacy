@@ -60,12 +60,11 @@ namespace JustyBaseLegacy.UI
 {
     public partial class BaseWindow
     {
-        private Controls.ObjectExplorerControl _objectExplorerControl;
         public DataGridView DgvObjectExplorer
         {
             get
             {
-                if (_objectExplorerControl is null)
+                if (_mvvmObjectExplorerControl is null)
                 {
                     if (this.InvokeRequired)
                     {
@@ -76,32 +75,28 @@ namespace JustyBaseLegacy.UI
                         InitializeObjectExplorerControl();
                     }
                 }
-                return _mvvmObjectExplorerControl?.DataGridView ?? _objectExplorerControl?.DataGridView;
+                return _mvvmObjectExplorerControl?.DataGridView;
             }
         }
 
         private void InitializeObjectExplorerControl()
         {
-            if (_objectExplorerControl == null)
-            {
-                _objectExplorerControl = new ObjectExplorerControl(this, _uiHelperService, _colorTheme, _autocompleteClass, imageList1);
+            if (_mvvmObjectExplorerControl is not null)
+                return;
 
-                // Keep the legacy parser alive for F4/hover compatibility while the
-                // visible adapter is selected by the temporary composition switch.
-                if (_tabManager is UI.DockSuiteTabManager dsm)
-                {
-                    _mvvmObjectExplorerControl ??= new Controls.MvvmObjectExplorerControl(_objectExplorerViewModel);
-                    dsm.RegisterPersistentTool("Outline", _mvvmObjectExplorerControl, WeifenLuo.WinFormsUI.Docking.DockState.DockLeft);
-                }
+            if (_tabManager is UI.DockSuiteTabManager dsm)
+            {
+                _mvvmObjectExplorerControl = new Controls.MvvmObjectExplorerControl(_objectExplorerViewModel);
+                dsm.RegisterPersistentTool("Outline", _mvvmObjectExplorerControl, WeifenLuo.WinFormsUI.Docking.DockState.DockLeft);
                 tabPageLegend.Tag = "initialized";
             }
         }
 
         private void RebuildObjectExplorer(string text)
         {
-            _objectExplorerControl?.ReBuildObjectExplorer(text);
-            if (_mvvmObjectExplorerControl is not null)
-                _ = RebuildMvvmObjectExplorerAsync(text);
+            if (_mvvmObjectExplorerControl is null)
+                InitializeObjectExplorerControl();
+            _ = RebuildMvvmObjectExplorerAsync(text);
         }
 
         private async Task RebuildMvvmObjectExplorerAsync(string text)
@@ -123,6 +118,55 @@ namespace JustyBaseLegacy.UI
                 _loggerLoud.LogError("Object explorer rebuild failed", exception);
             }
         }
+
+        /// <summary>
+        /// F4 / Ctrl+click: jump to a temp table, CTE, or DROP TABLE name in the script.
+        /// Uses the same sync parse as the MVVM outline repository (no legacy control).
+        /// </summary>
+        private bool TryNavigateToOutlineDefinition(string clickedWord)
+        {
+            if (string.IsNullOrWhiteSpace(clickedWord) || CurrentTB is null)
+                return false;
+
+            foreach (var item in JustyBaseLegacy.UI.Schema.LegacySqlReferenceParser.ParseNavigableDefinitions(_cleanSqlText))
+            {
+                if (!item.Name.Trim().Equals(clickedWord, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                SelectOutlineRowByName(item.Name);
+                CurrentTB.GoEnd();
+                CurrentTB.SelectionStart = item.Position;
+                CurrentTB.SelectionLength = item.Name.TrimStart().Length;
+                CurrentTB.DoSelectionVisible();
+                CurrentTB.Focus();
+                return true;
+            }
+
+            return false;
+        }
+
+        private void SelectOutlineRowByName(string name)
+        {
+            DataGridView? grid = DgvObjectExplorer;
+            if (grid is null)
+                return;
+
+            var references = _objectExplorerViewModel.References;
+            for (int i = 0; i < references.Count && i < grid.Rows.Count; i++)
+            {
+                if (references[i].Name.Trim().Equals(name, StringComparison.OrdinalIgnoreCase))
+                {
+                    grid.ClearSelection();
+                    grid.Rows[i].Selected = true;
+                    return;
+                }
+            }
+        }
+
+        private bool OutlineContainsWord(string word) =>
+            JustyBaseLegacy.UI.Schema.LegacySqlReferenceParser.Parse(_cleanSqlText)
+                .Any(reference => reference.Name.Trim().Equals(word, StringComparison.OrdinalIgnoreCase));
+
         private SqlTextModifyDefaultSqlImplementations _sqlTextChangingDefaultSqlImplementation;
         private readonly NzSignatureHelpPopup _signaturePopup = new();
 
@@ -268,26 +312,8 @@ namespace JustyBaseLegacy.UI
                     RebuildObjectExplorer(_cleanSqlText);
                 }
 
-                for (int i = 0; i < _objectExplorerControl.ExplorerList.Count; i++)
-                {
-                    if (_objectExplorerControl.ExplorerList[i].Title.Trim().Equals(clickedWord, StringComparison.OrdinalIgnoreCase)
-                        && (
-                        _objectExplorerControl.ExplorerList[i].type == ExplorerItemType.Drop ||
-                        _objectExplorerControl.ExplorerList[i].type == ExplorerItemType.TemporatyTable ||
-                        _objectExplorerControl.ExplorerList[i].type == ExplorerItemType.With
-                        )
-                      )
-                    {
-                        var item = _objectExplorerControl.ExplorerList[i];
-                        DgvObjectExplorer.Rows[i].Selected = true;
-                        CurrentTB.GoEnd();
-                        CurrentTB.SelectionStart = item.Position;
-                        CurrentTB.SelectionLength = item.Title.TrimStart().Length;
-                        CurrentTB.DoSelectionVisible();
-                        CurrentTB.Focus();
-                        return;
-                    }
-                }
+                if (TryNavigateToOutlineDefinition(clickedWord))
+                    return;
 
                 if (_generalDbService.DriverName(SelectedConnectionName) == "NetezzaSQL")
                 {
@@ -416,9 +442,12 @@ namespace JustyBaseLegacy.UI
                     || _generalDbService.DriverName(connectionName) == "NetezzaSQL";
                 if (isNetezza)
                 {
-                    EditorDocumentId stableDocumentId = document?.Id ?? EnsureEditorDocumentId(fastColored);
-                    RegisterDiagnosticsTarget(stableDocumentId, fastColored);
-                    ApplySemanticClassification(fastColored, stableDocumentId.ToString());
+                    EditorDocumentViewModel? workspaceDocument = document ?? EnsureWorkspaceDocument(fastColored);
+                    if (workspaceDocument is not null)
+                    {
+                        RegisterDiagnosticsTarget(workspaceDocument.Id, fastColored);
+                        ApplySemanticClassification(fastColored, workspaceDocument.Id.ToString());
+                    }
                 }
 
                 // Object-explorer text is global presentation state. A delayed
@@ -492,7 +521,11 @@ namespace JustyBaseLegacy.UI
                 return;
             }
 
-            string documentUri = EnsureEditorDocumentId(editor).ToString();
+            EditorDocumentViewModel? hoverDocument = EnsureWorkspaceDocument(editor);
+            if (hoverDocument is null)
+                return;
+
+            string documentUri = hoverDocument.Id.ToString();
             var parserHover = _legacySqlAuthoringServices.GetHover(editor.Text, editor.PlaceToPosition(e.Place), documentUri);
             if (parserHover is not null)
             {
@@ -631,7 +664,7 @@ namespace JustyBaseLegacy.UI
                             }
                         }
                     }
-                    else if (_objectExplorerControl?.ExplorerList != null && _objectExplorerControl.ExplorerList.Where(arg => arg.Title.Trim().ToString().Equals(hoveredWord, StringComparison.OrdinalIgnoreCase)).Any())
+                    else if (OutlineContainsWord(hoveredWord))
                     {
                         e.ToolTipTitle = hoveredWord;
                         prevTekst = hoveredWord;
@@ -655,7 +688,11 @@ namespace JustyBaseLegacy.UI
             if (e.KeyCode is not (Keys.D9 or Keys.OemOpenBrackets or Keys.Oemcomma) || editor.SelectionStart <= 0)
                 return;
 
-            string documentUri = EnsureEditorDocumentId(editor).ToString();
+            EditorDocumentViewModel? signatureDocument = EnsureWorkspaceDocument(editor);
+            if (signatureDocument is null)
+                return;
+
+            string documentUri = signatureDocument.Id.ToString();
             var help = _legacySqlAuthoringServices.GetSignatureHelp(editor.Text, editor.SelectionStart, documentUri);
             if (help is null)
             {
@@ -805,27 +842,8 @@ namespace JustyBaseLegacy.UI
                 RebuildObjectExplorer(_cleanSqlText);
             }
 
-            if (_objectExplorerControl is null) return;
-            for (int i = 0; i < _objectExplorerControl.ExplorerList.Count; i++)
-            {
-                if (_objectExplorerControl.ExplorerList[i].Title.Trim().Equals(clickedWord, StringComparison.OrdinalIgnoreCase)
-                    && (
-                    _objectExplorerControl.ExplorerList[i].type == ExplorerItemType.Drop ||
-                    _objectExplorerControl.ExplorerList[i].type == ExplorerItemType.TemporatyTable ||
-                    _objectExplorerControl.ExplorerList[i].type == ExplorerItemType.With
-                    )
-                  )
-                {
-                    var item = _objectExplorerControl.ExplorerList[i];
-                    DgvObjectExplorer.Rows[i].Selected = true;
-                    CurrentTB.GoEnd();
-                    CurrentTB.SelectionStart = item.Position;
-                    CurrentTB.SelectionLength = item.Title.TrimStart().Length;
-                    CurrentTB.DoSelectionVisible();
-                    CurrentTB.Focus();
-                    return;
-                }
-            }
+            if (TryNavigateToOutlineDefinition(clickedWord))
+                return;
 
             if (ModifierKeys.HasFlag(Keys.Control) && _generalDbService.DriverName(SelectedConnectionName) == "NetezzaSQL")
             {
