@@ -14,6 +14,7 @@ using JustyBaseLegacy.UI.Sql;
 using JustData.ViewModels.Editor;
 using JustData.Application.Editor;
 using JustData.Application.Startup;
+using JustData.Application.Sql;
 using JustyBaseLegacy.Services;
 using System.Diagnostics;
 using System.Data;
@@ -43,6 +44,12 @@ namespace JustyBaseLegacy.UI
 
         void IWinFormsSqlResultView.RegisterPresentedResultGrid(TabPage tab, CustomDataGridView grid) =>
             RegisterPresentedResultGrid(tab, grid);
+
+        void IWinFormsSqlResultView.RemovePresentedResult(
+            ResultSetKey key,
+            TabPage? pendingTab,
+            CustomDataGridView? pendingGrid) =>
+            RemovePresentedResult(key, pendingTab, pendingGrid);
 
         int ISqlResultsUiView.SqlResultsDeviceDpi => SqlResultsDeviceDpi;
         Font ISqlResultsUiView.SqlResultsUiFont => SqlResultsUiFont;
@@ -88,6 +95,10 @@ namespace JustyBaseLegacy.UI
         internal Image SqlResultsActivePinImage => _activePinImage;
         internal TabControlDrawingHandler SqlResultsTabDrawingHandler => _tabControlDrawingHandler;
         internal Dictionary<EditorDocumentId, (FastColoredTextBox Editor, DataGridView Grid)> SqlResultsLintDiagnosticsTargets => _lintDiagnosticsTargets;
+        private readonly Dictionary<EditorDocumentId, Stopwatch> _providerExecutionStopwatches = [];
+        private readonly Dictionary<(EditorDocumentId DocumentId, int StatementIndex), Stopwatch> _providerStatementStopwatches = [];
+        private readonly Dictionary<(EditorDocumentId DocumentId, int StatementIndex), string> _providerStatementSql = [];
+        private readonly HashSet<EditorDocumentId> _providerExecutionErrors = [];
         internal void OnSqlResultsTabKeyDown(object sender, KeyEventArgs e) => Tc_KeyDown(sender, e);
         internal void OnSqlResultSelectionChanged(TabPage? selectedTab)
         {
@@ -96,7 +107,146 @@ namespace JustyBaseLegacy.UI
 
             _editorWorkspaceViewModel.Documents
                 .FirstOrDefault(document => document.Id == documentId)
-                ?.SqlExecution.SelectResult(tag.ResultSetId);
+                ?.SqlExecution.SelectResultKey(tag.Key);
+        }
+
+        private void PresentProviderExecutionLog(SqlExecutionEvent executionEvent)
+        {
+            if (IsDisposed || Disposing)
+                return;
+
+            if (executionEvent.Kind == SqlExecutionEventKind.StatementStarted
+                && !string.IsNullOrWhiteSpace(executionEvent.StatementText))
+            {
+                _providerStatementSql[(executionEvent.DocumentId, executionEvent.StatementIndex)] =
+                    executionEvent.StatementText;
+            }
+
+            BeginInvoke(() =>
+            {
+                if (IsDisposed || Disposing)
+                    return;
+
+                TabPage? documentTab = FindSqlResultsTabForDocument(executionEvent.DocumentId);
+                SplitContainer? container = documentTab is null ? null : _tabManager.GetSplitContainerForTab(documentTab);
+                if (container is null)
+                    return;
+
+                EnsureSqlResultsToolWindow(documentTab);
+                TabPagePicture tab = PrepareTab(container, isLogTab: true);
+                if (tab.Tag is TabPageResultsTag tag)
+                    tag.DocumentId = executionEvent.DocumentId;
+
+                SqlExecutionLogControl? log = tab.Controls.OfType<SqlExecutionLogControl>().FirstOrDefault();
+                if (log is null)
+                {
+                    log = new SqlExecutionLogControl { Dock = DockStyle.Fill };
+                    log.ApplyTheme(_colorTheme);
+                    tab.Controls.Add(log);
+                }
+
+                AppendProviderExecutionLogEntry(log, tab, executionEvent);
+            });
+        }
+
+        private void AppendProviderExecutionLogEntry(
+            SqlExecutionLogControl log,
+            TabPagePicture tab,
+            SqlExecutionEvent executionEvent)
+        {
+            Stopwatch? executionStopwatch;
+            _providerExecutionStopwatches.TryGetValue(executionEvent.DocumentId, out executionStopwatch);
+            string? elapsed = executionStopwatch?.Elapsed.TotalSeconds.ToString("F3");
+
+            switch (executionEvent.Kind)
+            {
+                case SqlExecutionEventKind.Started:
+                    _providerExecutionStopwatches[executionEvent.DocumentId] = Stopwatch.StartNew();
+                    _providerExecutionErrors.Remove(executionEvent.DocumentId);
+                    ClearProviderStatementSql(executionEvent.DocumentId);
+                    tab.IsRunning = true;
+                    tab.IsSuccess = true;
+                    log.AppendEntry(DateTime.Now, "0.000", "SQL execution started.");
+                    return;
+
+                case SqlExecutionEventKind.StatementStarted:
+                    _providerStatementStopwatches[(executionEvent.DocumentId, executionEvent.StatementIndex)] = Stopwatch.StartNew();
+                    tab.IsRunning = true;
+                    log.AppendEntry(
+                        DateTime.Now,
+                        elapsed,
+                        null,
+                        null,
+                        $"Statement {executionEvent.StatementIndex + 1}/{executionEvent.StatementCount} started.",
+                        executionEvent.StatementText);
+                    return;
+
+                case SqlExecutionEventKind.StatementCompleted:
+                    (EditorDocumentId, int) statementKey = (executionEvent.DocumentId, executionEvent.StatementIndex);
+                    if (_providerStatementStopwatches.Remove(statementKey, out Stopwatch? statementStopwatch))
+                        elapsed = statementStopwatch.Elapsed.TotalSeconds.ToString("F3");
+                    log.AppendEntry(
+                        DateTime.Now,
+                        elapsed,
+                        $"Statement {executionEvent.StatementIndex + 1}/{executionEvent.StatementCount} completed.");
+                    return;
+
+                case SqlExecutionEventKind.AffectedRows:
+                    log.AppendEntry(DateTime.Now, elapsed, $"Affected rows: {executionEvent.AffectedRows}");
+                    return;
+
+                case SqlExecutionEventKind.ResultSet when executionEvent.ResultSet is not null:
+                    log.AppendEntry(
+                        DateTime.Now,
+                        elapsed,
+                        $"Result set received: {executionEvent.ResultSet.Name}.");
+                    return;
+
+                case SqlExecutionEventKind.Log:
+                    bool isErrorLog = executionEvent.Log?.Level == SqlLogLevel.Error;
+                    if (isErrorLog)
+                    {
+                        _providerExecutionErrors.Add(executionEvent.DocumentId);
+                        tab.IsSuccess = false;
+                        log.AppendErrorEntry(DateTime.Now, elapsed, executionEvent.Log?.Message ?? executionEvent.Message);
+                    }
+                    else
+                    {
+                        log.AppendEntry(DateTime.Now, elapsed, executionEvent.Log?.Message ?? executionEvent.Message);
+                    }
+                    return;
+
+                case SqlExecutionEventKind.Completed:
+                    bool failed = executionEvent.Outcome is SqlExecutionOutcome.Failed
+                        or SqlExecutionOutcome.Blocked
+                        or SqlExecutionOutcome.Cancelled;
+                    if (failed)
+                        _providerExecutionErrors.Add(executionEvent.DocumentId);
+                    tab.IsRunning = false;
+                    tab.IsSuccess = !_providerExecutionErrors.Contains(executionEvent.DocumentId);
+                    string message = failed
+                        ? executionEvent.ErrorMessage ?? "SQL execution failed."
+                        : "SQL execution completed successfully.";
+                    if (failed)
+                        log.AppendErrorEntry(DateTime.Now, elapsed, message);
+                    else
+                        log.AppendEntry(DateTime.Now, elapsed, message);
+                    if (failed && tab.Parent is TabControl resultTabs)
+                        resultTabs.SelectedTab = tab;
+                    _providerExecutionStopwatches.Remove(executionEvent.DocumentId);
+                    ClearProviderStatementSql(executionEvent.DocumentId);
+                    return;
+            }
+        }
+
+        private void ClearProviderStatementSql(EditorDocumentId documentId)
+        {
+            foreach ((EditorDocumentId DocumentId, int StatementIndex) key in _providerStatementSql.Keys
+                .Where(item => item.DocumentId == documentId)
+                .ToArray())
+            {
+                _providerStatementSql.Remove(key);
+            }
         }
         internal void DisableSqlLintRule(string ruleId) => DisableLintRule(ruleId);
         internal void EnableSqlLintRule(string ruleId) => EnableLintRule(ruleId);
@@ -104,21 +254,33 @@ namespace JustyBaseLegacy.UI
             _tabManager.GetSplitContainerForTab(tabPage);
         internal TabPage? FindSqlResultsTabForDocument(EditorDocumentId documentId) =>
             _documentIdsByTab.FirstOrDefault(item => item.Value == documentId).Key;
-        internal DockContent EnsureSqlResultsToolWindow() =>
-            _tabManager is DockSuiteTabManager dsm ? dsm.EnsureResultsToolWindow() : null;
+        internal DockContent EnsureSqlResultsToolWindow(TabPage? documentTab = null)
+        {
+            if (_tabManager is not DockSuiteTabManager dsm)
+                return null;
+
+            return documentTab is null
+                ? dsm.EnsureResultsToolWindow()
+                : dsm.ShowResultsForTab(documentTab);
+        }
         internal TabControl? GetSqlResultsTabControl(TabPage tabPage) =>
             _tabManager is DockSuiteTabManager dsm ? dsm.GetOrCreateResultsTabControl(tabPage) : null;
         internal TabPage? FindSqlResultsTabForSplitContainer(SplitContainer splitter) =>
             _tabManager is DockSuiteTabManager dsm ? dsm.FindTabForSplitContainer(splitter) : null;
         internal bool CanPresentSqlResult(EditorDocumentId documentId) =>
-            _editorWorkspaceViewModel.Documents.FirstOrDefault(document => document.Id == documentId) is { } document
-            && !string.Equals(_generalDbService.DriverName(document.ConnectionName), "NetezzaSQL", StringComparison.OrdinalIgnoreCase);
+            _editorWorkspaceViewModel.Documents.Any(document => document.Id == documentId);
 
         internal TabPagePicture CreatePresentedResultTab(
             EditorDocumentId documentId,
             JustData.Application.Sql.ResultSetDescriptor descriptor)
         {
-            TabPagePicture tab = PrepareTab();
+            TabPage? documentTab = FindSqlResultsTabForDocument(documentId);
+            SplitContainer? container = documentTab is null ? null : _tabManager.GetSplitContainerForTab(documentTab);
+            if (container is null)
+                throw new InvalidOperationException("The SQL document results container is no longer available.");
+
+            EnsureSqlResultsToolWindow(documentTab);
+            TabPagePicture tab = PrepareTab(container);
             if (tab.Tag is TabPageResultsTag tag)
             {
                 tag.DocumentId = documentId;
@@ -140,13 +302,19 @@ namespace JustyBaseLegacy.UI
             FastColoredTextBox editor = _documentIdsByEditor.FirstOrDefault(pair => pair.Value == documentId).Key
                 ?? CurrentTB
                 ?? throw new InvalidOperationException("The SQL editor is no longer available.");
+            string accessibilityId = $"resultGrid_{documentId}_{descriptor.ResultSetId}";
+            string attachedSql = descriptor.ExecutedSql ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(attachedSql)
+                && _providerStatementSql.TryGetValue((documentId, descriptor.StatementIndex), out string? statementSql))
+                attachedSql = statementSql;
             var grid = new CustomDataGridView(_colorTheme, _importExportTasks, _uiHelperService, editor, dataTable, rows)
             {
-                Name = $"resultGrid_{tab.Text}",
-                ResultGridAccessibilityName = $"resultGrid_{Guid.NewGuid():N}",
+                Name = accessibilityId,
+                AccessibleName = accessibilityId,
+                ResultGridAccessibilityName = "sqlResultGrid",
                 Dock = DockStyle.Fill,
                 DoMessageAction = DoMessage,
-                AttachedSQL = string.Empty,
+                AttachedSQL = attachedSql,
                 DateTimeFormat = _applicationSettingsContext.Config.DateTimeFormat,
                 DecimalFormat = _applicationSettingsContext.Config.DecimalFormat,
                 IntegerFormat = _applicationSettingsContext.Config.IntegerFormat,
@@ -238,7 +406,36 @@ namespace JustyBaseLegacy.UI
         {
             RegisterLegacyResultGrid(tab, grid);
             if (tab.Tag is TabPageResultsTag { DocumentId: { } documentId, ResultSetId: { Length: > 0 } resultSetId })
-                _resultGridRegistry.Register(documentId, resultSetId, grid);
+                _resultGridRegistry.Register(new ResultSetKey(documentId, resultSetId), grid);
+        }
+
+        internal void RemovePresentedResult(
+            ResultSetKey key,
+            TabPage? pendingTab = null,
+            CustomDataGridView? pendingGrid = null)
+        {
+            if (!_resultGridRegistry.TryGet(key, out CustomDataGridView? grid))
+                grid = pendingGrid;
+
+            if (grid is null && pendingTab is null)
+                return;
+
+            TabPage? tab = grid?.Parent as TabPage ?? pendingTab;
+            TabControl? owner = tab?.Parent as TabControl;
+            if (owner is not null && tab is not null && owner.TabPages.Contains(tab))
+                owner.TabPages.Remove(tab);
+
+            if (grid is not null && !grid.IsDisposed)
+            {
+                try { grid.ClearDataGridView(); }
+                catch (Exception exception)
+                {
+                    Trace.WriteLine($"Result grid cleanup failed: {exception.GetType().Name}");
+                }
+            }
+
+            _resultGridRegistry.RemoveResult(key);
+            ClearCurrentHelpReferences();
         }
 
         private void LayoutResultsToolbar(Control parent, Button btAbort, ProgressBar progressBarSQL, Control logView = null) =>

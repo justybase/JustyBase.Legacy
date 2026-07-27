@@ -76,6 +76,45 @@ public sealed class EditorWorkspaceViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Applies a presentation-reported document order to the workspace. The
+    /// workspace remains the owner of the order; unknown or omitted documents
+    /// retain their relative order at the end of the collection.
+    /// </summary>
+    public void Reorder(IReadOnlyList<EditorDocumentId> order)
+    {
+        ThrowIfDisposed();
+        if (order is null || order.Count == 0 || Documents.Count < 2)
+            return;
+
+        var byId = Documents.ToDictionary(document => document.Id);
+        var reordered = new List<EditorDocumentViewModel>(Documents.Count);
+        var included = new HashSet<EditorDocumentId>();
+
+        foreach (EditorDocumentId id in order)
+        {
+            if (byId.TryGetValue(id, out EditorDocumentViewModel? document) && included.Add(id))
+                reordered.Add(document);
+        }
+
+        foreach (EditorDocumentViewModel document in Documents)
+        {
+            if (included.Add(document.Id))
+                reordered.Add(document);
+        }
+
+        if (Documents.SequenceEqual(reordered))
+            return;
+
+        Documents.Clear();
+        foreach (EditorDocumentViewModel document in reordered)
+            Documents.Add(document);
+    }
+
+    public IReadOnlyList<EditorDocumentId> GetDocumentOrder() => Documents
+        .Select(document => document.Id)
+        .ToArray();
+
+    /// <summary>
     /// Registers a document whose editor control is being created by the
     /// WinForms adapter.  The adapter uses this synchronous seam while the
     /// legacy control construction remains synchronous; normal file-opening
@@ -313,11 +352,14 @@ public sealed class EditorWorkspaceViewModel : ObservableObject, IDisposable
         IReadOnlyList<EditorDocumentId>? documentOrder = null)
     {
         ThrowIfDisposed();
+        if (documentOrder is { Count: > 0 })
+            Reorder(documentOrder);
+
         var paths = new List<string>();
         var contents = new List<ManySqlContent>();
         var order = new List<string>();
         var tokens = new Dictionary<EditorDocumentId, string>();
-        var documents = GetSerializationOrder(documentOrder);
+        var documents = Documents.ToArray();
 
         foreach (var document in documents)
         {
@@ -339,7 +381,7 @@ public sealed class EditorWorkspaceViewModel : ObservableObject, IDisposable
         int selected = 0;
         if (ActiveDocument is not null)
         {
-            for (int index = 0; index < documents.Count; index++)
+            for (int index = 0; index < documents.Length; index++)
             {
                 if (ReferenceEquals(documents[index], ActiveDocument))
                 {
@@ -376,31 +418,6 @@ public sealed class EditorWorkspaceViewModel : ObservableObject, IDisposable
             document.SetLoadedText(text);
             DocumentReloaded?.Invoke(document);
         }, cancellationToken).ConfigureAwait(false);
-    }
-
-    private IReadOnlyList<EditorDocumentViewModel> GetSerializationOrder(
-        IReadOnlyList<EditorDocumentId>? documentOrder)
-    {
-        if (documentOrder is null || documentOrder.Count == 0)
-            return Documents.ToArray();
-
-        var documentsById = Documents.ToDictionary(document => document.Id);
-        var ordered = new List<EditorDocumentViewModel>(Documents.Count);
-        var included = new HashSet<EditorDocumentId>();
-
-        foreach (EditorDocumentId id in documentOrder)
-        {
-            if (documentsById.TryGetValue(id, out var document) && included.Add(id))
-                ordered.Add(document);
-        }
-
-        foreach (var document in Documents)
-        {
-            if (included.Add(document.Id))
-                ordered.Add(document);
-        }
-
-        return ordered;
     }
 
     private async Task NewDocumentAsync() => NewDocument();

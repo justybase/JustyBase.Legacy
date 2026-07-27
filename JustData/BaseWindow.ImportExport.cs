@@ -23,6 +23,7 @@ using FastColoredTextBoxNS.Helpers;
 using JustDataAdditionalForms;
 using JustData.Application.Editor;
 using JustData.Application.ImportExport;
+using JustData.Application.Sql;
 using JustData.ViewModels.ImportExport;
 using JustyBase.NetezzaDriver;
 using System.Drawing;
@@ -341,8 +342,8 @@ namespace JustyBaseLegacy.UI
                         && tag.DocumentId is { } taggedDocumentId
                         ? taggedDocumentId
                         : CurrentEditorDocumentId ?? throw new InvalidOperationException("No active editor document is available.");
-                    if (!_resultGridRegistry.TryFind(documentId, selectedGrid, out string? resultSetId)
-                        || string.IsNullOrWhiteSpace(resultSetId))
+                    if (!_resultGridRegistry.TryFind(documentId, selectedGrid, out ResultSetKey? resultKey)
+                        || resultKey is not { } key)
                     {
                         throw new InvalidOperationException("The selected result set is no longer available.");
                     }
@@ -356,7 +357,7 @@ namespace JustyBaseLegacy.UI
                         documentId,
                         xlsxPath,
                         format,
-                        resultSetId,
+                        key.ResultSetId,
                         selectedGrid.AttachedSQL,
                         connectionName,
                         IncludeSqlMetadata: true);

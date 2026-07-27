@@ -166,7 +166,7 @@ namespace JustyBaseLegacy.UI
                 dsm.SaveLayout(layoutPath);
             }
 
-            DynamicCollectionForNettezaHelpers.SaveSnipets(_applicationSettingsContext);
+            DynamicCollectionForNettezaHelpers.SaveSnipets(_applicationSettingsContext, _netezzaAutocompleteState);
             _connectionSessions.Clear();
 
             try
@@ -196,7 +196,6 @@ namespace JustyBaseLegacy.UI
                 _gitTimelineDocument = null;
             }
             _documentExecutionLifecyclePresenter.Dispose();
-            _sqlExecutionEngineContext.DetachPresenter(_legacyNetezzaExecutionPresenter);
             _sqlResultPresenter.Dispose();
             _loggerLoud.SetWindow(null);
         }

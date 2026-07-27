@@ -34,7 +34,7 @@ public sealed class LoginUiTests
             login.FindFirstDescendant(cf => cf.ByAutomationId("passwordTextBox"))!.Focus();
             Keyboard.Press(VirtualKeyShort.ENTER);
             Assert.True(SpinWait.SpinUntil(
-                () => app.GetAllTopLevelWindows(automation).Any(window => window.FindFirstDescendant(cf => cf.ByAutomationId("NetezzaSQL_addedFastColored")) is not null),
+                () => UiTestHelpers.TryFindMainWindow(app, automation) is not null,
                 TimeSpan.FromSeconds(30)),
                 $"Enter did not open the main window. Process exited: {app.HasExited}. Visible windows: {string.Join(", ", app.GetAllTopLevelWindows(automation).Select(window => window.Title))}");
         }

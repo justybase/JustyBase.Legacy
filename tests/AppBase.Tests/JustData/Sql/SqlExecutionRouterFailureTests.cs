@@ -13,8 +13,7 @@ public sealed class SqlExecutionRouterFailureTests
     {
         var database = Substitute.For<IGeneralDbService>();
         database.DriverName(Arg.Any<string>()).Returns("TestDriver");
-        var context = new SqlExecutionEngineContext();
-        var router = new SqlExecutionRouter(database, [new ThrowingEngine()], context);
+        var router = new SqlExecutionRouter(database, [new ThrowingEngine()]);
         var request = new SqlExecutionRequest(EditorDocumentId.New(), "select 1") { ConnectionName = "test" };
 
         SqlExecutionEvent[] events = await CollectAsync(router.ExecuteAsync(request));

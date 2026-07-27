@@ -7,29 +7,6 @@ namespace AppBase.Data;
 public static partial class DynamicCollectionForNettezaHelpers
 {
 
-    public static string[] Keywords = [];
-
-    public static string[] Snippets = [];
-
-    public static string[] MonkeySnippets = [];
-
-    //for group by 
-    public static string ExtraSnippet;
-
-    public static List<string> ActualColumnList = new List<string>();
-
-    public static Dictionary<string, string[]> DatabaseArray = new Dictionary<string, string[]>();
-    public static List<(string hint, string description)> CacheList1 = new List<(string, string)>(); //cache
-    public static List<(string hint, string description)> CacheList2 = new List<(string, string)>();
-
-    public static string CurrentColumn;
-
-    public static void ResetCache()
-    {
-        CacheList1.Clear();
-        CacheList2.Clear();
-    }
-
     [GeneratedRegex("([\\w\\.]+)([=<>!:]+)('?\\w+'?)$", RegexOptions.Compiled)]
     public static partial Regex RegexSpace3();
 
@@ -49,13 +26,16 @@ public static partial class DynamicCollectionForNettezaHelpers
         };
     }
 
-    public static void SaveSnipets(AppBase.Common.Interfaces.IApplicationSettingsContext applicationSettingsContext)
+    public static void SaveSnipets(
+        AppBase.Common.Interfaces.IApplicationSettingsContext applicationSettingsContext,
+        AppBase.Data.Core.Models.INetezzaAutocompleteState state)
     {
+        ArgumentNullException.ThrowIfNull(state);
         Snipets sn = new Snipets
         {
-            Keywords = Keywords,
-            Snippets = Snippets,
-            MonkeySnippets = MonkeySnippets
+            Keywords = state.Keywords.ToArray(),
+            Snippets = state.Snippets.ToArray(),
+            MonkeySnippets = state.MonkeySnippets.ToArray()
         };
         string filePath = Path.Combine(applicationSettingsContext.ConfigDirectory, "snipets.json");
         string content = JsonSerializer.Serialize(sn, MyJsonContextSnipets.Default.Snipets);

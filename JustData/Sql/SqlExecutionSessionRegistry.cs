@@ -16,6 +16,9 @@ public interface ISqlExecutionSessionRegistry
     bool TryGet(EditorDocumentId documentId, out ISqlExecutionSession? session);
     Task CancelAsync(EditorDocumentId documentId);
     bool TryConsumeCancellation(EditorDocumentId documentId);
+    bool TryGetRetainedConnection(EditorDocumentId documentId, string connectionName, string databaseName, out DbConnection? connection);
+    void RetainConnection(EditorDocumentId documentId, string connectionName, string databaseName, DbConnection connection);
+    void ReleaseRetainedConnection(EditorDocumentId documentId);
     void Complete(EditorDocumentId documentId);
     void Cleanup(EditorDocumentId documentId);
 }
@@ -34,6 +37,7 @@ public sealed class SqlExecutionSessionRegistry : ISqlExecutionSessionRegistry, 
 {
     private readonly object _sync = new();
     private readonly Dictionary<EditorDocumentId, SqlExecutionSession> _sessions = [];
+    private readonly Dictionary<EditorDocumentId, RetainedConnection> _retainedConnections = [];
     private readonly HashSet<EditorDocumentId> _cancelledDocuments = [];
 
     public bool TryStart(EditorDocumentId documentId, string connectionName, out ISqlExecutionSession session)
@@ -83,9 +87,68 @@ public sealed class SqlExecutionSessionRegistry : ISqlExecutionSessionRegistry, 
             return _cancelledDocuments.Remove(documentId);
     }
 
+    public bool TryGetRetainedConnection(
+        EditorDocumentId documentId,
+        string connectionName,
+        string databaseName,
+        out DbConnection? connection)
+    {
+        RetainedConnection? retained;
+        lock (_sync)
+        {
+            if (!_retainedConnections.TryGetValue(documentId, out retained)
+                || !string.Equals(retained.ConnectionName, connectionName, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(retained.DatabaseName, databaseName, StringComparison.OrdinalIgnoreCase))
+            {
+                connection = null;
+                return false;
+            }
+        }
+
+        if (retained.Connection.State == ConnectionState.Broken)
+        {
+            ReleaseRetainedConnection(documentId);
+            connection = null;
+            return false;
+        }
+
+        connection = retained.Connection;
+        return true;
+    }
+
+    public void RetainConnection(
+        EditorDocumentId documentId,
+        string connectionName,
+        string databaseName,
+        DbConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        RetainedConnection? replaced;
+        lock (_sync)
+        {
+            _retainedConnections.Remove(documentId, out replaced);
+            _retainedConnections[documentId] = new RetainedConnection(connectionName, databaseName, connection);
+        }
+        if (replaced is not null && !ReferenceEquals(replaced.Connection, connection))
+            DisposeConnection(replaced.Connection);
+    }
+
+    public void ReleaseRetainedConnection(EditorDocumentId documentId)
+    {
+        RetainedConnection? retained;
+        lock (_sync)
+            _retainedConnections.Remove(documentId, out retained);
+        if (retained is not null)
+            DisposeConnection(retained.Connection);
+    }
+
     public void Complete(EditorDocumentId documentId) => Remove(documentId);
 
-    public void Cleanup(EditorDocumentId documentId) => Remove(documentId);
+    public void Cleanup(EditorDocumentId documentId)
+    {
+        Remove(documentId);
+        ReleaseRetainedConnection(documentId);
+    }
 
     private void Remove(EditorDocumentId documentId)
     {
@@ -101,14 +164,27 @@ public sealed class SqlExecutionSessionRegistry : ISqlExecutionSessionRegistry, 
     public void Dispose()
     {
         SqlExecutionSession[] sessions;
+        RetainedConnection[] retained;
         lock (_sync)
         {
             sessions = _sessions.Values.ToArray();
             _sessions.Clear();
+            retained = _retainedConnections.Values.ToArray();
+            _retainedConnections.Clear();
         }
         foreach (SqlExecutionSession session in sessions)
             session.Dispose();
+        foreach (RetainedConnection item in retained)
+            DisposeConnection(item.Connection);
     }
+
+    private static void DisposeConnection(DbConnection connection)
+    {
+        try { if (connection.State != ConnectionState.Closed) connection.Close(); }
+        finally { connection.Dispose(); }
+    }
+
+    private sealed record RetainedConnection(string ConnectionName, string DatabaseName, DbConnection Connection);
 
     private sealed class SqlExecutionSession(EditorDocumentId documentId, string connectionName) : ISqlExecutionSession
     {

@@ -84,6 +84,19 @@ public sealed class SettingsSectionViewModelsTests
         Assert.False(vm.TypoCorrect);
     }
 
+    [Fact]
+    public void Editor_settings_exposes_a_snapshot_of_quick_snippets()
+    {
+        var values = new EditorSettings { QuickSnippets = new Dictionary<string, string> { ["S"] = "select 1" } };
+        var vm = new EditorSettingsViewModel(values);
+
+        IReadOnlyDictionary<string, string> snapshot = vm.QuickSnippets;
+        values.QuickSnippets["S"] = "select 2";
+
+        Assert.Equal("select 1", snapshot["S"]);
+        Assert.Equal("select 2", vm.QuickSnippets["S"]);
+    }
+
     // ── SqlResultsSettingsViewModel ──
 
     [Fact]
@@ -139,6 +152,19 @@ public sealed class SettingsSectionViewModelsTests
         vm.SimpleStartupRestore = false;
         Assert.False(vm.SimpleStartupRestore);
         Assert.Contains(nameof(FilesStartupSettingsViewModel.SimpleStartupRestore), changed);
+    }
+
+    [Fact]
+    public void Files_startup_settings_exposes_a_snapshot_of_extra_files()
+    {
+        var values = new FilesStartupSettings { StartFilesExtra = new Dictionary<string, bool> { ["a.sql"] = true } };
+        var vm = new FilesStartupSettingsViewModel(values);
+
+        IReadOnlyDictionary<string, bool> snapshot = vm.StartFilesExtra;
+        values.StartFilesExtra["a.sql"] = false;
+
+        Assert.True(snapshot["a.sql"]);
+        Assert.False(vm.StartFilesExtra["a.sql"]);
     }
 
     // ── LintSettingsViewModel ──

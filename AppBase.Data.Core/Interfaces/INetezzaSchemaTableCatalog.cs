@@ -9,5 +9,13 @@ namespace AppBase.Data.Core.Interfaces;
 /// </summary>
 public interface INetezzaSchemaTableCatalog
 {
-    Dictionary<string, Dictionary<int, NetezzaTableInfo>> TablesByConnection { get; }
+    IReadOnlyDictionary<string, Dictionary<int, NetezzaTableInfo>> TablesByConnection { get; }
+}
+
+/// <summary>Write port for the schema catalog refresh pipeline.</summary>
+public interface INetezzaSchemaTableCatalogWriter : INetezzaSchemaTableCatalog
+{
+    void ClearConnection(string connectionName);
+    void ReplaceConnection(string connectionName, Dictionary<int, NetezzaTableInfo> tables);
+    void SetTable(string connectionName, int tableId, NetezzaTableInfo table);
 }

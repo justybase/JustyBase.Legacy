@@ -68,7 +68,7 @@ public sealed class ExplorerAdapterTests
         ];
 
         SchemaSearchResult result = LegacySchemaRepository.SearchNetezzaCatalog(
-            "test_nz_connection", "dimdate", includeColumns: true, maxResults: 1_000, tables, databases, columns);
+            "NPS_144", "dimdate", includeColumns: true, maxResults: 1_000, tables, databases, columns);
 
         SchemaNode match = Assert.Single(result.Nodes);
         Assert.Equal("DIMDATE", match.Name);
@@ -104,7 +104,7 @@ public sealed class ExplorerAdapterTests
         ];
 
         SchemaNode match = Assert.Single(LegacySchemaRepository.SearchNetezzaCatalog(
-            "test_nz_connection", "calendar_date", true, 1_000, tables, databases, columns).Nodes);
+            "NPS_144", "calendar_date", true, 1_000, tables, databases, columns).Nodes);
 
         Assert.Equal(SchemaNodeKind.Table, match.Kind);
         Assert.Equal(42, match.LegacyObjectId);
@@ -180,8 +180,8 @@ public sealed class ExplorerAdapterTests
     public void Netezza_table_context_menu_preserves_the_legacy_action_surface()
     {
         var node = new SchemaNode(
-            "test_nz_connection/JUST_DATA/Tables/42", "DIMDATE", SchemaNodeKind.Table,
-            new("test_nz_connection", "JUST_DATA", "Tables", "DIMDATE"), true,
+            "NPS_144/JUST_DATA/Tables/42", "DIMDATE", SchemaNodeKind.Table,
+            new("NPS_144", "JUST_DATA", "Tables", "DIMDATE"), true,
             LegacyObjectId: 42, ProviderKind: TypeInDatabase.table.ToString());
 
         string[] labels = Flatten(SchemaContextMenuCatalog.GetEntries(node))
@@ -211,8 +211,8 @@ public sealed class ExplorerAdapterTests
         string expectedLabel)
     {
         var node = new SchemaNode(
-            $"test_nz_connection/JUST_DATA/{providerKind}/42", "OBJECT_1", LegacySchemaTypeMapper.Map(providerKind),
-            new("test_nz_connection", "JUST_DATA", providerKind.ToString(), "OBJECT_1"), false,
+            $"NPS_144/JUST_DATA/{providerKind}/42", "OBJECT_1", LegacySchemaTypeMapper.Map(providerKind),
+            new("NPS_144", "JUST_DATA", providerKind.ToString(), "OBJECT_1"), false,
             LegacyObjectId: 42, ProviderKind: providerKind.ToString());
 
         Assert.Contains(expectedLabel, Flatten(SchemaContextMenuCatalog.GetEntries(node)));
@@ -222,8 +222,8 @@ public sealed class ExplorerAdapterTests
     public void Netezza_column_context_menu_keeps_edit_drop_and_add_actions()
     {
         var node = new SchemaNode(
-            "test_nz_connection/JUST_DATA/Tables/DIMDATE/DATE_KEY", "DATE_KEY", SchemaNodeKind.Column,
-            new("test_nz_connection", "JUST_DATA", "Tables", "DIMDATE"), false,
+            "NPS_144/JUST_DATA/Tables/DIMDATE/DATE_KEY", "DATE_KEY", SchemaNodeKind.Column,
+            new("NPS_144", "JUST_DATA", "Tables", "DIMDATE"), false,
             LegacyObjectId: 9, ProviderKind: "INTEGER");
 
         Assert.Equal(["Edit Comment", "Drop Column", "Add Column"],
@@ -231,10 +231,10 @@ public sealed class ExplorerAdapterTests
     }
 
     [Theory]
-    [InlineData("test_nz_connection", 1, "test_nz_connection", false)]
-    [InlineData(null, 1, "test_nz_connection", true)]
-    [InlineData("Other", 1, "test_nz_connection", true)]
-    [InlineData("test_nz_connection", 0, "test_nz_connection", true)]
+    [InlineData("NPS_144", 1, "NPS_144", false)]
+    [InlineData(null, 1, "NPS_144", true)]
+    [InlineData("Other", 1, "NPS_144", true)]
+    [InlineData("NPS_144", 0, "NPS_144", true)]
     public void Selecting_the_current_connection_does_not_rebuild_and_collapse_the_tree(
         string? currentConnection,
         int rootCount,

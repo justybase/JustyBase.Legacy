@@ -23,7 +23,7 @@ namespace JustyBaseLegacy.UI.Extensions
                 database._initSchemaInProgress = true;
                 treeView.Invoke(()=>
                 {
-                    DynamicCollectionForGeneralHelpers.oneWord.Clear();
+                    database.AutocompleteSuggestions.OneWord.Clear();
 
                     int a1 = treeView.Nodes.IndexOfKey(connName);
                     if (a1 != -1)
@@ -340,7 +340,7 @@ namespace JustyBaseLegacy.UI.Extensions
                         n1.SelectedImageIndex = 1;
                         tnList.Add((n1.Nodes, n1));
                         n1.ContextMenuStrip = EmptyContextMenuStrip;
-                        DynamicCollectionForGeneralHelpers.oneWord.Add(validSchemaName);
+                        database.AutocompleteSuggestions.OneWord.Add(validSchemaName);
                     }
 
                     foreach (var itx in tnList)
@@ -426,7 +426,7 @@ namespace JustyBaseLegacy.UI.Extensions
                             tmpNode.SelectedImageIndex = 15;
                             tmpNode.ContextMenuStrip = cmTriggers;
                             tmpNode.Nodes.Add("fool");
-                            DynamicCollectionForGeneralHelpers.twoWords.Add($"{validSchemaName}.{tableName}");
+                            database.AutocompleteSuggestions.TwoWords.Add($"{validSchemaName}.{tableName}");
 
                             if (!database.objectInSchema[validSchemaName].ContainsKey(tableName))
                             {
@@ -443,7 +443,7 @@ namespace JustyBaseLegacy.UI.Extensions
                             n1.SelectedImageIndex = 18;
                             n1.ContextMenuStrip = cmStripSynonymsGeneral;
                             n1.Nodes.Add("fool");
-                            DynamicCollectionForGeneralHelpers.twoWords.Add($"{validSchemaName}.{item.ItemArray[2]}");
+                            database.AutocompleteSuggestions.TwoWords.Add($"{validSchemaName}.{item.ItemArray[2]}");
                             if (!database.objectInSchema[validSchemaName].ContainsKey(item.ItemArray[2] as string))
                             {
                                 database.objectInSchema[validSchemaName].Add(item.ItemArray[2] as string, TypeInDatabase.synonym);
@@ -460,7 +460,7 @@ namespace JustyBaseLegacy.UI.Extensions
                             n1.SelectedImageIndex = 18;
                             n1.ContextMenuStrip = cmStripAliasesGeneral;
                             n1.Nodes.Add("fool");
-                            DynamicCollectionForGeneralHelpers.twoWords.Add($"{validSchemaName}.{item.ItemArray[2]}");
+                            database.AutocompleteSuggestions.TwoWords.Add($"{validSchemaName}.{item.ItemArray[2]}");
                             if (!database.objectInSchema[validSchemaName].ContainsKey(item.ItemArray[2] as string))
                             {
                                 database.objectInSchema[validSchemaName].Add(item.ItemArray[2] as string, TypeInDatabase.db2alias);
@@ -485,7 +485,7 @@ namespace JustyBaseLegacy.UI.Extensions
                             tmpNode.SelectedImageIndex = 11;
                             tmpNode.ContextMenuStrip = EmptyContextMenuStrip;
                             tmpNode.Nodes.Add("fool");
-                            DynamicCollectionForGeneralHelpers.twoWords.Add($"{validSchemaName}.{item.ItemArray[2]}");
+                            database.AutocompleteSuggestions.TwoWords.Add($"{validSchemaName}.{item.ItemArray[2]}");
                             if (!database.objectInSchema[validSchemaName].ContainsKey(item.ItemArray[2] as string))
                             {
                                 database.objectInSchema[validSchemaName].Add(item.ItemArray[2] as string, TypeInDatabase.view);
@@ -599,7 +599,7 @@ namespace JustyBaseLegacy.UI.Extensions
                 // Add child nodes for table details
                 AddTableChildNodes(n1, cmColumns, cmConstraints, cmIndexes, cmPartitions, cmTriggers);
 
-                DynamicCollectionForGeneralHelpers.twoWords.Add($"{validSchemaName}.{tableName}");
+                        database.AutocompleteSuggestions.TwoWords.Add($"{validSchemaName}.{tableName}");
                 if (!database.objectInSchema[validSchemaName].ContainsKey(tableName))
                 {
                     database.objectInSchema[validSchemaName].Add(tableName, TypeInDatabase.table);
@@ -643,7 +643,7 @@ namespace JustyBaseLegacy.UI.Extensions
             tmpNode.Nodes.Add("fool");
         }
 
-        public static ContextMenuStrip EmptyContextMenuStrip { get; set; } = new();
+        private static readonly ContextMenuStrip EmptyContextMenuStrip = new();
     }
 }
 #endif

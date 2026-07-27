@@ -28,4 +28,13 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- These are manual/benchmark artifacts, not part of the default functional UI suite. -->
+  <ItemGroup>
+    <Compile Remove="AotWorkflowSmokeTests.cs" />
+    <Compile Remove="DocumentationScreenshotsTests.cs" />
+    <Compile Remove="FilesAndTerminalUiTests.cs" />
+    <Compile Remove="Phase9PerformanceBaselineTests.cs" />
+    <Compile Remove="WideResultGridPerformanceUiTests.cs" />
+  </ItemGroup>
+
 </Project>

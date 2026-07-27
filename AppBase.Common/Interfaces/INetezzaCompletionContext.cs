@@ -11,8 +11,8 @@ public interface INetezzaCompletionContext
     string SelectedConnectionName { get; }
     string SelectedDatabase { get; }
 
-    Dictionary<string, Dictionary<int, DatabaseInfo>> DatabaseDictionary { get; }
-    Dictionary<string, List<NetezzaColumnInfoRow>> ColumnTablesDictionary { get; }
-    Dictionary<string, Dictionary<string, Dictionary<string, (string owner, int tableId)>>> DatabaseSchemaLookup { get; }
-    Dictionary<string, Dictionary<string, Dictionary<string, string>>> DatabaseOwners { get; }
+    IReadOnlyDictionary<string, Dictionary<int, DatabaseInfo>> DatabaseDictionary { get; }
+    IReadOnlyDictionary<string, List<NetezzaColumnInfoRow>> ColumnTablesDictionary { get; }
+    IReadOnlyDictionary<string, Dictionary<string, Dictionary<string, (string owner, int tableId)>>> DatabaseSchemaLookup { get; }
+    IReadOnlyDictionary<string, Dictionary<string, Dictionary<string, string>>> DatabaseOwners { get; }
 }

@@ -25,7 +25,7 @@ namespace JustyBaseLegacy.UI.Extensions
         {
             treeView.Invoke(()=>
             {
-                DynamicCollectionForGeneralHelpers.oneWord.Clear();
+                database.AutocompleteSuggestions.OneWord.Clear();
 
                 int a1 = treeView.Nodes.IndexOfKey(connName);
                 if (a1 != -1)
@@ -56,7 +56,7 @@ namespace JustyBaseLegacy.UI.Extensions
                     n1.ImageIndex = 1;
                     n1.SelectedImageIndex = 1;
                     tnList.Add((n1.Nodes, n1.Text));
-                    DynamicCollectionForGeneralHelpers.oneWord.Add(user.ItemArray[0] as string);
+                    database.AutocompleteSuggestions.OneWord.Add(user.ItemArray[0] as string);
                 }
 
                 foreach (var itx in tnList)
@@ -106,7 +106,7 @@ namespace JustyBaseLegacy.UI.Extensions
                         n1.SelectedImageIndex = 8;
                         n1.ContextMenuStrip = cmStripTabeli;
                         n1.Nodes.Add("fool");
-                        DynamicCollectionForGeneralHelpers.twoWords.Add($"{user}.{tabName}");
+                        database.AutocompleteSuggestions.TwoWords.Add($"{user}.{tabName}");
                         if (!database.objectInSchema[user].ContainsKey(tabName))
                         {
                             database.objectInSchema[user].Add(tabName, TypeInDatabase.table);
@@ -122,7 +122,7 @@ namespace JustyBaseLegacy.UI.Extensions
                         n1.ImageIndex = 18;
                         n1.SelectedImageIndex = 18;
                         n1.Nodes.Add("fool");
-                        DynamicCollectionForGeneralHelpers.twoWords.Add($"{user}.{item.ItemArray[1]}");
+                        database.AutocompleteSuggestions.TwoWords.Add($"{user}.{item.ItemArray[1]}");
                         if (!database.objectInSchema[user].ContainsKey(item.ItemArray[1] as string))
                         {
                             database.objectInSchema[user].Add(item.ItemArray[1] as string, TypeInDatabase.synonym);
@@ -142,7 +142,7 @@ namespace JustyBaseLegacy.UI.Extensions
                             n1.SelectedImageIndex = 9;
                             n1.ContextMenuStrip = cmStripViewGeneral;
                             n1.Nodes.Add("fool");
-                            DynamicCollectionForGeneralHelpers.twoWords.Add($"{user}.{item["VIEW_NAME"]}");
+                            database.AutocompleteSuggestions.TwoWords.Add($"{user}.{item["VIEW_NAME"]}");
                             if (!database.objectInSchema[user].ContainsKey(item["VIEW_NAME"] as string))
                             {
                                 database.objectInSchema[user].Add(item["VIEW_NAME"] as string, TypeInDatabase.view);

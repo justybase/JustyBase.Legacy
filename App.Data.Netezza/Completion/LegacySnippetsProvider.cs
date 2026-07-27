@@ -14,22 +14,31 @@ namespace AppBase.Data.Completion;
 /// </summary>
 public sealed class LegacySnippetsProvider
 {
-    private static bool _snippetsLoaded;
     private readonly IApplicationSettingsContext _applicationSettingsContext;
     private readonly ISessionVariableStore _sessionVariableStore;
+    private readonly INetezzaAutocompleteState _state;
     private readonly Regex _space3 = DynamicCollectionForNettezaHelpers.RegexSpace3();
     private readonly string _desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
 
-    public LegacySnippetsProvider(IApplicationSettingsContext applicationSettingsContext, ISessionVariableStore sessionVariableStore)
+    public LegacySnippetsProvider(
+        IApplicationSettingsContext applicationSettingsContext,
+        ISessionVariableStore sessionVariableStore,
+        INetezzaAutocompleteState state)
     {
         _applicationSettingsContext = applicationSettingsContext ?? throw new ArgumentNullException(nameof(applicationSettingsContext));
         _sessionVariableStore = sessionVariableStore ?? throw new ArgumentNullException(nameof(sessionVariableStore));
+        _state = state ?? throw new ArgumentNullException(nameof(state));
         EnsureSnippetsLoaded();
     }
 
-    public static void EnsureSnippetsLoaded(IApplicationSettingsContext applicationSettingsContext)
+    public static void EnsureSnippetsLoaded(
+        IApplicationSettingsContext applicationSettingsContext,
+        INetezzaAutocompleteState state)
     {
-        if (_snippetsLoaded || applicationSettingsContext is null)
+        if (applicationSettingsContext is null || state is null
+            || state.Keywords.Count > 0
+            || state.Snippets.Count > 0
+            || state.MonkeySnippets.Count > 0)
             return;
 
         string filepath = Path.Combine(applicationSettingsContext.ConfigDirectory, "snipets.json");
@@ -38,13 +47,10 @@ public sealed class LegacySnippetsProvider
         if (sn is null)
             throw new NullReferenceException(nameof(sn));
 
-        DynamicCollectionForNettezaHelpers.Keywords = sn.Keywords ?? [];
-        DynamicCollectionForNettezaHelpers.Snippets = sn.Snippets ?? [];
-        DynamicCollectionForNettezaHelpers.MonkeySnippets = sn.MonkeySnippets ?? [];
-        _snippetsLoaded = true;
+        state.ReplaceSnippets(sn.Keywords, sn.Snippets, sn.MonkeySnippets);
     }
 
-    private void EnsureSnippetsLoaded() => EnsureSnippetsLoaded(_applicationSettingsContext);
+    private void EnsureSnippetsLoaded() => EnsureSnippetsLoaded(_applicationSettingsContext, _state);
 
     public IEnumerable<AutocompleteItem> YieldPreambleItems(string documentKey)
     {
@@ -93,30 +99,28 @@ public sealed class LegacySnippetsProvider
         if (fragmentText.Contains('.'))
             yield break;
 
-        if (DynamicCollectionForNettezaHelpers.Snippets is not null)
+        foreach (var item in _state.Snippets)
         {
-            foreach (var item in DynamicCollectionForNettezaHelpers.Snippets)
-                yield return CompletionItemAppearance.Apply(
-                    new AutocompleteItem2(item), CompletionIconKind.Snippet, "Snippet");
+            yield return CompletionItemAppearance.Apply(
+                new AutocompleteItem2(item), CompletionIconKind.Snippet, "Snippet");
         }
 
-        if (DynamicCollectionForNettezaHelpers.Keywords is not null)
+        foreach (var item in _state.Keywords)
         {
-            foreach (var item in DynamicCollectionForNettezaHelpers.Keywords)
-                yield return CompletionItemAppearance.Apply(
-                    new AutocompleteItem(item), CompletionIconKind.Keyword, "Keyword");
+            yield return CompletionItemAppearance.Apply(
+                new AutocompleteItem(item), CompletionIconKind.Keyword, "Keyword");
         }
     }
 
     private IEnumerable<AutocompleteItem> YieldAtAliasExpansion(List<(string basicHint, string description)> aliasHints)
     {
-        if (DynamicCollectionForNettezaHelpers.ExtraSnippet is { Length: >= 6 })
+        if (_state.ExtraSnippet is { Length: >= 6 } extraSnippet)
             yield return CompletionItemAppearance.Apply(
-                new MonkeySnippets(DynamicCollectionForNettezaHelpers.ExtraSnippet),
+                new MonkeySnippets(extraSnippet),
                 CompletionIconKind.Snippet,
                 "Snippet");
 
-        foreach (var item in DynamicCollectionForNettezaHelpers.MonkeySnippets)
+        foreach (var item in _state.MonkeySnippets)
             yield return CompletionItemAppearance.Apply(
                 new MonkeySnippets(item), CompletionIconKind.Snippet, "Snippet");
 

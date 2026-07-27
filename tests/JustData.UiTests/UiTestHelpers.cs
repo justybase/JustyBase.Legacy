@@ -18,9 +18,9 @@ namespace JustData.UiTests;
 /// </summary>
 internal static class UiTestHelpers
 {
-    private const string MainWindowId = "NetezzaSQL_addedFastColored";
+    private const string MainWindowId = "_addedFastColored";
     private const string ExeName = "JustyBaseLegacy.exe";
-    private const string ConnectionName = "test_nz_connection";
+    private const string ConnectionName = "NPS_144";
 
     /// <summary>
     /// Kills any existing instances of JustyBaseLegacy.exe so tests don't
@@ -54,10 +54,24 @@ internal static class UiTestHelpers
     }
 
     /// <summary>
+    /// Establishes a predictable desktop before a FlaUI session starts.
+    /// This is the equivalent of pressing Win+D on the interactive workstation.
+    /// </summary>
+    internal static void MinimizeAllWindows()
+    {
+        using (Keyboard.Pressing(VirtualKeyShort.LWIN))
+        {
+            Keyboard.Press(VirtualKeyShort.KEY_D);
+        }
+        Thread.Sleep(200);
+    }
+
+    /// <summary>
     /// Launches the app and waits for the login window without connecting.
     /// </summary>
     internal static LoginUiSession LaunchToLoginScreen(string? exePath = null)
     {
+        MinimizeAllWindows();
         KillExistingInstances();
 
         exePath ??= Path.Combine(AppContext.BaseDirectory, ExeName);
@@ -229,6 +243,49 @@ internal static class UiTestHelpers
         Thread.Sleep(200);
     }
 
+    /// <summary>
+    /// Copies the whole SQL editor content through the same WinForms clipboard
+    /// path a user would use. This makes selection-regression checks possible
+    /// even though FastColoredTextBox does not expose a stable ValuePattern.
+    /// </summary>
+    internal static string CopySqlEditorText(AutomationElement editor)
+    {
+        ArgumentNullException.ThrowIfNull(editor);
+        editor.Focus();
+        FlaUI.Core.Input.Keyboard.TypeSimultaneously(
+            FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL,
+            FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_A);
+        FlaUI.Core.Input.Keyboard.TypeSimultaneously(
+            FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL,
+            FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_C);
+        Thread.Sleep(150);
+        return ReadClipboardText();
+    }
+
+    internal static string ReadClipboardText()
+    {
+        string? result = null;
+        Exception? exception = null;
+        Thread thread = new(() =>
+        {
+            try
+            {
+                result = Clipboard.ContainsText() ? Clipboard.GetText() : string.Empty;
+            }
+            catch (Exception caught)
+            {
+                exception = caught;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        if (!thread.Join(TimeSpan.FromSeconds(5)))
+            throw new TimeoutException("Timed out while reading SQL from the clipboard.");
+        if (exception is not null)
+            ExceptionDispatchInfo.Capture(exception).Throw();
+        return result ?? string.Empty;
+    }
+
     private static void SetClipboardText(string text)
     {
         Exception? exception = null;
@@ -275,6 +332,40 @@ internal static class UiTestHelpers
             .FirstOrDefault();
     }
 
+    internal static Window? TryFindMainWindow(FlaUI.Core.Application application, UIA3Automation automation)
+    {
+        Window[] windows = application.GetAllTopLevelWindows(automation);
+
+        foreach (Window window in windows)
+        {
+            try
+            {
+                if (window.FindFirstDescendant(cf => cf.ByAutomationId(MainWindowId)) is not null)
+                    return window;
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                // UIA can expose a stale window while WinForms is rebuilding
+                // the top-level tree. Try the next window on this poll.
+            }
+        }
+
+        foreach (Window window in windows)
+        {
+            try
+            {
+                if (window.Title.StartsWith("JustyBaseLegacy", StringComparison.OrdinalIgnoreCase))
+                    return window;
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                // The next poll obtains fresh UIA wrappers.
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// Launches the standard JustyBaseLegacy.exe, logs in with the default
     /// profile, and returns a session handle. Any pre-existing instances
@@ -286,6 +377,7 @@ internal static class UiTestHelpers
         bool navigateDocumentationDimDate = false,
         bool documentationShowcaseLayout = false)
     {
+        MinimizeAllWindows();
         KillExistingInstances();
 
         exePath ??= Path.Combine(AppContext.BaseDirectory, ExeName);
@@ -325,9 +417,7 @@ internal static class UiTestHelpers
                 "the Save & Select button").Invoke();
 
             Window main = WaitFor(
-                () => application.GetAllTopLevelWindows(automation)
-                    .FirstOrDefault(window => window.FindFirstDescendant(
-                        cf => cf.ByAutomationId(MainWindowId)) is not null),
+                () => TryFindMainWindow(application, automation),
                 "the main JustData window");
             return new UiSession(application, automation, process, main);
         }
@@ -367,7 +457,7 @@ internal static class UiTestHelpers
     }
 
     /// <summary>
-    /// Verifies that the "test_nz_connection" profile exists in the local credentials file.
+    /// Verifies that the "NPS_144" profile exists in the local credentials file.
     /// </summary>
     internal static void EnsureTestoweProfile()
     {

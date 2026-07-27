@@ -15,19 +15,21 @@ public sealed class VariablesCharacterizationTests
     public void Legacy_variables_control_combines_session_and_global_rows()
     {
         ISessionVariableRuntimeContext helpers = Substitute.For<ISessionVariableRuntimeContext>();
-        helpers.ActualTabTitleText.Returns("query.sql");
-        helpers.SessionVariables.Returns(new Dictionary<string, Dictionary<string, string>>
+        IReadOnlyDictionary<string, string> sessionVariables = new Dictionary<string, string>
         {
-            ["query.sql"] = new() { ["session_id"] = "42" }
-        });
-        helpers.GlobalVariables.Returns(new Dictionary<string, string>
+            ["session_id"] = "42"
+        };
+        IReadOnlyDictionary<string, string> globalVariables = new Dictionary<string, string>
         {
             ["global_name"] = "value"
-        });
+        };
+        helpers.ActualTabTitleText.Returns("query.sql");
+        helpers.GetSessionVariables("query.sql").Returns(sessionVariables);
+        helpers.GlobalVariables.Returns(globalVariables);
 
         using VariablesViewModel vm = new(new TestSessionVariableStore(
-            helpers.SessionVariables,
-            helpers.GlobalVariables));
+            new Dictionary<string, Dictionary<string, string>> { ["query.sql"] = new(sessionVariables) },
+            new Dictionary<string, string>(globalVariables)));
         using VariablesControl control = new(
             baseWindow: null!,
             vm,
@@ -43,16 +45,14 @@ public sealed class VariablesCharacterizationTests
     {
         ISessionVariableRuntimeContext helpers = Substitute.For<ISessionVariableRuntimeContext>();
         Dictionary<string, string> globals = new() { ["global_name"] = "value" };
+        Dictionary<string, string> session = new() { ["session_id"] = "42" };
         helpers.ActualTabTitleText.Returns("query.sql");
-        helpers.SessionVariables.Returns(new Dictionary<string, Dictionary<string, string>>
-        {
-            ["query.sql"] = new() { ["session_id"] = "42" }
-        });
+        helpers.GetSessionVariables("query.sql").Returns(session);
         helpers.GlobalVariables.Returns(globals);
 
         using VariablesViewModel vm = new(new TestSessionVariableStore(
-            helpers.SessionVariables,
-            helpers.GlobalVariables));
+            new Dictionary<string, Dictionary<string, string>> { ["query.sql"] = session },
+            globals));
         using VariablesControl control = new(
             baseWindow: null!,
             vm,
@@ -67,7 +67,7 @@ public sealed class VariablesCharacterizationTests
             .PerformClick();
 
         Assert.Empty(globals);
-        Assert.Single(helpers.SessionVariables["query.sql"]);
+        Assert.Single(session);
     }
 
     private sealed class TestSessionVariableStore(

@@ -1,6 +1,7 @@
 using DatabaseDataGridView.WinForms;
 using JustData.Application.Editor;
 using JustData.Application.Sql;
+using JustData.ViewModels.Sql;
 using JustyBaseLegacy.Services;
 using System.Data;
 
@@ -23,6 +24,7 @@ internal interface IWinFormsSqlResultView
         ResultSetDescriptor descriptor,
         List<object[]> rows);
     void RegisterPresentedResultGrid(TabPage tab, CustomDataGridView grid);
+    void RemovePresentedResult(ResultSetKey key, TabPage? pendingTab = null, CustomDataGridView? pendingGrid = null);
 }
 
 /// <summary>
@@ -32,14 +34,41 @@ internal interface IWinFormsSqlResultView
 internal sealed class WinFormsSqlResultPresenter : IDisposable
 {
     private readonly IWinFormsSqlResultView _view;
-    private readonly Dictionary<string, PendingResult> _pending = new(StringComparer.Ordinal);
+    private readonly Dictionary<ResultSetKey, PendingResult> _pending = [];
+    private readonly HashSet<ResultSetKey> _removedResults = [];
+    private readonly Dictionary<EditorDocumentId, SqlExecutionViewModel> _executions = [];
     private bool _disposed;
 
     public WinFormsSqlResultPresenter(IWinFormsSqlResultView view) => _view = view;
 
+    public void Attach(SqlExecutionViewModel execution)
+    {
+        ArgumentNullException.ThrowIfNull(execution);
+        if (_executions.TryGetValue(execution.DocumentId, out SqlExecutionViewModel? existing)
+            && ReferenceEquals(existing, execution))
+            return;
+
+        if (existing is not null)
+        {
+            existing.ResultRemoved -= OnResultRemoved;
+            existing.ResultAdded -= OnResultAdded;
+        }
+
+        _executions[execution.DocumentId] = execution;
+        execution.ResultRemoved += OnResultRemoved;
+        execution.ResultAdded += OnResultAdded;
+    }
+
     public void Handle(SqlExecutionEvent executionEvent)
     {
-        if (_disposed || !_view.CanPresentSqlResult(executionEvent.DocumentId))
+        // Attach is performed while the editor document is created and is the
+        // authoritative lifecycle registration for this UI projection.  The
+        // workspace collection can lag the WinForms tab mapping during editor
+        // creation, causing the first ResultSet/Rows events to be discarded.
+        if (_disposed || !_executions.ContainsKey(executionEvent.DocumentId))
+            return;
+
+        if (executionEvent.IsUiProjectionOwned)
             return;
 
         if (_view.InvokeRequired)
@@ -50,9 +79,25 @@ internal sealed class WinFormsSqlResultPresenter : IDisposable
 
         switch (executionEvent.Kind)
         {
-            case SqlExecutionEventKind.ResultSet when executionEvent.ResultSet is not null:
-                _pending[executionEvent.ResultSet.ResultSetId] = new PendingResult(executionEvent.DocumentId, executionEvent.ResultSet);
+            case SqlExecutionEventKind.Started:
+                _removedResults.RemoveWhere(key => key.DocumentId == executionEvent.DocumentId);
                 break;
+            case SqlExecutionEventKind.ResultSet when executionEvent.ResultSet is not null:
+            {
+                var key = new ResultSetKey(executionEvent.DocumentId, executionEvent.ResultSet.ResultSetId);
+                if (_removedResults.Contains(key))
+                    break;
+                if (!_pending.TryGetValue(key, out PendingResult? pending))
+                {
+                    pending = new PendingResult(key, executionEvent.ResultSet);
+                    _pending[key] = pending;
+                }
+                // A result-set boundary is enough to show an empty result.
+                // Do not wait for a provider-specific first Rows event: some
+                // drivers report the schema before dispatching row batches.
+                pending.EnsureGrid(_view);
+                break;
+            }
             case SqlExecutionEventKind.Rows when executionEvent.Rows is not null:
                 AppendRows(executionEvent);
                 break;
@@ -64,7 +109,37 @@ internal sealed class WinFormsSqlResultPresenter : IDisposable
 
     public void RemoveDocument(EditorDocumentId documentId)
     {
-        foreach (string key in _pending
+        if (_executions.Remove(documentId, out SqlExecutionViewModel? execution))
+        {
+            execution.ResultRemoved -= OnResultRemoved;
+            execution.ResultAdded -= OnResultAdded;
+        }
+
+        RemovePending(documentId);
+        _removedResults.RemoveWhere(key => key.DocumentId == documentId);
+    }
+
+    public void RemovePendingResult(ResultSetKey key)
+    {
+        if (_disposed || !key.IsValid)
+            return;
+
+        if (_view.InvokeRequired)
+        {
+            _view.BeginInvoke(() => RemovePendingResult(key));
+            return;
+        }
+
+        _removedResults.Add(key);
+        if (_pending.Remove(key, out PendingResult? pending))
+        {
+            _view.RemovePresentedResult(key, pending.Tab, pending.Grid);
+        }
+    }
+
+    private void RemovePending(EditorDocumentId documentId)
+    {
+        foreach (ResultSetKey key in _pending
             .Where(pair => pair.Value.DocumentId == documentId)
             .Select(pair => pair.Key)
             .ToArray())
@@ -75,8 +150,11 @@ internal sealed class WinFormsSqlResultPresenter : IDisposable
 
     private void AppendRows(SqlExecutionEvent executionEvent)
     {
-        string? id = executionEvent.ResultSetId;
-        if (string.IsNullOrWhiteSpace(id) || !_pending.TryGetValue(id, out PendingResult? pending))
+        if (string.IsNullOrWhiteSpace(executionEvent.ResultSetId))
+            return;
+
+        var key = new ResultSetKey(executionEvent.DocumentId, executionEvent.ResultSetId);
+        if (!_pending.TryGetValue(key, out PendingResult? pending))
             return;
 
         pending.EnsureGrid(_view);
@@ -105,18 +183,76 @@ internal sealed class WinFormsSqlResultPresenter : IDisposable
             pending.Grid.InitGrid(false);
             _view.RegisterPresentedResultGrid(pending.Tab!, pending.Grid);
         }
-        RemoveDocument(documentId);
+        RemovePending(documentId);
     }
 
     public void Dispose()
     {
         _disposed = true;
+        foreach (SqlExecutionViewModel execution in _executions.Values)
+        {
+            execution.ResultRemoved -= OnResultRemoved;
+            execution.ResultAdded -= OnResultAdded;
+        }
+        _executions.Clear();
         _pending.Clear();
     }
 
-    private sealed class PendingResult(EditorDocumentId documentId, ResultSetDescriptor descriptor)
+    private void OnResultRemoved(ResultSetKey key)
     {
-        public EditorDocumentId DocumentId { get; } = documentId;
+        if (_disposed)
+            return;
+
+        // Result-close originates from both a WinForms click and the clean VM
+        // (for example ClearResults at the start of a new run). Always queue
+        // the view update to avoid re-entering legacy TabControl handlers that
+        // are currently removing the same page.
+        _view.BeginInvoke(() =>
+        {
+            if (_disposed)
+                return;
+
+            _removedResults.Add(key);
+            TabPage? pendingTab = null;
+            CustomDataGridView? pendingGrid = null;
+            if (_pending.Remove(key, out PendingResult? pending))
+            {
+                pendingTab = pending.Tab;
+                pendingGrid = pending.Grid;
+            }
+
+            _view.RemovePresentedResult(key, pendingTab, pendingGrid);
+        });
+    }
+
+    private void OnResultAdded(ResultSetKey key, ResultSetDescriptor descriptor)
+    {
+        if (_disposed || !_executions.ContainsKey(key.DocumentId))
+            return;
+        if (_removedResults.Contains(key))
+            return;
+
+        void EnsureResultProjection()
+        {
+            if (_disposed || !_executions.ContainsKey(key.DocumentId))
+                return;
+            if (!_pending.TryGetValue(key, out PendingResult? pending))
+            {
+                pending = new PendingResult(key, descriptor);
+                _pending[key] = pending;
+            }
+            pending.EnsureGrid(_view);
+        }
+
+        if (_view.InvokeRequired)
+            _view.BeginInvoke(EnsureResultProjection);
+        else
+            EnsureResultProjection();
+    }
+
+    private sealed class PendingResult(ResultSetKey key, ResultSetDescriptor descriptor)
+    {
+        public EditorDocumentId DocumentId { get; } = key.DocumentId;
         public ResultSetDescriptor Descriptor { get; } = descriptor;
         public List<object[]> Rows { get; } = [];
         public TabPagePicture? Tab { get; private set; }

@@ -303,16 +303,16 @@ namespace JustyBaseLegacy.UI
 
         private void SynchronizeResultPinState(TabPage page, bool isPinned)
         {
-            if (page.Tag is not TabPageResultsTag { DocumentId: { } documentId } tag)
+            if (page.Tag is not TabPageResultsTag { DocumentId: { } documentId } tag || tag.Key is not { } key)
                 return;
 
             var execution = _editorWorkspaceViewModel.Documents
                 .FirstOrDefault(document => document.Id == documentId)
                 ?.SqlExecution;
             if (isPinned)
-                execution?.PinResult(tag.ResultSetId);
+                execution?.PinResult(key);
             else
-                execution?.UnpinResult(tag.ResultSetId);
+                execution?.UnpinResult(key);
         }
 
         public void AttachTabPage(TabPage page, TabControl tcCurrent)

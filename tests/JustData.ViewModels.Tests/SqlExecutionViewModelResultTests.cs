@@ -162,6 +162,50 @@ public sealed class SqlExecutionViewModelResultTests
     }
 
     [Fact]
+    public async Task Result_lifecycle_events_are_document_scoped()
+    {
+        var documentId = EditorDocumentId.New();
+        var useCase = new SingleResultSetUseCase(documentId);
+        using var vm = new SqlExecutionViewModel(documentId, useCase);
+        var added = new List<ResultSetKey>();
+        var removed = new List<ResultSetKey>();
+        vm.ResultAdded += (key, _) => added.Add(key);
+        vm.ResultRemoved += removed.Add;
+
+        await vm.RunAsync(new SqlExecutionRequest(documentId, "select 1"));
+        vm.RemoveResult(new ResultSetKey(documentId, "result-1"));
+
+        Assert.Equal([new ResultSetKey(documentId, "result-1")], added);
+        Assert.Equal(added, removed);
+    }
+
+    [Fact]
+    public async Task ClearResults_emits_removals_for_each_unpinned_result()
+    {
+        var documentId = EditorDocumentId.New();
+        using var vm = new SqlExecutionViewModel(documentId, new DualResultSetUseCase(documentId));
+        var removed = new List<ResultSetKey>();
+        vm.ResultRemoved += removed.Add;
+
+        await vm.RunAsync(new SqlExecutionRequest(documentId, "select 1"));
+        vm.PinResult("result-1");
+        vm.ClearResults();
+
+        Assert.Equal([new ResultSetKey(documentId, "result-2")], removed);
+    }
+
+    [Fact]
+    public async Task Selecting_a_result_from_another_document_is_rejected()
+    {
+        var documentId = EditorDocumentId.New();
+        using var vm = new SqlExecutionViewModel(documentId, new SingleResultSetUseCase(documentId));
+        await vm.RunAsync(new SqlExecutionRequest(documentId, "select 1"));
+
+        Assert.Throws<ArgumentException>(() =>
+            vm.SelectResultKey(new ResultSetKey(EditorDocumentId.New(), "result-1")));
+    }
+
+    [Fact]
     public async Task RemoveResult_nonexistent_does_not_throw()
     {
         var documentId = EditorDocumentId.New();

@@ -3,6 +3,7 @@ using AppBase.Common.Enums;
 using AppBase.Common.Interfaces;
 using AppBase.Common.Models;
 using AppBase.Data.Core.Enums;
+using AppBase.Data.Core.Models;
 using System.Data.Common;
 using System.Diagnostics;
 using System.Text;
@@ -30,6 +31,7 @@ public interface IGeneralDb
     int NotifyAfter { get; set; }
     string Username { get; set; }
     Dictionary<string, Dictionary<string, TypeInDatabase>> objectInSchema { get; set; }
+    IAutocompleteSuggestionStore AutocompleteSuggestions { get; }
 
     event Action<string>? OnImportNotify;
 

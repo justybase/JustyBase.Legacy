@@ -209,7 +209,7 @@ namespace JustyBaseLegacy.UI
                 int position = fastColoredTextBox.SelectionStart;
                 (var word, var length) = fastColoredTextBox.CurrentWord(_applicationSettingsContext.Config.CurrentWordLengthLimit);
 
-                foreach (string snippet in DynamicCollectionForNettezaHelpers.MonkeySnippets)
+                foreach (string snippet in _netezzaAutocompleteState.MonkeySnippets)
                 {
                     if (snippet.StartsWith($"@@{word} ", StringComparison.OrdinalIgnoreCase))
                     {
@@ -370,8 +370,10 @@ namespace JustyBaseLegacy.UI
                     document?.UpdateTextFromView(fctb.Text);
                 }
 
-                _cleanSqlText = _sqlTextChangingDefaultSqlImplementation.HandleTextChanged(fctb, e, _colorTheme.CurrentFctbColors, ref _empty, _cleanSqlText, ref DynamicCollectionForNettezaHelpers.CurrentColumn,
+                string? currentColumn = _netezzaAutocompleteState.CurrentColumn;
+                _cleanSqlText = _sqlTextChangingDefaultSqlImplementation.HandleTextChanged(fctb, e, _colorTheme.CurrentFctbColors, ref _empty, _cleanSqlText, ref currentColumn,
                     fctb.Name.StartsWith("NetezzaSQL") || _generalDbService.DriverName(SelectedConnectionName) == "NetezzaSQL");
+                _netezzaAutocompleteState.CurrentColumn = currentColumn;
             }
         }
 

@@ -142,13 +142,13 @@ public sealed class MsSqlDb : GeneralDb
 
         foreach (DataRow thisDb in _dtDatabases.Rows)
         {
-            DynamicCollectionForGeneralHelpers.OneWord.Add(thisDb.ItemArray[0].ToString());
+            AutocompleteSuggestions.OneWord.Add(thisDb.ItemArray[0].ToString());
         }
 
         foreach (DataRow user in _schemas.Rows)
         {
             string db = user.ItemArray[0].ToString();
-            DynamicCollectionForGeneralHelpers.TwoWords.Add($"{user.ItemArray[0]}.{user.ItemArray[1]}");
+                AutocompleteSuggestions.TwoWords.Add($"{user.ItemArray[0]}.{user.ItemArray[1]}");
         }
         foreach (DataRow item in tables.Rows)//owner, name,type
         {
@@ -157,7 +157,7 @@ public sealed class MsSqlDb : GeneralDb
             {
                 tabName = $"\"{tabName}\"";
             }
-            DynamicCollectionForGeneralHelpers.TreeWords.Add($"{item.ItemArray[0]}.{item.ItemArray[1]}.{tabName}");
+                AutocompleteSuggestions.TreeWords.Add($"{item.ItemArray[0]}.{item.ItemArray[1]}.{tabName}");
         }
 
         foreach (DataRow item in views.Rows)
@@ -167,7 +167,7 @@ public sealed class MsSqlDb : GeneralDb
             {
                 tabName = $"\"{tabName}\"";
             }
-            DynamicCollectionForGeneralHelpers.TreeWords.Add($"{item.ItemArray[0]}.{item.ItemArray[1]}.{tabName}");
+                AutocompleteSuggestions.TreeWords.Add($"{item.ItemArray[0]}.{item.ItemArray[1]}.{tabName}");
         }
 
         /*

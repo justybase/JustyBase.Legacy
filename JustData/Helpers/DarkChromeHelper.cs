@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Drawing;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -12,12 +11,16 @@ namespace JustyBaseLegacy.UI.Helpers;
 /// </summary>
 internal static class DarkChromeHelper
 {
-    private static readonly HashSet<Control> BorderedControls = [];
-    private static readonly HashSet<Control> ChildBorderHosts = [];
-    private static readonly HashSet<GroupBox> ThemedGroupBoxes = [];
-    private static readonly HashSet<ComboBox> ThemedComboBoxes = [];
-    private static readonly HashSet<ComboBox> OwnerDrawComboBoxes = [];
-    private static readonly HashSet<TabControl> FlattenedTabControls = [];
+    // Registration must not retain controls after a window is closed. The
+    // helper is static, so HashSet<Control> would make every themed window
+    // process-lifetime state. ConditionalWeakTable keeps the one-handler
+    // guarantee without owning the control.
+    private static readonly ConditionalWeakTable<Control, Registration> BorderedControls = [];
+    private static readonly ConditionalWeakTable<Control, Registration> ChildBorderHosts = [];
+    private static readonly ConditionalWeakTable<GroupBox, Registration> ThemedGroupBoxes = [];
+    private static readonly ConditionalWeakTable<ComboBox, Registration> ThemedComboBoxes = [];
+    private static readonly ConditionalWeakTable<ComboBox, Registration> OwnerDrawComboBoxes = [];
+    private static readonly ConditionalWeakTable<TabControl, Registration> FlattenedTabControls = [];
     private static readonly ConditionalWeakTable<Control, BorderTheme> BorderThemes = [];
     private static readonly ConditionalWeakTable<GroupBox, GroupBoxTheme> GroupBoxThemes = [];
 
@@ -25,6 +28,8 @@ internal static class DarkChromeHelper
     {
         public Color Border;
     }
+
+    private sealed class Registration;
 
     private sealed class GroupBoxTheme
     {
@@ -71,7 +76,7 @@ internal static class DarkChromeHelper
         theme.Border = border;
         theme.DrawChildFieldBorders = drawChildFieldBorders;
 
-        if (ThemedGroupBoxes.Add(groupBox))
+        if (TryRegister(ThemedGroupBoxes, groupBox))
         {
             groupBox.Paint += ThemedGroupBox_Paint;
             groupBox.Resize += (_, _) => groupBox.Invalidate();
@@ -203,7 +208,7 @@ internal static class DarkChromeHelper
     {
         ArgumentNullException.ThrowIfNull(tabControl);
 
-        if (!FlattenedTabControls.Add(tabControl))
+        if (!TryRegister(FlattenedTabControls, tabControl))
         {
             if (tabControl.IsHandleCreated)
             {
@@ -226,7 +231,7 @@ internal static class DarkChromeHelper
 
         BorderThemes.GetOrCreateValue(host).Border = border;
 
-        if (!ChildBorderHosts.Add(host))
+        if (!TryRegister(ChildBorderHosts, host))
         {
             host.Invalidate();
             return;
@@ -287,7 +292,7 @@ internal static class DarkChromeHelper
 
         BorderThemes.GetOrCreateValue(control).Border = border;
 
-        if (!BorderedControls.Add(control))
+        if (!TryRegister(BorderedControls, control))
         {
             control.Invalidate();
             return;
@@ -434,7 +439,7 @@ internal static class DarkChromeHelper
 
     private static void AttachComboBoxResizeFix(ComboBox comboBox)
     {
-        if (!ThemedComboBoxes.Add(comboBox))
+        if (!TryRegister(ThemedComboBoxes, comboBox))
         {
             return;
         }
@@ -470,7 +475,7 @@ internal static class DarkChromeHelper
 
     private static void AttachOwnerDrawRenderer(ComboBox comboBox)
     {
-        if (OwnerDrawComboBoxes.Add(comboBox))
+        if (TryRegister(OwnerDrawComboBoxes, comboBox))
         {
             comboBox.DrawItem += DarkComboBox_DrawItem;
         }
@@ -527,5 +532,15 @@ internal static class DarkChromeHelper
         {
             e.DrawFocusRectangle();
         }
+    }
+
+    private static bool TryRegister<TControl>(ConditionalWeakTable<TControl, Registration> registrations, TControl control)
+        where TControl : class
+    {
+        if (registrations.TryGetValue(control, out _))
+            return false;
+
+        registrations.Add(control, new Registration());
+        return true;
     }
 }

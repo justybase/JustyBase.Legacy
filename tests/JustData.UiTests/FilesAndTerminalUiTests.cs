@@ -33,9 +33,7 @@ public sealed class FilesAndTerminalUiTests
                 "the Save & Select button").Invoke();
 
             Window mainWindow = WaitFor(
-                () => application.GetAllTopLevelWindows(automation)
-                    .FirstOrDefault(window => window.FindFirstDescendant(
-                        cf => cf.ByAutomationId("NetezzaSQL_addedFastColored")) is not null),
+                () => UiTestHelpers.TryFindMainWindow(application, automation),
                 "the main JustData window");
 
             Assert.NotNull(mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("dgvVariables")));

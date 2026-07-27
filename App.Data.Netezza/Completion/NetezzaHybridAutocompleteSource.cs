@@ -2,6 +2,7 @@ using AppBase.Common;
 using AppBase.Common.Interfaces;
 using JustData.Application.Editor;
 using AppBase.Data.Core.Interfaces;
+using AppBase.Data.Core.Core;
 using AppBase.Data.Core.Models;
 using FastColoredTextBoxNS;
 using FastColoredTextBoxNS.Helpers;
@@ -21,6 +22,7 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
     private readonly INetezzaCompletionContext _completionContext;
     private readonly Func<string> _activeDocumentTitleProvider;
     private readonly IGeneralDbService _generalDbService;
+    private readonly IConnectionSessionRegistry _connectionSessions;
     private readonly INetezzaSchemaTableCatalog _schemaTables;
     private readonly NetezzaSqlCompletionServices _completionServices;
     private NzCompletionEngine _completionEngine;
@@ -28,6 +30,7 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
     private readonly ISchemaProvider _schemaProvider;
     private readonly LegacySnippetsProvider _snippetsProvider;
     private readonly LegacyDbCompletionFallback _dbFallback;
+    private readonly INetezzaAutocompleteState _state;
     private readonly Dictionary<string, int> _keyValuePairsForAutocomplete = new();
 
     public NetezzaHybridAutocompleteSource(
@@ -38,20 +41,25 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         JustData.Application.Variables.ISessionVariableStore sessionVariableStore,
         Func<string> activeDocumentTitleProvider,
         IGeneralDbService generalDbService,
+        IConnectionSessionRegistry connectionSessions,
         INetezzaSchemaTableCatalog schemaTables,
         NetezzaSqlCompletionServices completionServices,
+        INetezzaAutocompleteState state,
         EditorDocumentId? documentId = null)
     {
         _menu = menu;
         _completionContext = completionContext;
         _activeDocumentTitleProvider = activeDocumentTitleProvider;
         _generalDbService = generalDbService;
+        _connectionSessions = connectionSessions ?? throw new ArgumentNullException(nameof(connectionSessions));
         _schemaTables = schemaTables ?? throw new ArgumentNullException(nameof(schemaTables));
         _completionServices = completionServices;
+        _state = state ?? throw new ArgumentNullException(nameof(state));
         _schemaProvider = completionServices.SchemaProvider;
         _snippetsProvider = new LegacySnippetsProvider(
             applicationSettingsContext,
-            sessionVariableStore);
+            sessionVariableStore,
+            _state);
         _dbFallback = new LegacyDbCompletionFallback(completionContext, generalDbService, _schemaTables);
 
         _documentId = documentId ?? EditorDocumentId.New();
@@ -67,8 +75,11 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         _completionEngine = _completionServices.CreateEngine(_documentId.ToString());
     }
 
+    public void ResetCache() => _dbFallback.ResetCache();
+
     public List<(string basicHint, string description)> AliasHints { get; set; } = new();
     public List<string> HintWithTable { get; set; } = new();
+    public INetezzaAutocompleteState State => _state;
 
     public IEnumerator<AutocompleteItem> GetEnumerator()
     {
@@ -165,13 +176,13 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
             yield break;
         }
 
-        if (!string.IsNullOrWhiteSpace(DynamicCollectionForNettezaHelpers.CurrentColumn))
+        if (!string.IsNullOrWhiteSpace(_state.CurrentColumn))
         {
             _keyValuePairsForAutocomplete.Clear();
             foreach (var (basicHint, _) in AliasHints)
             {
                 _keyValuePairsForAutocomplete[basicHint] = SqlTextModifyDefaultSqlImplementations.DamerauLevenshteinDistance(
-                    basicHint, text + DynamicCollectionForNettezaHelpers.CurrentColumn);
+                    basicHint, text + _state.CurrentColumn);
             }
 
             AliasHints.Sort(DynamicCollectionForNettezaHelpers.SortMethodAliases(_keyValuePairsForAutocomplete));
@@ -269,34 +280,38 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
 
     private IEnumerable<AutocompleteItem> YieldGeneralDriverFallback()
     {
-        foreach (var item in DynamicCollectionForGeneralHelpers.OneWord)
+        if (!_connectionSessions.TryGetValue(_completionContext.SelectedConnectionName, out IGeneralDb database))
+            yield break;
+
+        IAutocompleteSuggestionStore suggestions = database.AutocompleteSuggestions;
+        foreach (var item in suggestions.OneWord)
             yield return CompletionItemAppearance.Apply(
                 new AutocompleteItem(item), CompletionIconKind.Keyword, "Keyword");
 
-        foreach (var item in DynamicCollectionForGeneralHelpers.ActualColumnList)
+        foreach (var item in suggestions.ActualColumnList)
             yield return CompletionItemAppearance.Apply(
                 new AutocompleteItem(item), CompletionIconKind.Column, "Column");
 
-        foreach (var item in DynamicCollectionForGeneralHelpers.OneWordAdditions)
+        foreach (var item in suggestions.OneWordAdditions)
             yield return CompletionItemAppearance.Apply(
                 new AutocompleteItem(item), CompletionIconKind.Keyword, "Keyword");
 
-        foreach (var item in DynamicCollectionForGeneralHelpers.TwoWords)
+        foreach (var item in suggestions.TwoWords)
             yield return CompletionItemAppearance.Apply(
                 new MethodAutocompleteItem2(item), CompletionIconKind.Keyword, "Keyword");
 
-        foreach (var item in DynamicCollectionForGeneralHelpers.TwoWordsAdditions)
+        foreach (var item in suggestions.TwoWordsAdditions)
             yield return CompletionItemAppearance.Apply(
                 new MethodAutocompleteItem2(item), CompletionIconKind.Keyword, "Keyword");
 
-        if (DynamicCollectionForGeneralHelpers.TreeWords.Count > 0)
+        if (suggestions.TreeWords.Count > 0)
         {
-            foreach (var item in DynamicCollectionForGeneralHelpers.TreeWords)
+            foreach (var item in suggestions.TreeWords)
                 yield return CompletionItemAppearance.Apply(
                     new MethodAutocompleteItem2(item), CompletionIconKind.Reference, "Reference");
         }
 
-        foreach (var item in DynamicCollectionForNettezaHelpers.Keywords)
+        foreach (var item in _state.Keywords)
             yield return CompletionItemAppearance.Apply(
                 new AutocompleteItem(item), CompletionIconKind.Keyword, "Keyword");
     }

@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using JustData.Application.Settings;
+using System.Collections.ObjectModel;
 
 namespace JustData.ViewModels.Preferences;
 
@@ -39,7 +40,9 @@ public sealed class EditorSettingsViewModel(EditorSettings values) : SettingsSec
     public bool DontUseIndent { get => Values.DontUseIndent; set { if (Values.DontUseIndent != value) { Values.DontUseIndent = value; OnPropertyChanged(); } } }
     public int WordWrap { get => Values.WordWrap; set { if (Values.WordWrap != value) { Values.WordWrap = value; OnPropertyChanged(); } } }
     public int WordWrapAutoIndent { get => Values.WordWrapAutoIndent; set { if (Values.WordWrapAutoIndent != value) { Values.WordWrapAutoIndent = value; OnPropertyChanged(); } } }
-    public Dictionary<string, string> QuickSnippets => Values.QuickSnippets;
+    public IReadOnlyDictionary<string, string> QuickSnippets =>
+        new ReadOnlyDictionary<string, string>(
+            new Dictionary<string, string>(Values.QuickSnippets, StringComparer.OrdinalIgnoreCase));
 
     protected override void OnPropertiesReplaced() => OnPropertyChanged(string.Empty);
 }
@@ -68,8 +71,10 @@ public sealed class ImportExportSettingsViewModel(ImportExportSettings values) :
 
 public sealed class FilesStartupSettingsViewModel(FilesStartupSettings values) : SettingsSectionViewModel<FilesStartupSettings>(values)
 {
-    public List<string> StartsFolderPaths => Values.StartsFolderPaths;
-    public Dictionary<string, bool> StartFilesExtra => Values.StartFilesExtra;
+    public IReadOnlyList<string> StartsFolderPaths => Values.StartsFolderPaths.ToArray();
+    public IReadOnlyDictionary<string, bool> StartFilesExtra =>
+        new ReadOnlyDictionary<string, bool>(
+            new Dictionary<string, bool>(Values.StartFilesExtra, StringComparer.OrdinalIgnoreCase));
     public bool SimpleStartupRestore { get => Values.SimpleStartupRestore; set { if (Values.SimpleStartupRestore != value) { Values.SimpleStartupRestore = value; OnPropertyChanged(); } } }
     public int MaxRecentFilesCount { get => Values.MaxRecentFilesCount; set { if (Values.MaxRecentFilesCount != value) { Values.MaxRecentFilesCount = value; OnPropertyChanged(); } } }
 
@@ -78,9 +83,20 @@ public sealed class FilesStartupSettingsViewModel(FilesStartupSettings values) :
 
 public sealed class LintSettingsViewModel(LintSettings values) : SettingsSectionViewModel<LintSettings>(values)
 {
-    public List<string> DisabledLintRules => Values.DisabledLintRules;
+    public IReadOnlyList<string> DisabledLintRules => Values.DisabledLintRules.ToArray();
     public bool EditorHighlightShown { get => Values.EditorHighlightShown; set { if (Values.EditorHighlightShown != value) { Values.EditorHighlightShown = value; OnPropertyChanged(); } } }
-    public List<string> DisabledHighlightRules => Values.DisabledHighlightRules;
+    public IReadOnlyList<string> DisabledHighlightRules => Values.DisabledHighlightRules.ToArray();
+
+    public void DisableLintRule(string ruleId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ruleId);
+        if (!Values.DisabledLintRules.Contains(ruleId, StringComparer.OrdinalIgnoreCase))
+        {
+            Values.DisabledLintRules.Add(ruleId);
+            OnPropertyChanged(nameof(DisabledLintRules));
+        }
+    }
+
     protected override void OnPropertiesReplaced() => OnPropertyChanged(string.Empty);
 }
 

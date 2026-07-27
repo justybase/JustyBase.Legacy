@@ -13,7 +13,7 @@ namespace JustData.UiTests;
 
 public sealed class WideResultGridPerformanceUiTests
 {
-    private const string ConnectionName = "test_nz_connection";
+    private const string ConnectionName = "NPS_144";
     private const int ExpectedColumnCount = 300;
     private static readonly string WideSelect = BuildWideSelect();
     private const string FirstRenderPipeEnvironmentVariable = "JUSTYBASE_FIRST_RENDER_PIPE";
@@ -51,13 +51,11 @@ public sealed class WideResultGridPerformanceUiTests
                 .Invoke();
 
             Window mainWindow = WaitFor(
-                () => application.GetAllTopLevelWindows(automation)
-                    .FirstOrDefault(window => window.FindFirstDescendant(
-                        cf => cf.ByAutomationId("NetezzaSQL_addedFastColored")) is not null),
+                () => UiTestHelpers.TryFindMainWindow(application, automation),
                 "the main JustData window");
 
             AutomationElement editor = WaitFor(
-                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("NetezzaSQL_addedFastColored")),
+                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("_addedFastColored")),
                 "the SQL editor");
 
             SetEditorText(editor, "SELECT 1");

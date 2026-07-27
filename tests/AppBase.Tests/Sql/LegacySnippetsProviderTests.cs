@@ -1,9 +1,9 @@
-using System.Reflection;
 using System.Text.Json;
 using AppBase.Common;
 using AppBase.Common.Interfaces;
 using AppBase.Data;
 using AppBase.Data.Completion;
+using AppBase.Data.Core.Models;
 using JustData.Application.Variables;
 using NSubstitute;
 
@@ -12,28 +12,14 @@ namespace AppBase.Tests.Sql;
 public sealed class LegacySnippetsProviderTests : IDisposable
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), "LegacySnippetsProviderTests_" + Guid.NewGuid().ToString("N"));
-    private readonly string[] _previousKeywords;
-    private readonly string[] _previousSnippets;
-    private readonly string[] _previousMonkey;
-    private readonly string? _previousExtra;
 
     public LegacySnippetsProviderTests()
     {
         Directory.CreateDirectory(_tempDir);
-        _previousKeywords = DynamicCollectionForNettezaHelpers.Keywords;
-        _previousSnippets = DynamicCollectionForNettezaHelpers.Snippets;
-        _previousMonkey = DynamicCollectionForNettezaHelpers.MonkeySnippets;
-        _previousExtra = DynamicCollectionForNettezaHelpers.ExtraSnippet;
-        ResetSnippetsLoaded();
     }
 
     public void Dispose()
     {
-        DynamicCollectionForNettezaHelpers.Keywords = _previousKeywords;
-        DynamicCollectionForNettezaHelpers.Snippets = _previousSnippets;
-        DynamicCollectionForNettezaHelpers.MonkeySnippets = _previousMonkey;
-        DynamicCollectionForNettezaHelpers.ExtraSnippet = _previousExtra!;
-        ResetSnippetsLoaded();
         try
         {
             if (Directory.Exists(_tempDir))
@@ -50,9 +36,11 @@ public sealed class LegacySnippetsProviderTests : IDisposable
     {
         var settings = Substitute.For<IApplicationSettingsContext>();
         var store = Substitute.For<ISessionVariableStore>();
+        var state = new NetezzaAutocompleteState();
 
-        Assert.Throws<ArgumentNullException>(() => new LegacySnippetsProvider(null!, store));
-        Assert.Throws<ArgumentNullException>(() => new LegacySnippetsProvider(settings, null!));
+        Assert.Throws<ArgumentNullException>(() => new LegacySnippetsProvider(null!, store, state));
+        Assert.Throws<ArgumentNullException>(() => new LegacySnippetsProvider(settings, null!, state));
+        Assert.Throws<ArgumentNullException>(() => new LegacySnippetsProvider(settings, store, null!));
     }
 
     [Fact]
@@ -60,14 +48,15 @@ public sealed class LegacySnippetsProviderTests : IDisposable
     {
         WriteSnippets(["SELECT"], ["sel"], ["@@imp"]);
         var settings = CreateSettings();
+        var state = new NetezzaAutocompleteState();
 
-        LegacySnippetsProvider.EnsureSnippetsLoaded(settings);
-        File.WriteAllText(Path.Combine(_tempDir, "snipets.json"), "{}"); // would fail if re-read
-        LegacySnippetsProvider.EnsureSnippetsLoaded(settings);
+        LegacySnippetsProvider.EnsureSnippetsLoaded(settings, state);
+        File.WriteAllText(Path.Combine(_tempDir, "snipets.json"), "{}");
+        LegacySnippetsProvider.EnsureSnippetsLoaded(settings, state);
 
-        Assert.Equal(["SELECT"], DynamicCollectionForNettezaHelpers.Keywords);
-        Assert.Equal(["sel"], DynamicCollectionForNettezaHelpers.Snippets);
-        Assert.Equal(["@@imp"], DynamicCollectionForNettezaHelpers.MonkeySnippets);
+        Assert.Equal(["SELECT"], state.Keywords);
+        Assert.Equal(["sel"], state.Snippets);
+        Assert.Equal(["@@imp"], state.MonkeySnippets);
     }
 
     [Fact]
@@ -76,9 +65,10 @@ public sealed class LegacySnippetsProviderTests : IDisposable
         WriteSnippets([], [], []);
         var settings = CreateSettings();
         var store = Substitute.For<ISessionVariableStore>();
+        var state = new NetezzaAutocompleteState();
         store.GlobalVariables.Returns(new Dictionary<string, string> { ["ENV"] = "dev" });
         store.GetSessionVariables("doc1").Returns(new Dictionary<string, string> { ["@x"] = "1" });
-        var sut = new LegacySnippetsProvider(settings, store);
+        var sut = new LegacySnippetsProvider(settings, store, state);
 
         var labels = sut.YieldPreambleItems("doc1").Select(i => i.ToString()).ToArray();
 
@@ -91,8 +81,9 @@ public sealed class LegacySnippetsProviderTests : IDisposable
     public void TryYieldAtPrefixItems_handles_at_and_dot_prefixes()
     {
         WriteSnippets([], [], ["monkey"]);
-        DynamicCollectionForNettezaHelpers.ExtraSnippet = "extra!!";
-        var sut = new LegacySnippetsProvider(CreateSettings(), Substitute.For<ISessionVariableStore>());
+        var state = new NetezzaAutocompleteState();
+        state.ReplaceActualColumns(["extra!!"]);
+        var sut = new LegacySnippetsProvider(CreateSettings(), Substitute.For<ISessionVariableStore>(), state);
         var aliases = new List<(string basicHint, string description)>
         {
             ("e", "alias"),
@@ -117,7 +108,7 @@ public sealed class LegacySnippetsProviderTests : IDisposable
     public void YieldKeywordsAndSnippets_skips_dotted_fragments()
     {
         WriteSnippets(["JOIN"], ["snip"], []);
-        var sut = new LegacySnippetsProvider(CreateSettings(), Substitute.For<ISessionVariableStore>());
+        var sut = new LegacySnippetsProvider(CreateSettings(), Substitute.For<ISessionVariableStore>(), new NetezzaAutocompleteState());
 
         Assert.Empty(sut.YieldKeywordsAndSnippets("a.b"));
 
@@ -144,13 +135,5 @@ public sealed class LegacySnippetsProviderTests : IDisposable
         File.WriteAllText(
             Path.Combine(_tempDir, "snipets.json"),
             JsonSerializer.Serialize(sn, MyJsonContextSnipets.Default.Snipets));
-        ResetSnippetsLoaded();
-    }
-
-    private static void ResetSnippetsLoaded()
-    {
-        typeof(LegacySnippetsProvider)
-            .GetField("_snippetsLoaded", BindingFlags.NonPublic | BindingFlags.Static)!
-            .SetValue(null, false);
     }
 }

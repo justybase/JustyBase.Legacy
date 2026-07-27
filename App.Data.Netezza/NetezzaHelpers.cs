@@ -1,5 +1,6 @@
 ﻿using AppBase.Common;
 using AppBase.Common.Enums;
+using AppBase.Common.Interfaces;
 using AppBase.Data.Core.Core;
 using AppBase.Data.Core.Interfaces;
 using AppBase.Data.Core.Models;
@@ -142,6 +143,11 @@ public static class NetezzaHelpers
             return false;
         }
 
+        IDatabaseRuntimeCatalogWriter runtimeWriter = baseWindowHelpers as IDatabaseRuntimeCatalogWriter
+            ?? throw new InvalidOperationException("Schema initialization requires the catalog write port.");
+        INetezzaSchemaTableCatalogWriter catalogWriter = schemaTables as INetezzaSchemaTableCatalogWriter
+            ?? throw new InvalidOperationException("Schema initialization requires the table catalog write port.");
+
         IOrderedEnumerable<NetezzaBasesTables> orderedBaseTables = null;
 
         preferedUserName ??= Random.Shared.GetString("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", 32);
@@ -175,9 +181,7 @@ public static class NetezzaHelpers
                 ThenBy(a => a.TABLE_NAME).
                 ThenBy(a => a.OWNER_NAME);
         }
-        var tablesByConnection = schemaTables.TablesByConnection;
-        tablesByConnection[connectionName] = new();
-        var currentDatabaseTables = tablesByConnection[connectionName];
+        var currentDatabaseTables = new Dictionary<int, NetezzaTableInfo>();
 
         foreach (var row in orderedBaseTables)
         {
@@ -228,10 +232,12 @@ public static class NetezzaHelpers
                     FIRST_COLUMN_ID = -1,
                     COLUMN_COUNT = 0
                 };
-                dbTablesSet.Add(tableId);
+                runtimeWriter.AddBaseTable(connectionName, databaseId, tableId);
             }
         }
         orderedBaseTables = null;
+
+        catalogWriter.ReplaceConnection(connectionName, currentDatabaseTables);
 
         int columnId = 0;
 
@@ -249,43 +255,42 @@ public static class NetezzaHelpers
             }
         }
 
-        baseWindowHelpers.ColumnTablesDictionary[connectionName] = tableColumns;
+        runtimeWriter.SetColumnTable(connectionName, tableColumns);
 
-        baseWindowHelpers.DatabaseSchemaLookup[string.Intern(connectionName)] = new Dictionary<string, Dictionary<string, (string, int)>>(StringComparer.OrdinalIgnoreCase);
+        var schemaLookup = new Dictionary<string, Dictionary<string, (string owner, int tableId)>>(StringComparer.OrdinalIgnoreCase);
         if (baseWindowHelpers.DatabaseDictionary.TryGetValue(connectionName, out var dbDict1))
         {
             foreach (var database in dbDict1)
             {
-                baseWindowHelpers.DatabaseSchemaLookup[connectionName][database.Value.DatabaseName] = new Dictionary<string, (string owner, int tableId)>(StringComparer.OrdinalIgnoreCase);
+                schemaLookup[database.Value.DatabaseName] = new Dictionary<string, (string owner, int tableId)>(StringComparer.OrdinalIgnoreCase);
                 if (baseWindowHelpers.BaseTableConnections.TryGetValue(connectionName, out var btConn)
                     && btConn.TryGetValue(database.Key, out var dbTablesSet1))
                 {
                     foreach (int baseTable in dbTablesSet1)
                     {
-                        if (tablesByConnection.TryGetValue(connectionName, out var btDict)
-                            && btDict.TryGetValue(baseTable, out var table))
+                        if (currentDatabaseTables.TryGetValue(baseTable, out var table))
                         {
-                            baseWindowHelpers.DatabaseSchemaLookup[connectionName][database.Value.DatabaseName][table.TABLE_NAME] = (table.TABLE_OWNER, baseTable);
+                            schemaLookup[database.Value.DatabaseName][table.TABLE_NAME] = (table.TABLE_OWNER, baseTable);
                         }
                     }
                 }
             }
         }
+        runtimeWriter.SetSchemaLookup(connectionName, schemaLookup);
 
-        baseWindowHelpers.DatabaseOwners[connectionName] = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
-
+        var owners = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
         if (baseWindowHelpers.DatabaseDictionary.TryGetValue(connectionName, out var dbDict2))
         {
             foreach (var item in dbDict2)
             {
-                if (baseWindowHelpers.DatabaseSchemaLookup.TryGetValue(connectionName, out var schemaLookup)
-                    && schemaLookup.TryGetValue(item.Value.DatabaseName, out var schemaEntry))
+                if (schemaLookup.TryGetValue(item.Value.DatabaseName, out var schemaEntry))
                 {
                     var ownersDictionary = schemaEntry.Select(arg => arg.Value.owner).Distinct().ToDictionary(x => x, x => x);
-                    baseWindowHelpers.DatabaseOwners[connectionName][item.Value.DatabaseName] = ownersDictionary;
+                    owners[item.Value.DatabaseName] = ownersDictionary;
                 }
             }
         }
+        runtimeWriter.SetOwners(connectionName, owners);
         return true;
     }
 

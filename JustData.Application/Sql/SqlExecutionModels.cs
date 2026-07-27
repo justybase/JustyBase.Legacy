@@ -133,7 +133,20 @@ public sealed record ResultSetDescriptor(
     string Name,
     IReadOnlyList<ResultColumnDescriptor> Columns,
     int StatementIndex = 0,
-    bool IsPinned = false);
+    bool IsPinned = false,
+    string? ExecutedSql = null);
+
+/// <summary>
+/// Stable identity of a result set. A result-set identifier is meaningful only
+/// within its owning editor document, therefore UI adapters and registries
+/// must always carry both values together.
+/// </summary>
+public readonly record struct ResultSetKey(EditorDocumentId DocumentId, string ResultSetId)
+{
+    public bool IsValid => DocumentId != default && !string.IsNullOrWhiteSpace(ResultSetId);
+
+    public override string ToString() => $"{DocumentId}/{ResultSetId}";
+}
 
 public sealed record SqlDiagnostic(
     SqlDiagnosticSeverity Severity,
@@ -172,38 +185,55 @@ public sealed record SqlExecutionEvent
     public IReadOnlyList<IReadOnlyList<object?>>? Rows { get; init; }
     public long RowCount { get; init; }
     public bool IsTruncated { get; init; }
+    /// <summary>
+    /// True when a transitional adapter has already rendered the result. The
+    /// execution VM still receives metadata, but another UI presenter must
+    /// not create a duplicate grid.
+    /// </summary>
+    public bool IsUiProjectionOwned { get; init; }
     public SqlExecutionOutcome? Outcome { get; init; }
     public string? ErrorMessage { get; init; }
 
     public static SqlExecutionEvent Started(EditorDocumentId id, int statementCount = -1) =>
         new(SqlExecutionEventKind.Started, id) { StatementCount = statementCount };
 
-    public static SqlExecutionEvent Result(EditorDocumentId id, ResultSetDescriptor descriptor) =>
-        new(SqlExecutionEventKind.ResultSet, id) { ResultSet = descriptor };
+    public static SqlExecutionEvent Result(
+        EditorDocumentId id,
+        ResultSetDescriptor descriptor,
+        bool isUiProjectionOwned = false) =>
+        new(SqlExecutionEventKind.ResultSet, id)
+        {
+            ResultSet = descriptor,
+            IsUiProjectionOwned = isUiProjectionOwned
+        };
 
     public static SqlExecutionEvent RowsBatch(
         EditorDocumentId id,
         IReadOnlyList<IReadOnlyList<object?>> rows,
         int statementIndex = -1,
-        string? resultSetId = null) =>
+        string? resultSetId = null,
+        bool isUiProjectionOwned = false) =>
         new(SqlExecutionEventKind.Rows, id)
         {
             Rows = rows,
             RowCount = rows.Count,
             StatementIndex = statementIndex,
-            ResultSetId = resultSetId
+            ResultSetId = resultSetId,
+            IsUiProjectionOwned = isUiProjectionOwned
         };
 
     public static SqlExecutionEvent RowsObserved(
         EditorDocumentId id,
         long rowCount,
         int statementIndex = -1,
-        string? resultSetId = null) =>
+        string? resultSetId = null,
+        bool isUiProjectionOwned = false) =>
         new(SqlExecutionEventKind.Rows, id)
         {
             RowCount = Math.Max(0, rowCount),
             StatementIndex = statementIndex,
-            ResultSetId = resultSetId
+            ResultSetId = resultSetId,
+            IsUiProjectionOwned = isUiProjectionOwned
         };
 
     public static SqlExecutionEvent Completed(

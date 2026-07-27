@@ -78,7 +78,7 @@ using WeifenLuo.WinFormsUI.Docking;
 
 namespace JustyBaseLegacy.UI
 {
-    public partial class BaseWindow : Form, IEditorHost, IWinFormsSqlResultView, ISqlResultsUiView
+    public partial class BaseWindow : Form, IEditorHost, IWinFormsSqlResultView, ISqlResultsUiView, ISqlEditorUiPort
     {
         private void Form1_MouseDown(object sender, System.Windows.Forms.MouseEventArgs e)
         {
@@ -261,7 +261,7 @@ namespace JustyBaseLegacy.UI
         private readonly IImportExportTasks _importExportTasks;
         private readonly IGeneralDbService _generalDbService;
         private readonly IConnectionSessionRegistry _connectionSessions;
-        private readonly INetezzaSchemaTableCatalog _schemaTables;
+        private readonly INetezzaSchemaTableCatalogWriter _schemaTables;
         private readonly JustData.Application.Login.IApplicationSession _applicationSession;
         private readonly GeneralDbSessionAdapter _sessionAdapter;
         private readonly IFormatterService _formatter;
@@ -281,8 +281,10 @@ namespace JustyBaseLegacy.UI
         private readonly INetezzaHelperService _netezzaHelperService;
         private readonly IApplicationSettingsContext _applicationSettingsContext;
         private readonly IDatabaseRuntimeContext _databaseRuntimeContext;
+        private readonly IDatabaseRuntimeCatalogWriter _databaseCatalogWriter;
         private readonly INetezzaCompletionContext _completionContext;
         private readonly INetezzaCompletionRuntimeContext _completionRuntimeContext;
+        private readonly INetezzaAutocompleteState _netezzaAutocompleteState;
         private readonly INetezzaDdlCodeProvider _ddlCodeProvider;
         private readonly ISessionVariableStore _sessionVariableStore;
         private readonly INumberFormattingContext _numberFormattingContext;
@@ -296,11 +298,10 @@ namespace JustyBaseLegacy.UI
         private readonly TabControlDrawingHandler _tabControlDrawingHandler;
         private readonly NetezzaSqlCompletionServices _netezzaSqlCompletionServices;
         private readonly LegacySqlAuthoringServices _legacySqlAuthoringServices;
-        private readonly SqlExecutionEngineContext _sqlExecutionEngineContext;
-        private readonly LegacyNetezzaExecutionPresenter _legacyNetezzaExecutionPresenter;
         private readonly ISqlExecutionSessionRegistry _sqlExecutionSessionRegistry;
         private readonly IResultExportUseCase _resultExportUseCase;
         private readonly IDocumentResultGridRegistry _resultGridRegistry;
+        private readonly IEditorCatalogState _editorCatalogState;
         private readonly ImportExportViewModelFactory _importExportViewModelFactory;
         private readonly LoginFormFactory _loginFormFactory;
         private readonly ISqlPreprocessingService _sqlPreprocessingService;
@@ -315,8 +316,6 @@ namespace JustyBaseLegacy.UI
         private readonly IQueryWatchService _queryWatchService;
         private readonly IUiDispatcher _uiDispatcher;
         private QueryWatch? _queryWatch;
-        private readonly AsyncLocal<bool> _executionRoutedThroughViewModel = new();
-        private readonly AsyncLocal<EditorDocumentId?> _executingDocumentId = new();
         private readonly Dictionary<EditorDocumentId, (FastColoredTextBox Editor, DataGridView Grid)> _lintDiagnosticsTargets = new();
         private readonly SqlResultsUiFactory _sqlResultsUiFactory;
         private readonly WinFormsSqlResultPresenter _sqlResultPresenter;
@@ -333,15 +332,13 @@ namespace JustyBaseLegacy.UI
 
         private void ForgetLegacyResultCommand(TabPage tabPage)
         {
-            if (tabPage.Tag is TabPageResultsTag { DocumentId: { } documentId } tag)
+            if (tabPage.Tag is TabPageResultsTag { DocumentId: { } documentId } tag && tag.Key is { } key)
             {
+                _sqlResultPresenter.RemovePendingResult(key);
                 _editorWorkspaceViewModel.Documents
                     .FirstOrDefault(document => document.Id == documentId)
-                    ?.SqlExecution.RemoveResult(tag.ResultSetId);
+                    ?.SqlExecution.RemoveResult(key);
             }
-
-            if (tabPage.Tag is TabPageResultsTag { ResultSetId: { Length: > 0 } resultSetId })
-                _resultGridRegistry.RemoveResult(resultSetId);
         }
 
         // --- Shared services (injected) ---
@@ -368,8 +365,10 @@ namespace JustyBaseLegacy.UI
             IApplicationSettingsContext applicationSettingsContext,
             IColorTheme colorTheme,
             IDatabaseRuntimeContext databaseRuntimeContext,
+            IDatabaseRuntimeCatalogWriter databaseCatalogWriter,
             INetezzaCompletionContext completionContext,
             INetezzaCompletionRuntimeContext completionRuntimeContext,
+            INetezzaAutocompleteState netezzaAutocompleteState,
             ISessionVariableRuntimeContext sessionVariableRuntimeContext,
             IApplicationSettingsPersistence settingsPersistence,
             IRecentFileRuntimeContext recentFileRuntimeContext,
@@ -382,7 +381,7 @@ namespace JustyBaseLegacy.UI
             IInlineCommandRunner inlineCommandRunner,
             IGeneralDbService generalDbService,
             IConnectionSessionRegistry connectionSessions,
-            INetezzaSchemaTableCatalog schemaTables,
+            INetezzaSchemaTableCatalogWriter schemaTables,
             IUiHelperService uiHelperService,
             INetezzaHelperService netezzaHelperService,
             IWindowManagementService windowManagementService,
@@ -401,7 +400,6 @@ namespace JustyBaseLegacy.UI
             IManySqlBundleService manySqlBundleService,
             DatabaseExplorerViewModel databaseExplorerViewModel,
             ObjectExplorerViewModel objectExplorerViewModel,
-            SqlExecutionEngineContext sqlExecutionEngineContext,
             IResultExportUseCase resultExportUseCase,
             ImportExportViewModelFactory importExportViewModelFactory
             , LoginFormFactory loginFormFactory
@@ -417,6 +415,7 @@ namespace JustyBaseLegacy.UI
             , IQueryWatchService queryWatchService
             , ISqlExecutionSessionRegistry sqlExecutionSessionRegistry
             , IDocumentResultGridRegistry resultGridRegistry
+            , IEditorCatalogState editorCatalogState
             , IUiDispatcher? uiDispatcher = null
             )
         {
@@ -428,8 +427,10 @@ namespace JustyBaseLegacy.UI
             _applicationSettingsContext = applicationSettingsContext ?? throw new ArgumentNullException(nameof(applicationSettingsContext));
             _colorTheme = colorTheme ?? throw new ArgumentNullException(nameof(colorTheme));
             _databaseRuntimeContext = databaseRuntimeContext ?? throw new ArgumentNullException(nameof(databaseRuntimeContext));
+            _databaseCatalogWriter = databaseCatalogWriter ?? throw new ArgumentNullException(nameof(databaseCatalogWriter));
             _completionContext = completionContext ?? throw new ArgumentNullException(nameof(completionContext));
             _completionRuntimeContext = completionRuntimeContext ?? throw new ArgumentNullException(nameof(completionRuntimeContext));
+            _netezzaAutocompleteState = netezzaAutocompleteState ?? throw new ArgumentNullException(nameof(netezzaAutocompleteState));
             _ddlCodeProvider = ddlCodeProvider ?? throw new ArgumentNullException(nameof(ddlCodeProvider));
             _sessionVariableStore = sessionVariableStore ?? throw new ArgumentNullException(nameof(sessionVariableStore));
             _numberFormattingContext = numberFormattingContext ?? throw new ArgumentNullException(nameof(numberFormattingContext));
@@ -465,13 +466,9 @@ namespace JustyBaseLegacy.UI
             _objectExplorerViewModel = objectExplorerViewModel ?? throw new ArgumentNullException(nameof(objectExplorerViewModel));
             _objectExplorerNavigationController = new ObjectExplorerNavigationController(() => _mvvmDatabaseExplorerControl);
             _netezzaSchemaRefreshController = new NetezzaSchemaRefreshController(RefreshTableListInternalAsync);
-            _sqlExecutionEngineContext = sqlExecutionEngineContext ?? throw new ArgumentNullException(nameof(sqlExecutionEngineContext));
-            _legacyNetezzaExecutionPresenter = new LegacyNetezzaExecutionPresenter(
-                (request, cancellationToken) => ExecuteSqlForDocumentAsync(request, cancellationToken),
-                CancelActiveDocumentExecution);
-            _sqlExecutionEngineContext.AttachPresenter(_legacyNetezzaExecutionPresenter);
             _sqlExecutionSessionRegistry = sqlExecutionSessionRegistry ?? throw new ArgumentNullException(nameof(sqlExecutionSessionRegistry));
             _resultGridRegistry = resultGridRegistry ?? throw new ArgumentNullException(nameof(resultGridRegistry));
+            _editorCatalogState = editorCatalogState ?? throw new ArgumentNullException(nameof(editorCatalogState));
             _importExportViewModelFactory = importExportViewModelFactory ?? throw new ArgumentNullException(nameof(importExportViewModelFactory));
             _loginFormFactory = loginFormFactory ?? throw new ArgumentNullException(nameof(loginFormFactory));
             _sqlPreprocessingService = sqlPreprocessingService ?? throw new ArgumentNullException(nameof(sqlPreprocessingService));
@@ -541,6 +538,7 @@ namespace JustyBaseLegacy.UI
                         UpdateGitTimelineForActiveDocument();
                     }
                 };
+                dsm.DocumentOrderChanged = order => _editorWorkspaceViewModel.Reorder(order);
                 dsm.ApplyTheme(_applicationSettingsContext.Config.UseSpecialColoring);
                 RegisterLeftPanelTools(dsm);
 
@@ -669,7 +667,8 @@ namespace JustyBaseLegacy.UI
                     _settingsPersistence.SaveConfig,
                     _recentFileRuntimeContext.SaveRecentFiles,
                     _uiHelperService,
-                    _colorTheme);
+                    _colorTheme,
+                    _netezzaAutocompleteState);
             }
         }
 
@@ -846,10 +845,7 @@ namespace JustyBaseLegacy.UI
             _selDatabaseError = login.Profile.Database;
             _selConenctionError = login.Profile.Name;
 
-            if (!SQLUpperPanel.ConnectionsList.Contains(login.Profile.Name))
-            {
-                SQLUpperPanel.ConnectionsList.Add(login.Profile.Name);
-            }
+            _editorCatalogState.AddConnection(login.Profile.Name);
 
 
             _applicationSettingsContext.Config.FastLogin = login.FastLogin;
@@ -1364,7 +1360,9 @@ namespace JustyBaseLegacy.UI
                 this,
                 _colorTheme,
                 _netezzaSqlCompletionServices,
+                _netezzaAutocompleteState,
                 _codeActionProvider,
+                _editorCatalogState,
                 driver,
                 SelectedConnectionName,
                 SelectedDatabase,
@@ -1410,10 +1408,7 @@ namespace JustyBaseLegacy.UI
                 tabPageDaneSQLNowe.Text = _tabNameProvider.GetNextName(new HashSet<string>(EditorTabPages.Select(p => p.Text)));
             }
             string tabName = tabPageDaneSQLNowe.Text;
-            if (!_sessionVariableRuntimeContext.SessionVariables.ContainsKey(tabName))
-            {
-                _sessionVariableRuntimeContext.SessionVariables[tabName] = new Dictionary<string, string>();
-            }
+            _sessionVariableRuntimeContext.EnsureSessionVariables(tabName);
 
             if (_tabManager is not DockSuiteTabManager)
                 this._tabControlMain.Controls.Add(tabPageDaneSQLNowe);
@@ -1463,6 +1458,8 @@ namespace JustyBaseLegacy.UI
                 sqlUpper.ContinueOnError);
             editorDocument.DiagnosticsChanged += OnDocumentDiagnosticsChanged;
             editorDocument.SqlExecution.EventReceived += _sqlResultPresenter.Handle;
+            editorDocument.SqlExecution.EventReceived += PresentProviderExecutionLog;
+            _sqlResultPresenter.Attach(editorDocument.SqlExecution);
             _documentIdsByTab[tabPageDaneSQLNowe] = editorDocument.Id;
             _documentIdsByEditor[sqlUpper.CurrentTb] = editorDocument.Id;
             sqlUpper.SetDocumentId(editorDocument.Id);
@@ -1707,15 +1704,7 @@ namespace JustyBaseLegacy.UI
 
         void VariablesAfterChangeTabName(string prevTabName, string NewTabName)
         {
-            _sessionVariableRuntimeContext.SessionVariables[NewTabName] = new Dictionary<string, string>();
-
-            if (_sessionVariableRuntimeContext.SessionVariables[prevTabName] is not null)
-            {
-                foreach (var item in _sessionVariableRuntimeContext.SessionVariables[prevTabName])
-                {
-                    _sessionVariableRuntimeContext.SessionVariables[NewTabName][item.Key] = item.Value;
-                }
-            }
+            _sessionVariableRuntimeContext.CopySessionVariables(prevTabName, NewTabName);
         }
 
         private void RenameResultTabEventHandler(object sender, EventArgs e)
@@ -1791,10 +1780,11 @@ namespace JustyBaseLegacy.UI
         {
             if (name is not null)
             {
-                _sessionVariableRuntimeContext.SessionVariables[tabName][name] = value;
+                _sessionVariableRuntimeContext.SetSessionVariable(tabName, name, value);
             }
 
-            DgvVariables.RowCount = _sessionVariableRuntimeContext.SessionVariables[tabName].Count + _sessionVariableRuntimeContext.GlobalVariables.Count;
+            DgvVariables.RowCount = _sessionVariableRuntimeContext.GetSessionVariableCount(tabName)
+                + _sessionVariableRuntimeContext.GlobalVariables.Count;
             DgvVariables.Invalidate();
         }
 
@@ -1807,9 +1797,10 @@ namespace JustyBaseLegacy.UI
             }
 
             DgvVariables.RowCount = 0;
-            if (_sessionVariableRuntimeContext.SessionVariables.TryGetValue(tabName, out Dictionary<string, string> value))
+            if (_sessionVariableRuntimeContext.HasSessionVariables(tabName))
             {
-                DgvVariables.RowCount = value.Count + _sessionVariableRuntimeContext.GlobalVariables.Count;
+                DgvVariables.RowCount = _sessionVariableRuntimeContext.GetSessionVariableCount(tabName)
+                    + _sessionVariableRuntimeContext.GlobalVariables.Count;
                 DgvVariables.Invalidate();
             }
         }

@@ -1,6 +1,7 @@
 using AppBase.Common;
 using AppBase.Common.Interfaces;
 using JustData.Application.Editor;
+using JustData.Application.Sql;
 
 namespace JustyBaseLegacy.Services;
 
@@ -13,6 +14,9 @@ public sealed class TabPageResultsTag : IResultTab
     public TabControl? ParentControl { get; set; }
     public EditorDocumentId? DocumentId { get; set; }
     public string ResultSetId { get; set; } = Guid.NewGuid().ToString("N");
+    public ResultSetKey? Key => DocumentId is { } documentId && !string.IsNullOrWhiteSpace(ResultSetId)
+        ? new ResultSetKey(documentId, ResultSetId)
+        : null;
     public bool HasDiagnostics { get; set; }
     public bool HasLog { get; set; }
 

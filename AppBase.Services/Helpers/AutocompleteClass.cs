@@ -123,9 +123,7 @@ public partial class AutocompleteClass : IAutocompleteClass
                 {
                     string between = afterSelect.Substring(0, nr + 1).Trim();
                     var list1 = between.SqlSplit().Select(arg => arg.LastWord()).ToList();
-                    DynamicCollectionForNettezaHelpers.ActualColumnList.Clear();
-                    DynamicCollectionForNettezaHelpers.ActualColumnList = list1;
-                    DynamicCollectionForNettezaHelpers.ExtraSnippet = "@@xx " + String.Join(",", list1);
+                    dynamicCollectionNz.State.ReplaceActualColumns(list1);
                 }
             }
 
@@ -271,7 +269,7 @@ public partial class AutocompleteClass : IAutocompleteClass
                 }
 
                 string selConnName = _completionContext.SelectedConnectionName;
-                if (_completionContext.DatabaseSchemaLookup.TryGetValue(selConnName, out Dictionary<string, Dictionary<string, (string owner, int tableId)>> value3)
+                if (_completionContext.DatabaseSchemaLookup.TryGetValue(selConnName, out var value3)
                 && value3.TryGetValue(database, out var value4))
                 {
                     if (value4.ContainsKey(table))
@@ -353,6 +351,9 @@ public partial class AutocompleteClass : IAutocompleteClass
         try
         {
             string connectionName = _completionContext.SelectedConnectionName;
+            if (!_connectionSessions.TryGetValue(connectionName, out IGeneralDb? generalDatabase))
+                return;
+            IAutocompleteSuggestionStore suggestions = generalDatabase.AutocompleteSuggestions;
             int selStart = selectionStart;
 
             await Task.Run(() =>
@@ -416,8 +417,8 @@ public partial class AutocompleteClass : IAutocompleteClass
                 {
                     string between = afterSelect.Substring(0, nr + 1).Trim();
                     var betweenSelectAndFrom = between.SqlSplit().Select(arg => arg.LastWord()).ToList();
-                    DynamicCollectionForGeneralHelpers.ActualColumnList.Clear();
-                    DynamicCollectionForGeneralHelpers.ActualColumnList = betweenSelectAndFrom;
+                    suggestions.ActualColumnList.Clear();
+                    suggestions.ActualColumnList = betweenSelectAndFrom;
                 }
             }
 
@@ -549,14 +550,14 @@ public partial class AutocompleteClass : IAutocompleteClass
                     }
                 }
             }
-            DynamicCollectionForGeneralHelpers.OneWordAdditions.Clear();
-            DynamicCollectionForGeneralHelpers.OneWordAdditions = subqueryAliases;
-            DynamicCollectionForGeneralHelpers.OneWordAdditions.AddRange(oneWordTemp);
-            DynamicCollectionForGeneralHelpers.OneWordAdditions.Sort();
-            DynamicCollectionForGeneralHelpers.TwoWordsAdditions.Clear();
-            DynamicCollectionForGeneralHelpers.TwoWordsAdditions = subquerySuggestions;
-            DynamicCollectionForGeneralHelpers.TwoWordsAdditions.AddRange(twoWordsTemp);
-            DynamicCollectionForGeneralHelpers.TwoWordsAdditions.Sort();
+            suggestions.OneWordAdditions.Clear();
+            suggestions.OneWordAdditions = subqueryAliases;
+            suggestions.OneWordAdditions.AddRange(oneWordTemp);
+            suggestions.OneWordAdditions.Sort();
+            suggestions.TwoWordsAdditions.Clear();
+            suggestions.TwoWordsAdditions = subquerySuggestions;
+            suggestions.TwoWordsAdditions.AddRange(twoWordsTemp);
+            suggestions.TwoWordsAdditions.Sort();
             });
         }
         finally

@@ -3,6 +3,7 @@ using AppBase.Common.Configuration;
 using AppBase.Common.Interfaces;
 using AppBase.Data;
 using AppBase.Data.Completion;
+using AppBase.Data.Core.Models;
 using DatabaseDataGridView.WinForms;
 using DatabaseDataGridView.WinForms.Coloring;
 using JustData.Application.Settings;
@@ -27,6 +28,7 @@ namespace JustyBaseLegacy.UI
         private readonly Action _saveManySqlToDisk;
         private IApplicationConfig _config;
         private readonly IApplicationSettingsContext _applicationSettingsContext;
+        private readonly INetezzaAutocompleteState _netezzaAutocompleteState;
         private readonly ISnippetInitializationContext _snippetInitializationContext;
         private readonly Action _saveConfig;
         private readonly Action _saveRecentFiles;
@@ -40,9 +42,13 @@ namespace JustyBaseLegacy.UI
             ISnippetInitializationContext snippetInitializationContext,
             Action saveConfig,
             Action saveRecentFiles,
-            IUiHelperService uiHelperService, IColorTheme colorTheme, PreferencesViewModel? settingsViewModel = null)
+            IUiHelperService uiHelperService,
+            IColorTheme colorTheme,
+            INetezzaAutocompleteState netezzaAutocompleteState,
+            PreferencesViewModel? settingsViewModel = null)
         {
             _applicationSettingsContext = applicationSettingsContext ?? throw new ArgumentNullException(nameof(applicationSettingsContext));
+            _netezzaAutocompleteState = netezzaAutocompleteState ?? throw new ArgumentNullException(nameof(netezzaAutocompleteState));
             _snippetInitializationContext = snippetInitializationContext ?? throw new ArgumentNullException(nameof(snippetInitializationContext));
             _saveConfig = saveConfig ?? throw new ArgumentNullException(nameof(saveConfig));
             _saveRecentFiles = saveRecentFiles ?? throw new ArgumentNullException(nameof(saveRecentFiles));
@@ -51,7 +57,7 @@ namespace JustyBaseLegacy.UI
             _uiHelperService = uiHelperService;
             _config = _applicationSettingsContext.Config;
             _settingsViewModel = settingsViewModel ?? new PreferencesViewModel(
-                new WinFormsApplicationSettingsStore(_applicationSettingsContext),
+                new WinFormsApplicationSettingsStore(_applicationSettingsContext, _netezzaAutocompleteState),
                 new WinFormsSettingsThemePreviewAdapter(_applicationSettingsContext, _repaintApplication));
             InitializeComponent();
             _colorize = colorTheme;
@@ -626,7 +632,7 @@ namespace JustyBaseLegacy.UI
             _snippetInitializationContext.Initialize(
                 JustData.Properties.Resources.snipety,
                 JustData.Properties.Resources.special_names);
-            LegacySnippetsProvider.EnsureSnippetsLoaded(_applicationSettingsContext);
+            LegacySnippetsProvider.EnsureSnippetsLoaded(_applicationSettingsContext, _netezzaAutocompleteState);
 
             dgvKeywords.Rows.Clear();
             dgvStandard.Rows.Clear();
@@ -636,27 +642,27 @@ namespace JustyBaseLegacy.UI
             dgvColoringList2.Rows.Clear();
             dgvTypo.Rows.Clear();
 
-            if (DynamicCollectionForNettezaHelpers.Keywords is not null)
+            if (_netezzaAutocompleteState.Keywords is not null)
             {
-                for (int i = 0; i < DynamicCollectionForNettezaHelpers.Keywords.Length; i++)
+                for (int i = 0; i < _netezzaAutocompleteState.Keywords.Count; i++)
                 {
-                    dgvKeywords.Rows.Add(DynamicCollectionForNettezaHelpers.Keywords[i]);
+                    dgvKeywords.Rows.Add(_netezzaAutocompleteState.Keywords[i]);
                 }
             }
 
-            if (DynamicCollectionForNettezaHelpers.Snippets is not null)
+            if (_netezzaAutocompleteState.Snippets is not null)
             {
-                for (int i = 0; i < DynamicCollectionForNettezaHelpers.Snippets.Length; i++)
+                for (int i = 0; i < _netezzaAutocompleteState.Snippets.Count; i++)
                 {
-                    dgvStandard.Rows.Add(DynamicCollectionForNettezaHelpers.Snippets[i]);
+                    dgvStandard.Rows.Add(_netezzaAutocompleteState.Snippets[i]);
                 }
             }
 
-            if (DynamicCollectionForNettezaHelpers.MonkeySnippets is not null)
+            if (_netezzaAutocompleteState.MonkeySnippets is not null)
             {
-                for (int i = 0; i < DynamicCollectionForNettezaHelpers.MonkeySnippets.Length; i++)
+                for (int i = 0; i < _netezzaAutocompleteState.MonkeySnippets.Count; i++)
                 {
-                    var x = getNameOfMonkey(DynamicCollectionForNettezaHelpers.MonkeySnippets[i]);
+                    var x = getNameOfMonkey(_netezzaAutocompleteState.MonkeySnippets[i]);
                     dgvClassic.Rows.Add(x.Item1, x.Item2);
                 }
             }
@@ -1230,7 +1236,7 @@ namespace JustyBaseLegacy.UI
         {
             _saveConfig();
             _saveRecentFiles();
-            DynamicCollectionForNettezaHelpers.SaveSnipets(_applicationSettingsContext);
+            DynamicCollectionForNettezaHelpers.SaveSnipets(_applicationSettingsContext, _netezzaAutocompleteState);
             _saveManySqlToDisk();
         }
     }

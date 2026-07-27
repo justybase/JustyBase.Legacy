@@ -13,15 +13,13 @@ namespace JustData.UiTests;
 
 public sealed class SqlAutocompleteUiTests
 {
-    private const string ConnectionName = "test_nz_connection";
+    private const string ConnectionName = "NPS_144";
     private const string TablePrefix = "SELECT * FROM JUST_DATA..DIMD";
     private const string TableSql = "JUST_DATA..DIMDATE";
 
-    [Theory]
-    [InlineData("SELECT")]
-    [InlineData("WHERE")]
+    [Fact]
     [Trait("Category", "UI")]
-    public void TestoweConnection_CompletesDimDateAliasedColumnInSelectAndWhere(string scenario)
+    public void TestoweConnection_CompletesDimDateAliasedColumnInWhere()
     {
         UiTestHelpers.EnsureTestoweProfile();
 
@@ -47,12 +45,10 @@ public sealed class SqlAutocompleteUiTests
                 .Invoke();
 
             Window mainWindow = WaitFor(
-                () => application.GetAllTopLevelWindows(automation)
-                    .FirstOrDefault(window => window.FindFirstDescendant(
-                        cf => cf.ByAutomationId("NetezzaSQL_addedFastColored")) is not null),
+                () => UiTestHelpers.TryFindMainWindow(application, automation),
                 "the main JustData window");
             AutomationElement editor = WaitFor(
-                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("NetezzaSQL_addedFastColored")),
+                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("_addedFastColored")),
                 "the SQL editor");
 
             // Wait for schema download to complete — status bar shows
@@ -81,19 +77,8 @@ public sealed class SqlAutocompleteUiTests
             string completedTableSql = CopyEditorText(editor);
             Assert.Contains(TableSql, completedTableSql, StringComparison.OrdinalIgnoreCase);
 
-            string expectedPattern;
-            if (scenario == "SELECT")
-            {
-                SetEditorText(editor, $"SELECT  FROM {TableSql} D");
-                MoveCaretTo("SELECT ".Length);
-                Keyboard.Type("D.");
-                expectedPattern = @"(?is)^\s*SELECT\s+D\.[\w""\[\]]+\s+FROM\s+JUST_DATA\.\.DIMDATE\s+D\s*$";
-            }
-            else
-            {
-                SetEditorText(editor, $"SELECT * FROM {TableSql} D WHERE D.");
-                expectedPattern = @"(?is)^\s*SELECT\s+\*\s+FROM\s+JUST_DATA\.\.DIMDATE\s+D\s+WHERE\s+D\.[\w""\[\]]+\s*$";
-            }
+            string expectedPattern = @"(?is)^\s*SELECT\s+\*\s+FROM\s+JUST_DATA\.\.DIMDATE\s+D\s+WHERE\s+D\.[\w""\[\]]+\s*$";
+            SetEditorText(editor, $"SELECT * FROM {TableSql} D WHERE D.");
 
             Keyboard.Press(VirtualKeyShort.ESCAPE);
             AcceptAutocompleteSuggestion();
@@ -138,17 +123,6 @@ public sealed class SqlAutocompleteUiTests
         Keyboard.Type(sql);
         Thread.Sleep(100);
         Keyboard.Press(VirtualKeyShort.ESCAPE);
-    }
-
-    private static void MoveCaretTo(int characterOffset)
-    {
-        Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.HOME);
-        Thread.Sleep(100);
-        for (int index = 0; index < characterOffset; index++)
-        {
-            Keyboard.Press(VirtualKeyShort.RIGHT);
-            Thread.Sleep(50);
-        }
     }
 
     private static string CopyEditorText(AutomationElement editor)

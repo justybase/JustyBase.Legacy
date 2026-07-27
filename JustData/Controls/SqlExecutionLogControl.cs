@@ -22,8 +22,10 @@ public sealed class SqlExecutionLogControl : UserControl, ISqlExecutionLog
 
     public SqlExecutionLogControl()
     {
+        Name = "sqlExecutionLog";
         _editor = new FastColoredTextBox
         {
+            Name = "sqlExecutionLogText",
             Dock = DockStyle.Fill,
             ReadOnly = true,
             WordWrap = false,
@@ -52,6 +54,9 @@ public sealed class SqlExecutionLogControl : UserControl, ISqlExecutionLog
     public Control View => this;
 
     public FastColoredTextBox Editor => _editor;
+
+    protected override AccessibleObject CreateAccessibilityInstance() =>
+        new SqlExecutionLogAccessibleObject(this);
 
     public void ApplyTheme(IColorTheme colorTheme)
     {
@@ -121,6 +126,25 @@ public sealed class SqlExecutionLogControl : UserControl, ISqlExecutionLog
         }
 
         _editor.GoEnd();
+    }
+
+    /// <summary>
+    /// FastColoredTextBox does not publish its content through UI Automation.
+    /// The enclosing log therefore exposes a read-only accessible value so
+    /// assistive technology can read the same execution history as the user.
+    /// </summary>
+    private sealed class SqlExecutionLogAccessibleObject(SqlExecutionLogControl owner)
+        : ControlAccessibleObject(owner)
+    {
+        public override string? Name => owner._editor.Text;
+
+        public override string? Value
+        {
+            get => owner._editor.Text;
+            set { }
+        }
+
+        public override AccessibleRole Role => AccessibleRole.Text;
     }
 
     private static (string Line, string? CodeLine) FormatEntry(object?[]? fields)

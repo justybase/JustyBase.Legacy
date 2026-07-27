@@ -5,6 +5,7 @@ using AppBase.Data;
 using AppBase.Data.Completion;
 using AppBase.Data.Core.Core;
 using AppBase.Data.Core.Interfaces;
+using AppBase.Data.Core.Models;
 using JustData.Application.Editor;
 using DatabaseDataGridView.WinForms.Coloring;
 using FastColoredTextBoxNS;
@@ -36,9 +37,11 @@ namespace JustyBaseLegacy.UI.DbForms
         private readonly IConnectionSessionRegistry _connectionSessions;
         private readonly INetezzaSchemaTableCatalog _schemaTables;
         private readonly ILogger _logger;
-        private readonly BaseWindow _baseWindow;
+        private readonly ISqlEditorUiPort _editorUi;
         private readonly IColorTheme _colorTheme;
         private readonly NetezzaSqlCompletionServices _netezzaSqlCompletionServices;
+        private readonly INetezzaAutocompleteState _netezzaAutocompleteState;
+        private readonly IEditorCatalogState _editorCatalogState;
         private TableLayoutPanel _editorLayout;
         private Bitmap? _runToolbarIcon;
         private Bitmap? _stopToolbarIcon;
@@ -61,10 +64,12 @@ namespace JustyBaseLegacy.UI.DbForms
             JustData.Application.Variables.ISessionVariableStore sessionVariableStore,
             Func<string> activeDocumentTitleProvider,
             ILogger logger,
-            BaseWindow baseWindow,
+            ISqlEditorUiPort editorUi,
             IColorTheme colorTheme,
             NetezzaSqlCompletionServices netezzaSqlCompletionServices,
+            INetezzaAutocompleteState netezzaAutocompleteState,
             ICodeActionProvider codeActionProvider,
+            IEditorCatalogState editorCatalogState,
             string driver,
             string selectedConnection,
             string selectedDatabase,
@@ -78,9 +83,11 @@ namespace JustyBaseLegacy.UI.DbForms
             _completionContext = completionContext;
             _setSelectedConnectionName = setSelectedConnectionName;
             _logger = logger;
-            _baseWindow = baseWindow;
+            _editorUi = editorUi ?? throw new ArgumentNullException(nameof(editorUi));
             _colorTheme = colorTheme;
             _netezzaSqlCompletionServices = netezzaSqlCompletionServices;
+            _netezzaAutocompleteState = netezzaAutocompleteState ?? throw new ArgumentNullException(nameof(netezzaAutocompleteState));
+            _editorCatalogState = editorCatalogState ?? throw new ArgumentNullException(nameof(editorCatalogState));
 
             InitializeComponent();
             Disposed += (_, _) =>
@@ -150,7 +157,7 @@ namespace JustyBaseLegacy.UI.DbForms
             fastColoredTextBox1.Font = new System.Drawing.Font(_applicationSettingsContext.Config.FontName, fontSize, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point);
             ApplyFastColoredTextBoxDpiMetrics();
             MiscellaneousHelper.UpdateAdditionStyles(fastColoredTextBox1.Range, _colorTheme.CurrentFctbColors, _applicationSettingsContext.Config.BracketFolding);
-            _baseWindow.GetTextCommentRanges(fastColoredTextBox1);
+            _editorUi.GetTextCommentRanges(fastColoredTextBox1);
 
             fastColoredTextBox1.Focus();
             fastColoredTextBox1.KeyDown += FastColored_KeyDown;
@@ -182,8 +189,10 @@ namespace JustyBaseLegacy.UI.DbForms
                 sessionVariableStore,
                 activeDocumentTitleProvider,
                 _generalDbService,
+                _connectionSessions,
                 _schemaTables,
-                _netezzaSqlCompletionServices);
+                _netezzaSqlCompletionServices,
+                _netezzaAutocompleteState);
             _autocompleteSource = autocompleteSource;
             popupMenu.Items.SetAutocompleteItems(autocompleteSource);
             fastColoredTextBox1.Tag = new TbInfo(StringComparer.OrdinalIgnoreCase);
@@ -192,7 +201,7 @@ namespace JustyBaseLegacy.UI.DbForms
             (fastColoredTextBox1.Tag as TbInfo).AdditionalDataWith = new Dictionary<string, List<string>>();
             (fastColoredTextBox1.Tag as TbInfo).AdditionalTableData = new Dictionary<string, List<string>>();
 
-            _baseWindow.WireEditorEvents(fastColoredTextBox1, driver?.StartsWith("NetezzaSQL", StringComparison.OrdinalIgnoreCase) == true);
+            _editorUi.WireEditorEvents(fastColoredTextBox1, driver?.StartsWith("NetezzaSQL", StringComparison.OrdinalIgnoreCase) == true);
             fastColoredTextBox1.GotFocus += FastColoredTextBox1_GotFocus;
 
             tsbKeepConnection.Checked = (!_applicationSettingsContext.Config.CloseConnectionByDefault);
@@ -212,8 +221,6 @@ namespace JustyBaseLegacy.UI.DbForms
             set => fastColoredTextBox1 = value;
         }
 
-        public static List<string> ConnectionsList = new List<string>();
-
         private string _selectedConnectionName;
         public string SelectedConnectionName
         {
@@ -221,22 +228,9 @@ namespace JustyBaseLegacy.UI.DbForms
             set
             {
                 string internedValue = string.Intern(value);
-                //selectedConnectionName = value;
-                lock (SQLUpperPanel.ConnectionsList)
-                {
-                    if (!SQLUpperPanel.ConnectionsList.Contains((string)internedValue))
-                    {
-                        SQLUpperPanel.ConnectionsList.Add((string)internedValue);
-                    }
-                    //all tabs shoul have same lists
-                    foreach (var connectionName in SQLUpperPanel.ConnectionsList)
-                    {
-                        if (!cbConnections.Items.Contains(connectionName))
-                        {
-                            cbConnections.Items.Add(connectionName);
-                        }
-                    }
-                }
+                _editorCatalogState.AddConnection(internedValue);
+                foreach (var connectionName in _editorCatalogState.Snapshot.Connections)
+                    if (!cbConnections.Items.Contains(connectionName)) cbConnections.Items.Add(connectionName);
                 //cbConnections.Text= selectedConnectionName;
                 // Assign before SelectedItem so cbConnections_SelectedIndexChanged does not
                 // treat programmatic initialization (e.g. AddMainTab for DDL) as a connection switch.
@@ -261,11 +255,11 @@ namespace JustyBaseLegacy.UI.DbForms
         {
             string tmp = _selectedConnectionName;
             cbConnections.Items.Clear();
-            foreach (var item in ConnectionsList)
+            foreach (var item in _editorCatalogState.Snapshot.Connections)
             {
                 cbConnections.Items.Add(item);
             }
-            if (ConnectionsList.Contains(tmp))
+            if (_editorCatalogState.Snapshot.Connections.Contains(tmp, StringComparer.OrdinalIgnoreCase))
             {
                 SelectedConnectionName = tmp;
             }
@@ -298,10 +292,7 @@ namespace JustyBaseLegacy.UI.DbForms
             if (cbConnections.Items.Contains(name))
             {
                 cbConnections.Items.Remove(name);
-                if (SQLUpperPanel.ConnectionsList.Contains(name))
-                {
-                    SQLUpperPanel.ConnectionsList.Remove(name);
-                }
+                _editorCatalogState.RemoveConnection(name);
             }
             if (cbConnections.Items.Count > 0)
             {
@@ -329,8 +320,9 @@ namespace JustyBaseLegacy.UI.DbForms
                 .Select(o => string.Intern(o))
                 .ToArray();
 
+            _editorCatalogState.ReplaceDatabases(SelectedConnectionName, databasesArray);
             cbDatabases.Items.Clear();
-            cbDatabases.Items.AddRange(databasesArray);
+            cbDatabases.Items.AddRange(_editorCatalogState.Snapshot.DatabasesFor(SelectedConnectionName).ToArray());
 
             if (_lastSelectedDartabaseNameForConnection.TryGetValue(SelectedConnectionName, out var res)
                 && databasesArray.Contains(res, StringComparer.OrdinalIgnoreCase))
@@ -345,7 +337,6 @@ namespace JustyBaseLegacy.UI.DbForms
             UpdateComboDropDownWidth(cbDatabases);
         }
 
-        public static List<string> DatabasesList = new List<string>();
         private string _selectedDatabase;
         public string SelectedDatabase
         {
@@ -359,13 +350,7 @@ namespace JustyBaseLegacy.UI.DbForms
                 }
 
                 string internedValue = string.Intern(value);
-                lock (SQLUpperPanel.DatabasesList)
-                {
-                    if (!SQLUpperPanel.DatabasesList.Contains(internedValue))
-                    {
-                        SQLUpperPanel.DatabasesList.Add(internedValue);
-                    }
-                }
+                _editorCatalogState.AddDatabase(SelectedConnectionName, internedValue);
 
                 _selectedDatabase = internedValue;
                 cbDatabases.SelectedItem = internedValue;
@@ -399,7 +384,7 @@ namespace JustyBaseLegacy.UI.DbForms
                     _selectedConnectionName = newConnectionName;
                     _setSelectedConnectionName(newConnectionName);
                     _netezzaSqlCompletionServices.InvalidateSchema();
-                    await _baseWindow.CbConnectionsSelectedIndexChanged((o) => SetEnabledConnectionsDatabases(o));
+                    await _editorUi.CbConnectionsSelectedIndexChanged((o) => SetEnabledConnectionsDatabases(o));
                     if (!IsDisposed && !Disposing)
                         _netezzaSqlCompletionServices.EnsureSchemaForConnection(_completionContext, SelectedConnectionName);
                 }
@@ -417,9 +402,10 @@ namespace JustyBaseLegacy.UI.DbForms
 
         private void FastColoredTextBox1_GotFocus(object sender, EventArgs e)
         {
-            if (!ConnectionsList.Contains(SelectedConnectionName) && ConnectionsList.Count > 0)
+            IReadOnlyList<string> connections = _editorCatalogState.Snapshot.Connections;
+            if (!connections.Contains(SelectedConnectionName, StringComparer.OrdinalIgnoreCase) && connections.Count > 0)
             {
-                SelectedConnectionName = ConnectionsList[0];
+                SelectedConnectionName = connections[0];
             }
 
             _setSelectedConnectionName(SelectedConnectionName);
@@ -461,31 +447,31 @@ namespace JustyBaseLegacy.UI.DbForms
         }
 
         private void RunToolStrip_Click(object sender, EventArgs e) =>
-            _ = ObserveUiOperationAsync(nameof(RunToolStrip_Click), () => _baseWindow.RunSQL());
+            _ = ObserveUiOperationAsync(nameof(RunToolStrip_Click), () => _editorUi.RunSQL());
 
         private void RunCtrlF5_Click(object sender, EventArgs e) =>
-            _ = ObserveUiOperationAsync(nameof(RunCtrlF5_Click), () => _baseWindow.RunSQL(1));
+            _ = ObserveUiOperationAsync(nameof(RunCtrlF5_Click), () => _editorUi.RunSQL(1));
 
         public void RunExcel_Click(object sender, EventArgs e) =>
-            _ = ObserveUiOperationAsync(nameof(RunExcel_Click), () => _baseWindow.RunSQL(0, ExportOptions.xlsx));
+            _ = ObserveUiOperationAsync(nameof(RunExcel_Click), () => _editorUi.RunSQL(0, ExportOptions.xlsx));
 
         public void RunCSV_Click(object sender, EventArgs e) =>
-            _ = ObserveUiOperationAsync(nameof(RunCSV_Click), () => _baseWindow.RunSQL(0, ExportOptions.csv));
+            _ = ObserveUiOperationAsync(nameof(RunCSV_Click), () => _editorUi.RunSQL(0, ExportOptions.csv));
 
         public void runToCursorToolStripMenuItem_Click(object sender, EventArgs e) =>
-            _ = ObserveUiOperationAsync(nameof(runToCursorToolStripMenuItem_Click), () => _baseWindow.RunSQL(4));
+            _ = ObserveUiOperationAsync(nameof(runToCursorToolStripMenuItem_Click), () => _editorUi.RunSQL(4));
 
         private void btStop_Click(object sender, EventArgs e)
         {
-            _baseWindow.Stop_Click(sender, e);
+            _editorUi.Stop_Click(sender, e);
         }
 
         private void scriptModeToolStripMenuItem_Click(object sender, EventArgs e) =>
-            _ = ObserveUiOperationAsync(nameof(scriptModeToolStripMenuItem_Click), () => _baseWindow.RunSQL(0, ExportOptions.onlyLog));
+            _ = ObserveUiOperationAsync(nameof(scriptModeToolStripMenuItem_Click), () => _editorUi.RunSQL(0, ExportOptions.onlyLog));
 
         private void tsbImport_Click(object sender, EventArgs e)
         {
-            _baseWindow.XLSXtoolStripMenuItem_Click(sender, e);
+            _editorUi.XLSXtoolStripMenuItem_Click(sender, e);
         }
 
         private bool keepConnectionOpen;
@@ -497,7 +483,7 @@ namespace JustyBaseLegacy.UI.DbForms
                 keepConnectionOpen = value;
                 tsbKeepConnection.Checked = value;
                     _applicationSettingsContext.Config.CloseConnectionByDefault = !value;
-                _baseWindow.RefreshTabKeepConnectionProperty();
+                _editorUi.RefreshTabKeepConnectionProperty();
             }
         }
 
@@ -527,7 +513,7 @@ namespace JustyBaseLegacy.UI.DbForms
             }
             catch (Exception ex)
             {
-                _logger.MessageBox_Show(_baseWindow,
+                _logger.MessageBox_Show(_editorUi,
                     $"Failed to format SQL: {ex.Message}",
                     "Format Error",
                     MessageBoxButtons.OK,
@@ -560,19 +546,21 @@ namespace JustyBaseLegacy.UI.DbForms
 
         private void NewToolStripButton_Click(object sender, EventArgs e)
         {
-            _baseWindow.OpenNewSqlDocument();
+            _editorUi.OpenNewSqlDocument();
         }
 
         public void SetDocumentId(EditorDocumentId documentId) =>
             _autocompleteSource?.SetDocumentId(documentId);
 
+        public void ResetAutocompleteCache() => _autocompleteSource?.ResetCache();
+
         private void SaveToolStripButton_Click(object sender, EventArgs e)
         {
-            _baseWindow.SaveOnTabEventHandler(sender, e);
+            _editorUi.SaveOnTabEventHandler(sender, e);
         }
 
         private void OpenToolStripButton_Click(object sender, EventArgs e) =>
-            _ = ObserveUiOperationAsync(nameof(OpenToolStripButton_Click), _baseWindow.OpenAsync);
+            _ = ObserveUiOperationAsync(nameof(OpenToolStripButton_Click), _editorUi.OpenAsync);
 
         private async Task ObserveUiOperationAsync(string operationName, Func<Task> operation)
         {
@@ -602,9 +590,9 @@ namespace JustyBaseLegacy.UI.DbForms
 
         private void PasteToolStripButton_Click(object sender, EventArgs e)
         {
-            _baseWindow.ForceNormalPaste = true;
+            _editorUi.ForceNormalPaste = true;
             fastColoredTextBox1.Paste();
-            _baseWindow.ForceNormalPaste = false;
+            _editorUi.ForceNormalPaste = false;
         }
         private void PrintToolStripButton_Click(object sender, EventArgs e)
         {

@@ -4,77 +4,13 @@ using AppBase.Common;
 using AppBase.Common.Interfaces;
 using JustData.Application.Editor;
 using JustData.Application.Sql;
+using System.Data;
 using System.Data.Common;
 using System.Runtime.CompilerServices;
 using System.Text;
 using SpreadSheetTasks;
 
 namespace JustyBaseLegacy.UI.Sql;
-
-/// <summary>
-/// Narrow boundary between provider execution and WinForms presentation.  An
-/// engine depends on this boundary, never on <c>BaseWindow</c> itself.
-/// </summary>
-public interface ISqlExecutionDocumentPresenter
-{
-    IAsyncEnumerable<SqlExecutionEvent> ExecuteAsync(
-        SqlExecutionRequest request,
-        CancellationToken cancellationToken = default);
-
-    void Cancel(EditorDocumentId documentId, string connectionName);
-}
-
-/// <summary>Document lifecycle adapter used by the SQL engines.</summary>
-public sealed class SqlExecutionEngineContext
-{
-    private readonly object _sync = new();
-    private ISqlExecutionDocumentPresenter? _presenter;
-
-    public void AttachPresenter(ISqlExecutionDocumentPresenter presenter)
-    {
-        ArgumentNullException.ThrowIfNull(presenter);
-        lock (_sync)
-            _presenter = presenter;
-    }
-
-    public void DetachPresenter(ISqlExecutionDocumentPresenter presenter)
-    {
-        lock (_sync)
-        {
-            if (ReferenceEquals(_presenter, presenter))
-                _presenter = null;
-        }
-    }
-
-    internal IAsyncEnumerable<SqlExecutionEvent> ExecuteAsync(
-        SqlExecutionRequest request,
-        CancellationToken cancellationToken)
-    {
-        ISqlExecutionDocumentPresenter? presenter;
-        lock (_sync)
-            presenter = _presenter;
-
-        return presenter?.ExecuteAsync(request, cancellationToken)
-            ?? MissingPresenter(request);
-    }
-
-    internal void Cancel(EditorDocumentId documentId, string connectionName)
-    {
-        ISqlExecutionDocumentPresenter? presenter;
-        lock (_sync)
-            presenter = _presenter;
-        presenter?.Cancel(documentId, connectionName);
-    }
-
-    private static async IAsyncEnumerable<SqlExecutionEvent> MissingPresenter(SqlExecutionRequest request)
-    {
-        yield return SqlExecutionEvent.Completed(
-            request.DocumentId,
-            SqlExecutionOutcome.Blocked,
-            "The SQL document presenter is not available.");
-        await Task.CompletedTask;
-    }
-}
 
 public interface ISqlExecutionEngine
 {
@@ -86,32 +22,41 @@ public interface ISqlExecutionEngine
 }
 
 /// <summary>
+/// Lets the router avoid synthesizing statement lifecycle events when an
+/// engine already emits them from its provider pipeline.
+/// </summary>
+internal interface IStatementLifecycleSqlExecutionEngine
+{
+    bool EmitsStatementLifecycle(SqlExecutionRequest request);
+}
+
+/// <summary>
 /// Engine slice for DB2, Oracle, Postgres, SQL Server, SQLite, MySQL and
 /// OLEDB.  The reader loop remains owned by the presenter while results are
 /// streamed through the application event contract.
 /// </summary>
-public sealed class GeneralSqlExecutionEngine : ISqlExecutionEngine
+public sealed class GeneralSqlExecutionEngine : ISqlExecutionEngine, IStatementLifecycleSqlExecutionEngine
 {
-    private readonly SqlExecutionEngineContext? _legacyContext;
     private readonly ISqlExecutionSessionRegistry? _sessions;
     private readonly IImportExportTasks? _exportTasks;
     private readonly IConnectionSessionRegistry? _databaseSessions;
-
-    // Kept for composition tests while the Netezza engine is migrated.  New
-    // production composition uses the provider constructor below.
-    public GeneralSqlExecutionEngine(SqlExecutionEngineContext context) => _legacyContext = context;
+    private readonly IApplicationSettingsContext? _settings;
 
     public GeneralSqlExecutionEngine(
         ISqlExecutionSessionRegistry sessions,
         IImportExportTasks? exportTasks,
-        IConnectionSessionRegistry databaseSessions)
+        IConnectionSessionRegistry databaseSessions,
+        IApplicationSettingsContext? settings = null)
     {
         _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
         _exportTasks = exportTasks;
         _databaseSessions = databaseSessions ?? throw new ArgumentNullException(nameof(databaseSessions));
+        _settings = settings;
     }
 
     internal bool EmitsStatementEvents => _sessions is not null;
+    bool IStatementLifecycleSqlExecutionEngine.EmitsStatementLifecycle(SqlExecutionRequest request) =>
+        EmitsStatementEvents;
     private static readonly HashSet<string> SupportedDrivers = new(StringComparer.OrdinalIgnoreCase)
     {
         "DB2", "Microsoft.ACE.OLEDB.12.0", "Oracle", "Postgres", "MySql",
@@ -125,14 +70,7 @@ public sealed class GeneralSqlExecutionEngine : ISqlExecutionEngine
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (_sessions is null)
-        {
-            if (_legacyContext is null)
-                throw new InvalidOperationException("No SQL execution backend is configured.");
-            await foreach (SqlExecutionEvent item in _legacyContext.ExecuteAsync(request, cancellationToken)
-                .WithCancellation(cancellationToken))
-                yield return item;
-            yield break;
-        }
+            throw new InvalidOperationException("No SQL execution backend is configured.");
 
         if (_databaseSessions is null
             || !_databaseSessions.TryGetValue(request.ConnectionName, out var database))
@@ -157,93 +95,71 @@ public sealed class GeneralSqlExecutionEngine : ISqlExecutionEngine
                 yield break;
             }
 
-            for (int statementIndex = 0; statementIndex < batches.Count; statementIndex++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                string sql = batches[statementIndex];
-                yield return new SqlExecutionEvent(SqlExecutionEventKind.StatementStarted, request.DocumentId)
-                { StatementIndex = statementIndex, StatementCount = batches.Count, StatementText = SqlSensitiveDataRedactor.Redact(sql) };
+            if (!request.KeepConnectionOpen)
+                _sessions.ReleaseRetainedConnection(request.DocumentId);
 
-                using DbConnection connection = string.IsNullOrWhiteSpace(request.DatabaseName)
-                    ? database.GetConnection()
-                    : database.GetConnection(request.DatabaseName);
+            DbConnection? retainedConnection = null;
+            bool hasRetainedConnection = request.KeepConnectionOpen
+                && _sessions.TryGetRetainedConnection(
+                    request.DocumentId,
+                    request.ConnectionName,
+                    request.DatabaseName,
+                    out retainedConnection);
+            DbConnection connection = retainedConnection ?? (string.IsNullOrWhiteSpace(request.DatabaseName)
+                ? database.GetConnection()
+                : database.GetConnection(request.DatabaseName));
+
+            try
+            {
+                // F5 can split a selected script into multiple commands, but
+                // all commands share this one connection. SingleBatch remains
+                // the only mode that sends the full text as one command.
                 session.SetConnection(connection, ownsConnection: false);
                 session.SetProviderAbort(() => database.AbortAsync("x"));
-                await OpenConnectionAsync(connection, cancellationToken).ConfigureAwait(false);
-                using DbCommand command = CreateCommand(connection, sql, request.CommandTimeoutSeconds ?? 0);
-                session.SetCommand(command, ownsCommand: false);
+                if (connection.State != ConnectionState.Open)
+                    await OpenConnectionAsync(connection, cancellationToken).ConfigureAwait(false);
 
-                if (request.OutputMode == SqlOutputMode.LogOnly)
+                for (int statementIndex = 0; statementIndex < batches.Count; statementIndex++)
                 {
-                    int affected = await ExecuteNonQueryAsync(command, cancellationToken).ConfigureAwait(false);
-                    yield return new SqlExecutionEvent(SqlExecutionEventKind.AffectedRows, request.DocumentId)
-                    { StatementIndex = statementIndex, AffectedRows = affected };
+                    cancellationToken.ThrowIfCancellationRequested();
+                    string sql = batches[statementIndex];
+                    yield return new SqlExecutionEvent(SqlExecutionEventKind.StatementStarted, request.DocumentId)
+                    { StatementIndex = statementIndex, StatementCount = batches.Count, StatementText = SqlSensitiveDataRedactor.Redact(sql) };
+
+                    IAsyncEnumerable<SqlExecutionEvent> statementEvents = request.ContinueOnError
+                        ? ExecuteStatementContinuingOnErrorAsync(
+                            connection, session, request, sql, statementIndex, cancellationToken)
+                        : ExecuteStatementAsync(connection, session, request, sql, statementIndex, cancellationToken);
+                    await foreach (SqlExecutionEvent statementEvent in statementEvents
+                        .WithCancellation(cancellationToken))
+                        yield return statementEvent;
+
+                    yield return new SqlExecutionEvent(SqlExecutionEventKind.StatementCompleted, request.DocumentId)
+                    { StatementIndex = statementIndex, StatementCount = batches.Count };
+                }
+            }
+            finally
+            {
+                bool keepConnection = request.KeepConnectionOpen
+                    && !session.IsCancelling
+                    && connection.State == ConnectionState.Open;
+                if (keepConnection)
+                {
+                    _sessions.RetainConnection(
+                        request.DocumentId,
+                        request.ConnectionName,
+                        request.DatabaseName,
+                        connection);
+                }
+                else if (hasRetainedConnection)
+                {
+                    _sessions.ReleaseRetainedConnection(request.DocumentId);
                 }
                 else
                 {
-                    using DbDataReader reader = await ExecuteReaderAsync(command, cancellationToken).ConfigureAwait(false);
-                    if (request.OutputMode is SqlOutputMode.Xlsx or SqlOutputMode.Xlsb)
-                    {
-                        if (string.IsNullOrWhiteSpace(request.OutputPath))
-                            throw new InvalidOperationException("An output path is required for spreadsheet export.");
-                        await ExportXlsxAsync(reader, request.OutputPath, request.OutputMode == SqlOutputMode.Xlsb,
-                            sql, cancellationToken).ConfigureAwait(false);
-                        yield return new SqlExecutionEvent(SqlExecutionEventKind.Log, request.DocumentId)
-                        { StatementIndex = statementIndex, Message = $"Exported to {request.OutputPath}" };
-                    }
-                    else if (request.OutputMode == SqlOutputMode.Csv)
-                    {
-                        if (string.IsNullOrWhiteSpace(request.OutputPath))
-                            throw new InvalidOperationException("An output path is required for CSV export.");
-                        if (_exportTasks is null)
-                            throw new InvalidOperationException("CSV export is not configured.");
-                        await ExportCsvAsync(_exportTasks, reader, Encoding.UTF8, request.OutputPath, ',', Environment.NewLine,
-                            progress => { }, cancellationToken: cancellationToken).ConfigureAwait(false);
-                        yield return new SqlExecutionEvent(SqlExecutionEventKind.Log, request.DocumentId)
-                        { StatementIndex = statementIndex, Message = $"Exported to {request.OutputPath}" };
-                    }
-                    else
-                    {
-                        int resultNumber = 0;
-                        do
-                        {
-                            cancellationToken.ThrowIfCancellationRequested();
-                            if (reader.FieldCount <= 0) continue;
-                            string resultSetId = $"{request.DocumentId}-{statementIndex}-{resultNumber++}";
-                            ResultColumnDescriptor[] columns = Enumerable.Range(0, reader.FieldCount)
-                                .Select(i => new ResultColumnDescriptor(i, reader.GetName(i), reader.GetDataTypeName(i)))
-                                .ToArray();
-                            yield return SqlExecutionEvent.Result(request.DocumentId,
-                                new ResultSetDescriptor(resultSetId, $"Result {resultNumber}", columns, statementIndex));
-
-                            var batch = new List<IReadOnlyList<object?>>(500);
-                            long rows = 0;
-                            long limit = request.RowLimit ?? long.MaxValue;
-                            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-                            {
-                            object?[] row = new object?[reader.FieldCount];
-                            for (int i = 0; i < row.Length; i++)
-                                row[i] = await reader.IsDBNullAsync(i, cancellationToken).ConfigureAwait(false) ? null : reader.GetValue(i);
-                            batch.Add(row); rows++;
-                            if (batch.Count == 500)
-                            {
-                                yield return SqlExecutionEvent.RowsBatch(request.DocumentId, batch.ToArray(), statementIndex, resultSetId);
-                                batch.Clear();
-                            }
-                            if (rows >= limit)
-                            {
-                                yield return new SqlExecutionEvent(SqlExecutionEventKind.Truncated, request.DocumentId)
-                                { StatementIndex = statementIndex, ResultSetId = resultSetId, RowCount = rows, IsTruncated = true };
-                                break;
-                            }
-                            }
-                            if (batch.Count > 0)
-                                yield return SqlExecutionEvent.RowsBatch(request.DocumentId, batch.ToArray(), statementIndex, resultSetId);
-                        } while (await reader.NextResultAsync(cancellationToken).ConfigureAwait(false));
-                    }
+                    try { if (connection.State != ConnectionState.Closed) connection.Close(); }
+                    finally { connection.Dispose(); }
                 }
-                yield return new SqlExecutionEvent(SqlExecutionEventKind.StatementCompleted, request.DocumentId)
-                { StatementIndex = statementIndex, StatementCount = batches.Count };
             }
             yield return SqlExecutionEvent.Completed(request.DocumentId, SqlExecutionOutcome.Success);
         }
@@ -272,6 +188,170 @@ public sealed class GeneralSqlExecutionEngine : ISqlExecutionEngine
             .Select(statement => statement.Trim())
             .Where(statement => statement.Length >= 2)
             .ToArray();
+    }
+
+    private async IAsyncEnumerable<SqlExecutionEvent> ExecuteStatementContinuingOnErrorAsync(
+        DbConnection connection,
+        ISqlExecutionSession session,
+        SqlExecutionRequest request,
+        string sql,
+        int statementIndex,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        Exception? statementFailure = null;
+        await using IAsyncEnumerator<SqlExecutionEvent> enumerator = ExecuteStatementAsync(
+                connection, session, request, sql, statementIndex, cancellationToken)
+            .GetAsyncEnumerator(cancellationToken);
+        while (true)
+        {
+            bool hasNext;
+            try
+            {
+                hasNext = await enumerator.MoveNextAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception) when (!cancellationToken.IsCancellationRequested && !session.IsCancelling)
+            {
+                statementFailure = exception;
+                break;
+            }
+
+            if (!hasNext)
+                break;
+            yield return enumerator.Current;
+        }
+
+        if (statementFailure is not null)
+        {
+            string message = SqlSensitiveDataRedactor.Redact(statementFailure.Message);
+            yield return new SqlExecutionEvent(SqlExecutionEventKind.Log, request.DocumentId)
+            {
+                StatementIndex = statementIndex,
+                Message = $"Statement failed: {message}",
+                Log = new SqlLogEntry(DateTimeOffset.Now, SqlLogLevel.Error, message, statementIndex)
+            };
+        }
+    }
+
+    private async IAsyncEnumerable<SqlExecutionEvent> ExecuteStatementAsync(
+        DbConnection connection,
+        ISqlExecutionSession session,
+        SqlExecutionRequest request,
+        string sql,
+        int statementIndex,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        using DbCommand command = CreateCommand(connection, sql, request.CommandTimeoutSeconds ?? 0);
+        session.SetCommand(command, ownsCommand: false);
+
+        if (request.OutputMode == SqlOutputMode.LogOnly)
+        {
+            int affected = await ExecuteNonQueryAsync(command, cancellationToken).ConfigureAwait(false);
+            yield return new SqlExecutionEvent(SqlExecutionEventKind.AffectedRows, request.DocumentId)
+            { StatementIndex = statementIndex, AffectedRows = affected };
+            yield break;
+        }
+
+        using DbDataReader reader = await ExecuteReaderAsync(command, cancellationToken).ConfigureAwait(false);
+        if (request.OutputMode is SqlOutputMode.Csv or SqlOutputMode.Xlsx or SqlOutputMode.Xlsb)
+        {
+            if (string.IsNullOrWhiteSpace(request.OutputPath))
+                throw new ArgumentException("An output path is required for SQL export.", nameof(request));
+
+            if (request.OutputMode == SqlOutputMode.Csv)
+            {
+                IImportExportTasks tasks = _exportTasks
+                    ?? throw new InvalidOperationException("CSV export is not configured.");
+                string separatorSetting = _settings?.Config.SepInExportedCsv ?? ";";
+                char separator = string.IsNullOrEmpty(separatorSetting) ? ';' : separatorSetting[0];
+                string newLineSetting = _settings?.Config.SepRowsInExportedCsv ?? Environment.NewLine;
+                await ExportCsvAsync(
+                    tasks,
+                    reader,
+                    ResolveEncoding(_settings?.Config.EncondingName),
+                    request.OutputPath,
+                    separator,
+                    ResolveNewLine(newLineSetting),
+                    progress: null,
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await ExportXlsxAsync(
+                    reader,
+                    request.OutputPath,
+                    request.OutputMode == SqlOutputMode.Xlsb,
+                    sql,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            yield return new SqlExecutionEvent(SqlExecutionEventKind.Log, request.DocumentId)
+            {
+                StatementIndex = statementIndex,
+                Message = $"Results exported to {request.OutputPath}."
+            };
+            yield break;
+        }
+
+        bool sawResultSet = false;
+        int resultNumber = 0;
+        do
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (reader.FieldCount <= 0)
+                continue;
+
+            sawResultSet = true;
+            string resultSetId = $"{request.DocumentId}-{statementIndex}-{resultNumber++}";
+            ResultColumnDescriptor[] columns = Enumerable.Range(0, reader.FieldCount)
+                .Select(i => new ResultColumnDescriptor(i, reader.GetName(i), reader.GetDataTypeName(i)))
+                .ToArray();
+            yield return SqlExecutionEvent.Result(request.DocumentId,
+                new ResultSetDescriptor(
+                    resultSetId,
+                    $"Result {resultNumber}",
+                    columns,
+                    statementIndex,
+                    ExecutedSql: SqlSensitiveDataRedactor.Redact(sql)));
+
+            var batch = new List<IReadOnlyList<object?>>(500);
+            long rows = 0;
+            long limit = request.RowLimit ?? long.MaxValue;
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                object?[] row = new object?[reader.FieldCount];
+                for (int i = 0; i < row.Length; i++)
+                    row[i] = await reader.IsDBNullAsync(i, cancellationToken).ConfigureAwait(false)
+                        ? null
+                        : reader.GetValue(i);
+                batch.Add(row);
+                rows++;
+                if (batch.Count == 500)
+                {
+                    yield return SqlExecutionEvent.RowsBatch(request.DocumentId, batch.ToArray(), statementIndex, resultSetId);
+                    batch.Clear();
+                }
+                if (rows >= limit)
+                {
+                    yield return new SqlExecutionEvent(SqlExecutionEventKind.Truncated, request.DocumentId)
+                    { StatementIndex = statementIndex, ResultSetId = resultSetId, RowCount = rows, IsTruncated = true };
+                    break;
+                }
+            }
+            if (batch.Count > 0)
+                yield return SqlExecutionEvent.RowsBatch(request.DocumentId, batch.ToArray(), statementIndex, resultSetId);
+        } while (await reader.NextResultAsync(cancellationToken).ConfigureAwait(false));
+
+        if (!sawResultSet)
+        {
+            long affectedRows = reader.RecordsAffected;
+            if (affectedRows >= 0)
+            {
+                yield return new SqlExecutionEvent(SqlExecutionEventKind.AffectedRows, request.DocumentId)
+                { StatementIndex = statementIndex, AffectedRows = affectedRows };
+            }
+            yield return new SqlExecutionEvent(SqlExecutionEventKind.Log, request.DocumentId)
+            { StatementIndex = statementIndex, Message = "Statement completed without a result set." };
+        }
     }
 
     /// <summary>
@@ -394,7 +474,7 @@ public sealed class GeneralSqlExecutionEngine : ISqlExecutionEngine
             do
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                string resultSetPath = outputPath + (resultSetIndex > 0 ? resultSetIndex.ToString() : string.Empty);
+                string resultSetPath = AppendResultSetIndex(outputPath, resultSetIndex);
                 exportTasks.ExportCSVReader(encoding, reader, resultSetPath, separator.ToString(), false, newLine, progress);
                 resultSetCompleted?.Invoke(resultSetPath);
                 resultSetIndex++;
@@ -402,37 +482,65 @@ public sealed class GeneralSqlExecutionEngine : ISqlExecutionEngine
             while (reader.NextResult());
         }, cancellationToken);
     }
+
+    private static string AppendResultSetIndex(string outputPath, int resultSetIndex)
+    {
+        if (resultSetIndex <= 0)
+            return outputPath;
+
+        string extension = Path.GetExtension(outputPath);
+        return string.IsNullOrEmpty(extension)
+            ? outputPath + resultSetIndex
+            : outputPath[..^extension.Length] + resultSetIndex + extension;
+    }
+
+    private static Encoding ResolveEncoding(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.Equals("utf-8", StringComparison.OrdinalIgnoreCase))
+            return Encoding.UTF8;
+
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        return int.TryParse(name, out int page) ? Encoding.GetEncoding(page) : Encoding.GetEncoding(name);
+    }
+
+    private static string ResolveNewLine(string? value) =>
+        string.IsNullOrEmpty(value) ? Environment.NewLine : value.Replace("\\r", "\r").Replace("\\n", "\n");
 }
 
 /// <summary>
 /// Netezza execution engine. Normal document execution uses the same
 /// provider-neutral ADO/event pipeline as the other relational providers.
-/// Legacy presentation remains available for modes whose semantics still
-/// depend on the old BaseWindow execution surface.
 /// </summary>
-public sealed class NetezzaSqlExecutionEngine : ISqlExecutionEngine
+public enum NetezzaExecutionRoute
+{
+    Provider
+}
+
+public sealed class NetezzaSqlExecutionEngine : ISqlExecutionEngine, IStatementLifecycleSqlExecutionEngine
 {
     private readonly GeneralSqlExecutionEngine? _providerEngine;
-    private readonly SqlExecutionEngineContext? _legacyContext;
+    private readonly IConnectionSessionRegistry? _databaseSessions;
+    private readonly IGeneralDbService? _generalDbService;
+    private readonly IDatabaseRuntimeContext? _databaseRuntimeContext;
+    private readonly ILogger? _logger;
+    private readonly IImportExportTasks? _exportTasks;
 
-    /// <summary>Compatibility constructor used by the transitional presenter tests.</summary>
-    public NetezzaSqlExecutionEngine(SqlExecutionEngineContext context)
-    {
-        _legacyContext = context ?? throw new ArgumentNullException(nameof(context));
-    }
-
-    /// <summary>
-    /// Production constructor. The legacy context is retained only for
-    /// unsupported/legacy modes during the remaining migration.
-    /// </summary>
+    /// <summary>Production constructor: Netezza has no BaseWindow fallback.</summary>
     public NetezzaSqlExecutionEngine(
         ISqlExecutionSessionRegistry sessions,
         IImportExportTasks? exportTasks,
-        SqlExecutionEngineContext legacyContext,
-        IConnectionSessionRegistry databaseSessions)
+        IConnectionSessionRegistry databaseSessions,
+        IGeneralDbService? generalDbService = null,
+        IDatabaseRuntimeContext? databaseRuntimeContext = null,
+        ILogger? logger = null,
+        IApplicationSettingsContext? settings = null)
     {
-        _providerEngine = new GeneralSqlExecutionEngine(sessions, exportTasks, databaseSessions);
-        _legacyContext = legacyContext ?? throw new ArgumentNullException(nameof(legacyContext));
+        _providerEngine = new GeneralSqlExecutionEngine(sessions, exportTasks, databaseSessions, settings);
+        _databaseSessions = databaseSessions;
+        _generalDbService = generalDbService;
+        _databaseRuntimeContext = databaseRuntimeContext;
+        _logger = logger;
+        _exportTasks = exportTasks;
     }
 
     public bool CanExecute(string driverName) =>
@@ -442,20 +550,65 @@ public sealed class NetezzaSqlExecutionEngine : ISqlExecutionEngine
         SqlExecutionRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (_providerEngine is not null && CanUseProviderEngine(request))
-            return _providerEngine.ExecuteAsync(request, cancellationToken);
-
-        if (_legacyContext is not null)
-            return _legacyContext.ExecuteAsync(request, cancellationToken);
+        if (_providerEngine is not null && GetRoute(request) == NetezzaExecutionRoute.Provider)
+            return ExecuteProviderAsync(request, cancellationToken);
 
         throw new InvalidOperationException("No Netezza SQL execution backend is configured.");
     }
 
-    private static bool CanUseProviderEngine(SqlExecutionRequest request) =>
-        request.OutputMode is SqlOutputMode.Grid or SqlOutputMode.LogOnly
-        && !request.KeepConnectionOpen
-        && !request.ContinueOnError
-        && !request.Explain;
+    public static NetezzaExecutionRoute GetRoute(SqlExecutionRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return NetezzaExecutionRoute.Provider;
+    }
+
+    bool IStatementLifecycleSqlExecutionEngine.EmitsStatementLifecycle(SqlExecutionRequest request) =>
+        _providerEngine is not null && GetRoute(request) == NetezzaExecutionRoute.Provider;
+
+    private async IAsyncEnumerable<SqlExecutionEvent> ExecuteProviderAsync(
+        SqlExecutionRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        EnsureConnectionSession(request.ConnectionName);
+        SqlExecutionRequest providerRequest = request.Explain
+            ? request with
+            {
+                // Preserve the established Netezza editor behaviour: EXPLAIN
+                // applies to the selected batch by prefixing its first SQL
+                // statement, and the returned plan is rendered as a result.
+                SqlText = "explain verbose " + request.SqlText,
+                Explain = false
+            }
+            : request;
+        await foreach (SqlExecutionEvent executionEvent in _providerEngine!
+            .ExecuteAsync(providerRequest, cancellationToken)
+            .WithCancellation(cancellationToken))
+        {
+            yield return executionEvent;
+        }
+    }
+
+    private void EnsureConnectionSession(string connectionName)
+    {
+        if (string.IsNullOrWhiteSpace(connectionName)
+            || _databaseSessions is null
+            || _databaseSessions.TryGetValue(connectionName, out _)
+            || _generalDbService is null
+            || _databaseRuntimeContext is null
+            || _logger is null)
+        {
+            return;
+        }
+
+        IGeneralDb database = _generalDbService.GetGeneralDb(
+            _databaseRuntimeContext,
+            _logger,
+            _exportTasks,
+            connectionName,
+            out _);
+        database.Username = _generalDbService.UserName(connectionName);
+        _databaseSessions.Set(connectionName, database);
+    }
 }
 
 /// <summary>
@@ -466,18 +619,15 @@ public sealed class SqlExecutionRouter : ISqlExecutionUseCase
 {
     private readonly IGeneralDbService _generalDbService;
     private readonly IReadOnlyList<ISqlExecutionEngine> _engines;
-    private readonly SqlExecutionEngineContext _context;
     private readonly ISqlExecutionSessionRegistry? _sessions;
 
     public SqlExecutionRouter(
         IGeneralDbService generalDbService,
         IEnumerable<ISqlExecutionEngine> engines,
-        SqlExecutionEngineContext context,
         ISqlExecutionSessionRegistry? sessions = null)
     {
         _generalDbService = generalDbService ?? throw new ArgumentNullException(nameof(generalDbService));
         _engines = engines?.ToArray() ?? throw new ArgumentNullException(nameof(engines));
-        _context = context ?? throw new ArgumentNullException(nameof(context));
         _sessions = sessions;
     }
 
@@ -502,14 +652,13 @@ public sealed class SqlExecutionRouter : ISqlExecutionUseCase
         using CancellationTokenRegistration cancellation = cancellationToken.Register(
             () =>
             {
-                _context.Cancel(request.DocumentId, request.ConnectionName);
                 if (_sessions is not null)
                     _ = _sessions.CancelAsync(request.DocumentId);
             });
 
         yield return SqlExecutionEvent.Started(request.DocumentId, 1);
-        bool engineEmitsStatementEvents = engine is GeneralSqlExecutionEngine generalEngine
-            && generalEngine.EmitsStatementEvents;
+        bool engineEmitsStatementEvents = engine is IStatementLifecycleSqlExecutionEngine lifecycleEngine
+            && lifecycleEngine.EmitsStatementLifecycle(request);
         if (!engineEmitsStatementEvents)
         {
             yield return new SqlExecutionEvent(SqlExecutionEventKind.StatementStarted, request.DocumentId)

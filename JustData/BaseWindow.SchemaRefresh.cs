@@ -62,6 +62,12 @@ namespace JustyBaseLegacy.UI
             }
         }
 
+        private void ResetAutocompleteCachesForAllEditors()
+        {
+            foreach (TabPage tab in EditorTabPages)
+                (_tabManager.GetEditorPanel(tab) as SQLUpperPanel)?.ResetAutocompleteCache();
+        }
+
         private bool IsEnabledMode = true;
 
         public void SchemaRefreshOptionEnable(bool enabled)
@@ -101,6 +107,7 @@ namespace JustyBaseLegacy.UI
             string selConnName = SelectedConnectionName;
             _completionRuntimeContext.SelectedConnectionName = SelectedConnectionName;
             _netezzaSqlCompletionServices.InvalidateSchema();
+            ResetAutocompleteCachesForAllEditors();
             FastColoredTextBox fctb = CurrentTB;
 
             // Track whether the non-Netezza branch already initialized MVVM tree
@@ -134,13 +141,13 @@ namespace JustyBaseLegacy.UI
 
                     if (_completionContext.DatabaseDictionary?.Count == 0 && _applicationSettingsContext.Config.CachedDatabaseDictionary is not null)
                     {
-                        _completionRuntimeContext.DatabaseDictionary = _applicationSettingsContext.Config.CachedDatabaseDictionary;
+                        _completionRuntimeContext.ReplaceDatabaseDictionary(_applicationSettingsContext.Config.CachedDatabaseDictionary);
                     }
 
                     // Skip legacy NetezzaLoadSchemaTreeViewPhase before download — no data yet.
                     // The callback inside DownloadSchemaNetezza provides progress, and the
                     // final MVVM InitializeAsync(selConnName) renders the tree correctly.
-                    _completionContext.DatabaseDictionary?.Clear(); // to avoid keeping dummy data in memory
+                    _completionRuntimeContext.ClearDatabaseDictionary(); // to avoid keeping dummy data in memory
 
                     schemaDownloadSucceeded = await nz.DownloadSchemaNetezza(selConnName, NetezzaRefreshMode.partial, null, false,
                         () => EnsureNetezzaLoadSchemaTreeViewPhaseInvoked(selConnName));
@@ -186,8 +193,8 @@ namespace JustyBaseLegacy.UI
                 {
                     CurrentUpper?.ExtendDatabasesList(value.Keys);
                     _netezzaSqlCompletionServices.InvalidateSchema();
+                    ResetAutocompleteCachesForAllEditors();
                     _netezzaSqlCompletionServices.EnsureSchemaForConnection(_completionContext, selConnName);
-                    DynamicCollectionForNettezaHelpers.ResetCache();
                 }
             }
             else if (_generalDbService.LoginDataDic.ContainsKey(selConnName)
@@ -441,18 +448,9 @@ namespace JustyBaseLegacy.UI
                     statusTextBox.Text = $"schema loading";
                     try
                     {
-                        if (_schemaTables.TablesByConnection.TryGetValue(connectionName, out var value2))
-                        {
-                            value2.Clear();
-                        }
-                        if (_completionContext.DatabaseSchemaLookup.TryGetValue(connectionName, out var value4))
-                        {
-                            value4.Clear();
-                        }
-                        if (_completionContext.DatabaseOwners.TryGetValue(connectionName, out var value5))
-                        {
-                            value5.Clear();
-                        }
+                        _schemaTables.ClearConnection(connectionName);
+                        _completionRuntimeContext.ClearSchemaLookup(connectionName);
+                        _completionRuntimeContext.ClearDatabaseOwners(connectionName);
 
                         TreeNode root = auxiliaryDatabaseTreeView.Nodes.Add(connectionName, connectionName);
 
@@ -646,7 +644,8 @@ namespace JustyBaseLegacy.UI
                         _mvvmDatabaseExplorerControl.DatabaseTreeView.Enabled = true;
                     _completionRuntimeContext.SchemaRefreshed = true;
                     _netezzaSqlCompletionServices.InvalidateSchema();
-                        _netezzaSqlCompletionServices.EnsureSchemaForConnection(_completionContext, connectionName);
+                    ResetAutocompleteCachesForAllEditors();
+                    _netezzaSqlCompletionServices.EnsureSchemaForConnection(_completionContext, connectionName);
                 }
             }
             else
@@ -874,16 +873,14 @@ namespace JustyBaseLegacy.UI
             // After a full refresh, run the schema-data side effects that legacy
             // NetezzaLoadSchemaTreeViewPhase would have done. Clear dictionaries first
             // so InitializeConnectionSchemaData starts from a clean state.
-            if (_schemaTables.TablesByConnection.TryGetValue(conName, out var nzValue))
-                nzValue.Clear();
-            if (_completionContext.DatabaseSchemaLookup.TryGetValue(conName, out var lookupValue))
-                lookupValue.Clear();
-            if (_completionContext.DatabaseOwners.TryGetValue(conName, out var ownersValue))
-                ownersValue.Clear();
+            _schemaTables.ClearConnection(conName);
+            _completionRuntimeContext.ClearSchemaLookup(conName);
+            _completionRuntimeContext.ClearDatabaseOwners(conName);
 
             string userName = _applicationSession.CurrentLogin?.Profile.UserName ?? string.Empty;
             NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, _connectionSessions, _schemaTables, userName, conName);
             _netezzaSqlCompletionServices.InvalidateSchema();
+            ResetAutocompleteCachesForAllEditors();
             _netezzaSqlCompletionServices.EnsureSchemaForConnection(_completionContext, conName);
 
             // The MVVM tree is rendered by InitializeAsync(selConnName) at the end of
@@ -908,17 +905,15 @@ namespace JustyBaseLegacy.UI
                             string connName = item.Text;
 
                             // Clear dictionaries so InitializeConnectionSchemaData re-sorts from clean state
-                            if (_schemaTables.TablesByConnection.TryGetValue(connName, out var nzValue))
-                                nzValue.Clear();
-                            if (_completionContext.DatabaseSchemaLookup.TryGetValue(connName, out var lookupValue))
-                                lookupValue.Clear();
-                            if (_completionContext.DatabaseOwners.TryGetValue(connName, out var ownersValue))
-                                ownersValue.Clear();
+                            _schemaTables.ClearConnection(connName);
+                            _completionRuntimeContext.ClearSchemaLookup(connName);
+                            _completionRuntimeContext.ClearDatabaseOwners(connName);
 
                             string userName = _applicationSession.CurrentLogin?.Profile.UserName ?? string.Empty;
                             NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, _connectionSessions, _schemaTables, userName, connName);
                             _completionRuntimeContext.SchemaRefreshed = true;
                             _netezzaSqlCompletionServices.InvalidateSchema();
+                            ResetAutocompleteCachesForAllEditors();
                             _netezzaSqlCompletionServices.EnsureSchemaForConnection(_completionContext, connName);
 
                             // Re-render MVVM tree with the new sort order — skip legacy auxiliary tree
@@ -1007,17 +1002,15 @@ namespace JustyBaseLegacy.UI
             if (success)
             {
                 // Clear dictionaries so InitializeConnectionSchemaData starts from a clean state
-                if (_schemaTables.TablesByConnection.TryGetValue(connectionName, out var nzValue))
-                    nzValue.Clear();
-                if (_completionContext.DatabaseSchemaLookup.TryGetValue(connectionName, out var lookupValue))
-                    lookupValue.Clear();
-                if (_completionContext.DatabaseOwners.TryGetValue(connectionName, out var ownersValue))
-                    ownersValue.Clear();
+                _schemaTables.ClearConnection(connectionName);
+                _completionRuntimeContext.ClearSchemaLookup(connectionName);
+                _completionRuntimeContext.ClearDatabaseOwners(connectionName);
 
                 string userName = _applicationSession.CurrentLogin?.Profile.UserName ?? string.Empty;
                 NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, _connectionSessions, _schemaTables, userName, connectionName);
                 _completionRuntimeContext.SchemaRefreshed = true;
                 _netezzaSqlCompletionServices.InvalidateSchema();
+                ResetAutocompleteCachesForAllEditors();
                 _netezzaSqlCompletionServices.EnsureSchemaForConnection(_completionContext, connectionName);
 
                 // MVVM tree re-renders from refreshed data — skip legacy auxiliary tree building

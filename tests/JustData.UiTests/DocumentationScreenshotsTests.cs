@@ -8,7 +8,7 @@ namespace JustData.UiTests;
 
 /// <summary>
 /// Captures PNG screenshots for README documentation.
-/// Requires local <c>test_nz_connection</c> credentials and Netezza connectivity for main-window shots.
+/// Requires local <c>NPS_144</c> credentials and Netezza connectivity for main-window shots.
 /// </summary>
 public sealed class DocumentationScreenshotsTests
 {
@@ -182,7 +182,7 @@ public sealed class DocumentationScreenshotsTests
     private static void RunShowcaseQuery(UiSession session)
     {
         AutomationElement editor = UiTestHelpers.WaitFor(
-            () => session.MainWindow.FindFirstDescendant(cf => cf.ByAutomationId("NetezzaSQL_addedFastColored")),
+            () => session.MainWindow.FindFirstDescendant(cf => cf.ByAutomationId("_addedFastColored")),
             "the SQL editor");
 
         UiTestHelpers.SetSqlEditorText(editor, DimDateResultsSql);

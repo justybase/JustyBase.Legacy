@@ -1,4 +1,5 @@
 using AppBase.Common;
+using AppBase.Common.Configuration;
 using AppBase.Common.Enums;
 using AppBase.Common.Interfaces;
 using AppBase.Data;
@@ -30,7 +31,6 @@ public sealed class LegacyDbCompletionFallbackTests : IDisposable
     public void Dispose()
     {
         _sut.ResetCache();
-        DynamicCollectionForNettezaHelpers.DatabaseArray.Remove(ConnectionName);
         _tables.Remove(ConnectionName);
     }
 
@@ -95,15 +95,10 @@ public sealed class LegacyDbCompletionFallbackTests : IDisposable
     }
 
     [Fact]
-    public void ResetCache_clears_helper_caches()
+    public void ResetCache_clears_instance_caches()
     {
-        DynamicCollectionForNettezaHelpers.CacheList1.Add(("a", "b"));
-        DynamicCollectionForNettezaHelpers.CacheList2.Add(("c", "d"));
-
         _sut.ResetCache();
-
-        Assert.Empty(DynamicCollectionForNettezaHelpers.CacheList1);
-        Assert.Empty(DynamicCollectionForNettezaHelpers.CacheList2);
+        Assert.NotNull(_sut.GetCompletions("EMP"));
     }
 
     private void SeedHappyPath()
@@ -113,7 +108,14 @@ public sealed class LegacyDbCompletionFallbackTests : IDisposable
         _context.SelectedDatabase.Returns("JUST_DATA");
         _db.DriverName(ConnectionName).Returns("NetezzaSQL");
 
-        DynamicCollectionForNettezaHelpers.DatabaseArray[ConnectionName] = ["JUST_DATA", "OTHER_DB"];
+        _context.DatabaseDictionary.Returns(new Dictionary<string, Dictionary<int, DatabaseInfo>>
+        {
+            [ConnectionName] = new()
+            {
+                [1] = new DatabaseInfo(1, "JUST_DATA", "ADMIN", "SYSTEM"),
+                [2] = new DatabaseInfo(2, "OTHER_DB", "ADMIN", "SYSTEM")
+            }
+        });
 
         _tables[ConnectionName] = new Dictionary<int, NetezzaTableInfo>
         {

@@ -397,7 +397,10 @@ public partial class BaseWindow
                 return;
             await ExecuteNetezzaNonQueryAsync(node.Path.Connection, database.DatabaseName,
                 $"COMMENT ON COLUMN {qualifiedColumn} IS '{form.finalDesc.Replace("'", "''")}';");
-            columns[columnId] = column with { COLUMN_DESCRIPTION = form.finalDesc };
+            _databaseCatalogWriter.SetColumnTableValue(
+                node.Path.Connection,
+                columnId,
+                column with { COLUMN_DESCRIPTION = form.finalDesc });
             return;
         }
         if (action == SchemaContextAction.DropColumn)
@@ -538,7 +541,7 @@ public partial class BaseWindow
         if (tab is not null)
         {
             tab.SelectAll();
-            await RunNzSQL(CurrentUpper?.KeepConnectionOpen ?? false);
+            await RunSQL();
         }
     }
 

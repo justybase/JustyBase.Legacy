@@ -58,13 +58,9 @@ public sealed class SqlExecutionRouterTests
     [Fact]
     public async Task Netezza_normal_document_execution_uses_the_provider_backend()
     {
-        var presenter = new RecordingPresenter(SqlExecutionOutcome.Success);
-        var context = new SqlExecutionEngineContext();
-        context.AttachPresenter(presenter);
         var engine = new NetezzaSqlExecutionEngine(
             new SqlExecutionSessionRegistry(),
             exportTasks: null,
-            context,
             new AppBase.Data.Core.Core.ConnectionSessionRegistry());
 
         SqlExecutionEvent[] events = await CollectAsync(engine.ExecuteAsync(
@@ -75,19 +71,14 @@ public sealed class SqlExecutionRouterTests
 
         Assert.Equal(SqlExecutionOutcome.Blocked, Assert.Single(events).Outcome);
         Assert.Contains("connection", events[0].ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(presenter.Request);
     }
 
     [Fact]
-    public async Task Netezza_legacy_connection_mode_keeps_the_compatibility_backend()
+    public async Task Netezza_keep_connection_mode_uses_the_provider_backend()
     {
-        var presenter = new RecordingPresenter(SqlExecutionOutcome.Success);
-        var context = new SqlExecutionEngineContext();
-        context.AttachPresenter(presenter);
         var engine = new NetezzaSqlExecutionEngine(
             new SqlExecutionSessionRegistry(),
             exportTasks: null,
-            context,
             new AppBase.Data.Core.Core.ConnectionSessionRegistry());
 
         SqlExecutionEvent[] events = await CollectAsync(engine.ExecuteAsync(
@@ -97,8 +88,34 @@ public sealed class SqlExecutionRouterTests
                 KeepConnectionOpen = true
             }));
 
-        Assert.Equal(SqlExecutionOutcome.Success, Assert.Single(events).Outcome);
-        Assert.NotNull(presenter.Request);
+        Assert.Equal(SqlExecutionOutcome.Blocked, Assert.Single(events).Outcome);
+    }
+
+    [Theory]
+    [InlineData(SqlOutputMode.Grid, false, false, false, NetezzaExecutionRoute.Provider)]
+    [InlineData(SqlOutputMode.LogOnly, false, false, false, NetezzaExecutionRoute.Provider)]
+    [InlineData(SqlOutputMode.Grid, true, false, false, NetezzaExecutionRoute.Provider)]
+    [InlineData(SqlOutputMode.Grid, false, true, false, NetezzaExecutionRoute.Provider)]
+    [InlineData(SqlOutputMode.Grid, false, false, true, NetezzaExecutionRoute.Provider)]
+    [InlineData(SqlOutputMode.Csv, false, false, false, NetezzaExecutionRoute.Provider)]
+    [InlineData(SqlOutputMode.Xlsx, false, false, false, NetezzaExecutionRoute.Provider)]
+    [InlineData(SqlOutputMode.Xlsb, false, false, false, NetezzaExecutionRoute.Provider)]
+    public void Netezza_route_is_explicit_for_every_supported_execution_shape(
+        SqlOutputMode outputMode,
+        bool keepConnectionOpen,
+        bool continueOnError,
+        bool explain,
+        NetezzaExecutionRoute expected)
+    {
+        var request = new SqlExecutionRequest(EditorDocumentId.New(), "select 1")
+        {
+            OutputMode = outputMode,
+            KeepConnectionOpen = keepConnectionOpen,
+            ContinueOnError = continueOnError,
+            Explain = explain
+        };
+
+        Assert.Equal(expected, NetezzaSqlExecutionEngine.GetRoute(request));
     }
 
     [Fact]
@@ -142,7 +159,6 @@ public sealed class SqlExecutionRouterTests
         await cancellation.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => execution);
-        Assert.True(presenter.Cancelled);
         Assert.True(presenter.CancellationObserved);
         Assert.True(presenter.EnumeratorDisposed);
     }
@@ -205,12 +221,9 @@ public sealed class SqlExecutionRouterTests
     {
         var database = Substitute.For<IGeneralDbService>();
         database.DriverName(Arg.Any<string>()).Returns(driver);
-        var context = new SqlExecutionEngineContext();
-        context.AttachPresenter(presenter);
         return new SqlExecutionRouter(
             database,
-            [new GeneralSqlExecutionEngine(context), new NetezzaSqlExecutionEngine(context)],
-            context);
+            [presenter]);
     }
 
     private static async Task<SqlExecutionEvent[]> CollectAsync(
@@ -224,15 +237,19 @@ public sealed class SqlExecutionRouterTests
     }
 
     private sealed class RecordingPresenter(SqlExecutionOutcome? outcome, bool block = false)
-        : ISqlExecutionDocumentPresenter
+        : ISqlExecutionEngine
     {
+        private static readonly HashSet<string> SupportedDrivers = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "NetezzaSQL", "Postgres", "Oracle", "SQLite"
+        };
+
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public bool Cancelled { get; private set; }
         public bool CancellationObserved { get; private set; }
         public bool EnumeratorDisposed { get; private set; }
         public SqlExecutionRequest? Request { get; private set; }
 
-        public void Cancel(EditorDocumentId documentId, string connectionName) => Cancelled = true;
+        public bool CanExecute(string driverName) => SupportedDrivers.Contains(driverName);
 
         public async IAsyncEnumerable<SqlExecutionEvent> ExecuteAsync(
             SqlExecutionRequest request,

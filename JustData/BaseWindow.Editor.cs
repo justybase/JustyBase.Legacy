@@ -189,18 +189,12 @@ namespace JustyBaseLegacy.UI
                 {
                     (_tabManager.GetEditorPanel(tab) as SQLUpperPanel)?.RemoveConnection(previousConnectionName);
                 }
-                if (SQLUpperPanel.ConnectionsList.Contains(previousConnectionName))
-                {
-                    SQLUpperPanel.ConnectionsList.Remove(previousConnectionName);
-                }
+                _editorCatalogState.RemoveConnection(previousConnectionName);
             }
 
             SelectedConnectionName = newConnectionName;
             SelectedDatabase = selection.Profile.Database;
-            if (!SQLUpperPanel.ConnectionsList.Contains(newConnectionName))
-            {
-                SQLUpperPanel.ConnectionsList.Add(newConnectionName);
-            }
+            _editorCatalogState.AddConnection(newConnectionName);
 
             _applicationSettingsContext.Config.FastLogin = selection.FastLogin;
             this.Text = "JustyBaseLegacy - " + newConnectionName;
@@ -602,7 +596,8 @@ namespace JustyBaseLegacy.UI
                     _settingsPersistence.SaveConfig,
                     _recentFileRuntimeContext.SaveRecentFiles,
                     _uiHelperService,
-                    _colorTheme);
+                    _colorTheme,
+                    _netezzaAutocompleteState);
                 return;
             }
 
@@ -614,7 +609,8 @@ namespace JustyBaseLegacy.UI
                 _settingsPersistence.SaveConfig,
                 _recentFileRuntimeContext.SaveRecentFiles,
                 _uiHelperService,
-                _colorTheme);
+                _colorTheme,
+                _netezzaAutocompleteState);
             pr.ShowDialog();
         }
 
@@ -715,10 +711,7 @@ namespace JustyBaseLegacy.UI
             {
                 if (sn.IsStandard())
                 {
-                    var ar = DynamicCollectionForNettezaHelpers.MonkeySnippets;
-                    Array.Resize(ref ar, ar.Length + 1);
-                    ar[^1] = $"@@{sn.GetName()} {snipetText}";
-                    DynamicCollectionForNettezaHelpers.MonkeySnippets = ar;
+                    _netezzaAutocompleteState.AddMonkeySnippet($"@@{sn.GetName()} {snipetText}");
                 }
                 else if (sn.IsQuick())
                 {

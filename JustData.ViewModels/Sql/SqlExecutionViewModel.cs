@@ -161,6 +161,15 @@ public sealed class SqlExecutionViewModel : ObservableObject, IDisposable
     /// <summary>Raised synchronously for every event, including row batches.</summary>
     public event Action<SqlExecutionEvent>? EventReceived;
 
+    /// <summary>
+    /// Lifecycle notifications for presentation adapters. Result metadata is
+    /// owned here; grids and tabs are projections keyed by <see cref="ResultSetKey"/>.
+    /// </summary>
+    public event Action<ResultSetKey, ResultSetDescriptor>? ResultAdded;
+    public event Action<ResultSetKey, ResultSetDescriptor>? ResultUpdated;
+    public event Action<ResultSetKey>? ResultRemoved;
+    public event Action<ResultSetKey?>? SelectedResultChanged;
+
     public async Task<SqlExecutionOutcome> RunAsync(
         SqlExecutionRequest request,
         CancellationToken cancellationToken = default)
@@ -306,34 +315,68 @@ public sealed class SqlExecutionViewModel : ObservableObject, IDisposable
     public void SelectResult(string? resultSetId)
     {
         ThrowIfDisposed();
-        SelectedResultSet = string.IsNullOrEmpty(resultSetId)
+        SelectResultKey(string.IsNullOrEmpty(resultSetId)
             ? null
-            : ResultSets.FirstOrDefault(item => item.ResultSetId == resultSetId);
+            : new ResultSetKey(_documentId, resultSetId));
+    }
+
+    public EditorDocumentId DocumentId => _documentId;
+
+    public void SelectResultKey(ResultSetKey? key)
+    {
+        ThrowIfDisposed();
+        if (key is { DocumentId: var documentId } && documentId != _documentId)
+            throw new ArgumentException("The result set belongs to another document.", nameof(key));
+
+        SetSelectedResult(key is { } value
+            ? ResultSets.FirstOrDefault(item => item.ResultSetId == value.ResultSetId)
+            : null);
     }
 
     public void PinResult(string? resultSetId)
     {
         ThrowIfDisposed();
-        UpdatePinState(resultSetId, isPinned: true);
+        if (!string.IsNullOrWhiteSpace(resultSetId))
+            PinResult(new ResultSetKey(_documentId, resultSetId));
+    }
+
+    public void PinResult(ResultSetKey key)
+    {
+        ThrowIfDisposed();
+        UpdatePinState(key, isPinned: true);
     }
 
     public void UnpinResult(string? resultSetId)
     {
         ThrowIfDisposed();
-        UpdatePinState(resultSetId, isPinned: false);
+        if (!string.IsNullOrWhiteSpace(resultSetId))
+            UnpinResult(new ResultSetKey(_documentId, resultSetId));
+    }
+
+    public void UnpinResult(ResultSetKey key)
+    {
+        ThrowIfDisposed();
+        UpdatePinState(key, isPinned: false);
     }
 
     public void ClearResults()
     {
         ThrowIfDisposed();
+        var removed = new List<ResultSetKey>();
         for (int index = ResultSets.Count - 1; index >= 0; index--)
         {
             if (!ResultSets[index].IsPinned)
+            {
+                removed.Add(KeyFor(ResultSets[index]));
                 ResultSets.RemoveAt(index);
+            }
         }
 
         if (SelectedResultSet is not null && !ResultSets.Contains(SelectedResultSet))
-            SelectedResultSet = ResultSets.LastOrDefault();
+            SetSelectedResult(ResultSets.LastOrDefault());
+
+        foreach (ResultSetKey key in removed)
+            ResultRemoved?.Invoke(key);
     }
 
     public void RemoveResult(string? resultSetId)
@@ -342,16 +385,26 @@ public sealed class SqlExecutionViewModel : ObservableObject, IDisposable
         if (string.IsNullOrWhiteSpace(resultSetId))
             return;
 
+        RemoveResult(new ResultSetKey(_documentId, resultSetId));
+    }
+
+    public void RemoveResult(ResultSetKey key)
+    {
+        ThrowIfDisposed();
+        if (key.DocumentId != _documentId || string.IsNullOrWhiteSpace(key.ResultSetId))
+            return;
+
         ResultSetDescriptor? result = ResultSets.FirstOrDefault(
-            item => item.ResultSetId == resultSetId);
+            item => item.ResultSetId == key.ResultSetId);
         if (result is null)
             return;
 
         bool wasSelected = ReferenceEquals(SelectedResultSet, result)
-            || SelectedResultSet?.ResultSetId == resultSetId;
+            || SelectedResultSet?.ResultSetId == key.ResultSetId;
         ResultSets.Remove(result);
         if (wasSelected)
-            SelectedResultSet = ResultSets.LastOrDefault();
+            SetSelectedResult(ResultSets.LastOrDefault());
+        ResultRemoved?.Invoke(key);
     }
 
     private async Task ExecuteCommandAsync(SqlExecutionMode mode, SqlOutputMode outputMode)
@@ -438,18 +491,26 @@ public sealed class SqlExecutionViewModel : ObservableObject, IDisposable
             ResultSets.Add(descriptor);
         }
 
-        SelectedResultSet ??= index >= 0 ? ResultSets[index] : descriptor;
+        ResultSetDescriptor current = index >= 0 ? ResultSets[index] : descriptor;
+        ResultSetKey key = KeyFor(current);
+        if (index >= 0)
+            ResultUpdated?.Invoke(key, current);
+        else
+            ResultAdded?.Invoke(key, current);
+
+        if (SelectedResultSet is null)
+            SetSelectedResult(current);
     }
 
-    private void UpdatePinState(string? resultSetId, bool isPinned)
+    private void UpdatePinState(ResultSetKey key, bool isPinned)
     {
-        if (string.IsNullOrWhiteSpace(resultSetId))
+        if (key.DocumentId != _documentId || string.IsNullOrWhiteSpace(key.ResultSetId))
             return;
 
         int index = -1;
         for (int candidate = 0; candidate < ResultSets.Count; candidate++)
         {
-            if (ResultSets[candidate].ResultSetId == resultSetId)
+            if (ResultSets[candidate].ResultSetId == key.ResultSetId)
             {
                 index = candidate;
                 break;
@@ -459,8 +520,21 @@ public sealed class SqlExecutionViewModel : ObservableObject, IDisposable
             return;
 
         ResultSets[index] = ResultSets[index] with { IsPinned = isPinned };
-        if (SelectedResultSet?.ResultSetId == resultSetId)
-            SelectedResultSet = ResultSets[index];
+        ResultSetDescriptor updated = ResultSets[index];
+        if (SelectedResultSet?.ResultSetId == key.ResultSetId)
+            SetSelectedResult(updated);
+        ResultUpdated?.Invoke(key, updated);
+    }
+
+    private ResultSetKey KeyFor(ResultSetDescriptor descriptor) =>
+        new(_documentId, descriptor.ResultSetId);
+
+    private void SetSelectedResult(ResultSetDescriptor? result)
+    {
+        if (!SetProperty(ref _selectedResultSet, result, nameof(SelectedResultSet)))
+            return;
+
+        SelectedResultChanged?.Invoke(result is null ? null : KeyFor(result));
     }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
@@ -474,6 +548,10 @@ public sealed class SqlExecutionViewModel : ObservableObject, IDisposable
         lock (_sync)
             _activeCancellation?.Cancel();
         EventReceived = null;
+        ResultAdded = null;
+        ResultUpdated = null;
+        ResultRemoved = null;
+        SelectedResultChanged = null;
     }
 
     private sealed class UnavailableSqlExecutionUseCase : ISqlExecutionUseCase

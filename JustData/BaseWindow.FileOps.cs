@@ -252,10 +252,11 @@ namespace JustyBaseLegacy.UI
                 IReadOnlyList<EditorDocumentId>? documentOrder = _tabManager is DockSuiteTabManager dockSuiteTabManager
                     ? dockSuiteTabManager.GetEditorDocumentOrder()
                     : null;
+                if (documentOrder is { Count: > 0 })
+                    _editorWorkspaceViewModel.Reorder(documentOrder);
                 await _editorWorkspaceViewModel.SaveManySqlAsync(
                     filePath,
-                    cancellationToken,
-                    documentOrder).ConfigureAwait(true);
+                    cancellationToken).ConfigureAwait(true);
             }
             catch (IOException ex)
             {

@@ -2,6 +2,7 @@ using AppBase.Common;
 using AppBase.Common.Interfaces;
 using JustData.Application.Settings;
 using AppBase.Data;
+using AppBase.Data.Core.Models;
 using System.Text;
 using System.Text.Json;
 
@@ -9,9 +10,12 @@ namespace JustyBaseLegacy.UI.Configuration;
 
 /// <summary>Legacy file/config adapter for the transactional Preferences VM.</summary>
 /// <summary>WinForms configuration-format adapter for transactional settings drafts.</summary>
-public sealed class WinFormsApplicationSettingsStore(IApplicationSettingsContext applicationSettingsContext) : IApplicationSettingsStore
+public sealed class WinFormsApplicationSettingsStore(
+    IApplicationSettingsContext applicationSettingsContext,
+    INetezzaAutocompleteState netezzaAutocompleteState) : IApplicationSettingsStore
 {
     private readonly IApplicationSettingsContext _applicationSettingsContext = applicationSettingsContext ?? throw new ArgumentNullException(nameof(applicationSettingsContext));
+    private readonly INetezzaAutocompleteState _netezzaAutocompleteState = netezzaAutocompleteState ?? throw new ArgumentNullException(nameof(netezzaAutocompleteState));
 
     public Task<ApplicationSettingsSnapshot> LoadAsync(CancellationToken cancellationToken = default)
     {
@@ -68,9 +72,7 @@ public sealed class WinFormsApplicationSettingsStore(IApplicationSettingsContext
                 LegacyApplicationSettingsMapper.ApplyToLegacy(draft, _applicationSettingsContext.Config);
             }
 
-            DynamicCollectionForNettezaHelpers.Keywords = snippets.Keywords.ToArray();
-            DynamicCollectionForNettezaHelpers.Snippets = snippets.Snippets.ToArray();
-            DynamicCollectionForNettezaHelpers.MonkeySnippets = snippets.MonkeySnippets.ToArray();
+            _netezzaAutocompleteState.ReplaceSnippets(snippets.Keywords, snippets.Snippets, snippets.MonkeySnippets);
         }
         catch
         {
@@ -92,9 +94,9 @@ public sealed class WinFormsApplicationSettingsStore(IApplicationSettingsContext
         {
             return new SnippetSettings
             {
-                Keywords = DynamicCollectionForNettezaHelpers.Keywords?.ToList() ?? [],
-                Snippets = DynamicCollectionForNettezaHelpers.Snippets?.ToList() ?? [],
-                MonkeySnippets = DynamicCollectionForNettezaHelpers.MonkeySnippets?.ToList() ?? []
+                Keywords = _netezzaAutocompleteState.Keywords.ToList(),
+                Snippets = _netezzaAutocompleteState.Snippets.ToList(),
+                MonkeySnippets = _netezzaAutocompleteState.MonkeySnippets.ToList()
             };
         }
 

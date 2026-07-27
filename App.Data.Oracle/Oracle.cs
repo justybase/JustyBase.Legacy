@@ -62,7 +62,7 @@ public sealed class Oracle : GeneralDb
 
         foreach (DataRow user in _users.Rows)
         {
-            DynamicCollectionForGeneralHelpers.OneWord.Add(user.ItemArray[0] as string);
+            AutocompleteSuggestions.OneWord.Add(user.ItemArray[0] as string);
         }
 
         foreach (DataRow itx in _users.Rows)
@@ -80,13 +80,13 @@ public sealed class Oracle : GeneralDb
                 {
                     tabName = $"\"{tabName}\"";
                 }
-                DynamicCollectionForGeneralHelpers.TwoWords.Add($"{user}.{tabName}");
+                AutocompleteSuggestions.TwoWords.Add($"{user}.{tabName}");
             }
 
             var synonymCol = _synonyms.Select($"OWNER = '{user}'");
             foreach (DataRow item in synonymCol)
             {
-                DynamicCollectionForGeneralHelpers.TwoWords.Add($"{user}.{item.ItemArray[1]}");
+                AutocompleteSuggestions.TwoWords.Add($"{user}.{item.ItemArray[1]}");
             }
 
             DataRow[] viewCol;
@@ -94,7 +94,7 @@ public sealed class Oracle : GeneralDb
 
             foreach (DataRow item in viewCol)
             {
-                DynamicCollectionForGeneralHelpers.TwoWords.Add($"{user}.{item.ItemArray[1]}");
+                AutocompleteSuggestions.TwoWords.Add($"{user}.{item.ItemArray[1]}");
             }
         }
 

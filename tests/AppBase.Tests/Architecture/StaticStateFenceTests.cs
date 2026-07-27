@@ -16,15 +16,6 @@ public sealed class StaticStateFenceTests
     {
         "AppBase.Data.NetezzaHelpers.ServerVersion",
         "AppBase.Data.NetezzaHelpers.SqliteInProgress",
-        "AppBase.Data.DynamicCollectionForNettezaHelpers.Keywords",
-        "AppBase.Data.DynamicCollectionForNettezaHelpers.Snippets",
-        "AppBase.Data.DynamicCollectionForNettezaHelpers.MonkeySnippets",
-        "AppBase.Data.DynamicCollectionForNettezaHelpers.ExtraSnippet",
-        "AppBase.Data.DynamicCollectionForNettezaHelpers.ActualColumnList",
-        "AppBase.Data.DynamicCollectionForNettezaHelpers.DatabaseArray",
-        "AppBase.Data.DynamicCollectionForNettezaHelpers.CacheList1",
-        "AppBase.Data.DynamicCollectionForNettezaHelpers.CacheList2",
-        "AppBase.Data.DynamicCollectionForNettezaHelpers.CurrentColumn",
     };
 
     private static readonly HashSet<string> AllowedServicesStaticMutables = new(StringComparer.Ordinal)

@@ -1,5 +1,6 @@
 using AppBase.Common;
 using AppBase.Common.Interfaces;
+using AppBase.Data.Core.Models;
 using DatabaseDataGridView.WinForms;
 using DatabaseDataGridView.WinForms.Coloring;
 using FastColoredTextBoxNS;
@@ -117,6 +118,8 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
             SwapResultsForTab(tabPage);
             if (_documentIdsByTab.TryGetValue(tabPage, out var documentId))
                 ActiveDocumentChanged?.Invoke(documentId);
+
+            DocumentOrderChanged?.Invoke(GetEditorDocumentOrder());
         }
     }
 
@@ -725,7 +728,8 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
         Action saveConfig,
         Action saveRecentFiles,
         IUiHelperService uiHelperService,
-        IColorTheme colorTheme)
+        IColorTheme colorTheme,
+        INetezzaAutocompleteState netezzaAutocompleteState)
     {
         if (_preferencesContent is not null && !_preferencesContent.IsDisposed)
         {
@@ -742,7 +746,8 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
             saveConfig,
             saveRecentFiles,
             uiHelperService,
-            colorTheme);
+            colorTheme,
+            netezzaAutocompleteState);
         _preferencesContent.Show(_dockPanel, DockState.Document);
         _preferencesContent.Activate();
     }
@@ -822,6 +827,20 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
         return _resultsWindow;
     }
 
+    /// <summary>
+    /// Makes the Results tool visible and binds it to the supplied editor
+    /// document. Execution events can arrive while Results itself is active,
+    /// in which case ActiveDocumentChanged cannot infer the owning editor.
+    /// </summary>
+    public ResultsDockContent ShowResultsForTab(TabPage tabPage)
+    {
+        ResultsDockContent results = EnsureResultsToolWindow();
+        SwapResultsForTab(tabPage);
+        ForceResultsBelowSqlDocuments();
+        results.Activate();
+        return results;
+    }
+
     public void DockResultsBelowDocuments()
     {
         if (_resultsWindow is null || _resultsWindow.IsDisposed)
@@ -844,8 +863,7 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
             _resultsWindow = new ResultsDockContent();
         }
 
-        DockPane? documentPane = _dockPanel.Panes
-            .FirstOrDefault(pane => pane.DockState == DockState.Document);
+        DockPane? documentPane = FindSqlDocumentPane();
         if (documentPane is null)
         {
             return;
@@ -857,11 +875,10 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
     private void ShowResultsInDocumentPane()
     {
         if (_resultsWindow is null || _resultsWindow.IsDisposed
-            || _resultsWindow.DockState == DockState.Document)
+            || (_resultsWindow.DockState == DockState.Document && _resultsWindow.Visible))
             return;
 
-        var documentPane = _dockPanel.Panes
-            .FirstOrDefault(pane => pane.DockState == DockState.Document);
+        DockPane? documentPane = FindSqlDocumentPane();
         if (documentPane is null)
             return;
 
@@ -874,6 +891,11 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
             : 0.25;
         _resultsWindow.Show(documentPane, DockAlignment.Bottom, proportion);
     }
+
+    private DockPane? FindSqlDocumentPane() =>
+        _dockPanel.Panes.FirstOrDefault(pane =>
+            pane.DockState == DockState.Document
+            && pane.Contents.OfType<EditorDockContent>().Any());
 
     private void QueueResultsDocking()
     {
@@ -894,6 +916,13 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
 
     /// <summary>Raised when DockSuite activates a clean-layer editor document.</summary>
     public Action<EditorDocumentId>? ActiveDocumentChanged { get; set; }
+
+    /// <summary>
+    /// Reports the current DockSuite document ordering. DockPanelSuite does
+    /// not expose a dedicated tab-reorder event, but activation is raised for
+    /// both clicks and the completion of a document-tab drag.
+    /// </summary>
+    public Action<IReadOnlyList<EditorDocumentId>>? DocumentOrderChanged { get; set; }
 
     /// <summary>
     /// Event raised after theme change to request reopening of document tabs.
@@ -1079,6 +1108,7 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
     {
         TabCloseRequested = null;
         ActiveDocumentChanged = null;
+        DocumentOrderChanged = null;
         ReopenTabsRequested = null;
 
         foreach (TabControl results in _perTabResults.Values.ToArray())

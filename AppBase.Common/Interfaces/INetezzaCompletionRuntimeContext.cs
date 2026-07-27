@@ -10,5 +10,8 @@ public interface INetezzaCompletionRuntimeContext : INetezzaCompletionContext
     new bool SchemaRefreshed { get; set; }
     new string SelectedConnectionName { get; set; }
     new string SelectedDatabase { get; set; }
-    new Dictionary<string, Dictionary<int, DatabaseInfo>> DatabaseDictionary { get; set; }
+    void ReplaceDatabaseDictionary(Dictionary<string, Dictionary<int, DatabaseInfo>> value);
+    void ClearDatabaseDictionary();
+    void ClearSchemaLookup(string connectionName);
+    void ClearDatabaseOwners(string connectionName);
 }

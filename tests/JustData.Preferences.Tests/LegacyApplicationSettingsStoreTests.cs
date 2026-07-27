@@ -2,6 +2,7 @@ using AppBase.Common;
 using AppBase.Common.Interfaces;
 using JustData.Application.Settings;
 using JustyBaseLegacy.UI.Configuration;
+using AppBase.Data.Core.Models;
 using NSubstitute;
 using System.Text.Json;
 
@@ -25,7 +26,8 @@ public sealed class WinFormsApplicationSettingsStoreTests : IDisposable
         helpers.ConfigMainFile.Returns(configPath);
         helpers.DoSaveConfig.Returns(true);
 
-        var store = new WinFormsApplicationSettingsStore(helpers);
+        var state = new NetezzaAutocompleteState();
+        var store = new WinFormsApplicationSettingsStore(helpers, state);
         var draft = (await store.LoadAsync()).ToDraft();
         draft.Appearance.FontName = "TransactionalFont";
         draft.SqlResults.CommandTimeout = 1234;
@@ -37,7 +39,7 @@ public sealed class WinFormsApplicationSettingsStoreTests : IDisposable
 
         Assert.Equal("TransactionalFont", config.FontName);
         Assert.Equal(1234, config.CommandTimeout);
-        Assert.Equal("keyword", AppBase.Data.DynamicCollectionForNettezaHelpers.Keywords.Single());
+        Assert.Equal("keyword", state.Keywords.Single());
         Assert.Equal("TransactionalFont", JsonDocument.Parse(File.ReadAllText(configPath)).RootElement.GetProperty("FontName").GetString());
         using JsonDocument persistedConfig = JsonDocument.Parse(File.ReadAllText(configPath));
         Assert.Equal(2, persistedConfig.RootElement.GetProperty("StartsFolderPaths").GetArrayLength());
@@ -60,15 +62,16 @@ public sealed class WinFormsApplicationSettingsStoreTests : IDisposable
         helpers.ConfigMainFile.Returns(configPath);
         helpers.DoSaveConfig.Returns(false);
 
-        var draft = (await new WinFormsApplicationSettingsStore(helpers).LoadAsync()).ToDraft();
+        var state = new NetezzaAutocompleteState();
+        var draft = (await new WinFormsApplicationSettingsStore(helpers, state).LoadAsync()).ToDraft();
         draft.Appearance.FontName = "not persisted";
         draft.Snippets.Keywords = ["new-keyword"];
 
-        await new WinFormsApplicationSettingsStore(helpers).SaveAsync(draft);
+        await new WinFormsApplicationSettingsStore(helpers, state).SaveAsync(draft);
 
         Assert.Equal("original", File.ReadAllText(configPath));
         Assert.Equal("Consolas", config.FontName);
-        Assert.Equal(["new-keyword"], AppBase.Data.DynamicCollectionForNettezaHelpers.Keywords);
+        Assert.Equal(["new-keyword"], state.Keywords);
     }
 
     [Fact]
@@ -86,7 +89,7 @@ public sealed class WinFormsApplicationSettingsStoreTests : IDisposable
         helpers.ConfigMainFile.Returns(configPath);
         helpers.DoSaveConfig.Returns(true);
 
-        await Assert.ThrowsAnyAsync<Exception>(() => new WinFormsApplicationSettingsStore(helpers).SaveAsync(new ApplicationSettingsDraft()));
+        await Assert.ThrowsAnyAsync<Exception>(() => new WinFormsApplicationSettingsStore(helpers, new NetezzaAutocompleteState()).SaveAsync(new ApplicationSettingsDraft()));
 
         Assert.Equal("original", File.ReadAllText(configPath));
         Assert.Empty(Directory.GetFiles(_directory, "*.tmp-*"));

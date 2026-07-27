@@ -405,7 +405,7 @@ WITH UR; ";
 
         foreach (DataRow item in _schemas.Rows)
         {
-            DynamicCollectionForGeneralHelpers.OneWord.Add(item.ItemArray[0] as string);
+            AutocompleteSuggestions.OneWord.Add(item.ItemArray[0] as string);
         }
 
         foreach (DataRow item in _schemas.Rows)
@@ -420,13 +420,13 @@ WITH UR; ";
                 //QuoteNameIfNeeded(ref schemaName);
 
 
-                DynamicCollectionForGeneralHelpers.TwoWords.Add($"{schema}.{schemaName}");
+                AutocompleteSuggestions.TwoWords.Add($"{schema}.{schemaName}");
             }
 
             var synonymCol = _synonyms.Select($"TABLE_SCHEMA = '{schema}'");
             foreach (DataRow item2 in synonymCol)
             {
-                DynamicCollectionForGeneralHelpers.TwoWords.Add($"{schema}.{item2.ItemArray[2]}");
+                AutocompleteSuggestions.TwoWords.Add($"{schema}.{item2.ItemArray[2]}");
             }
 
             DataRow[] viewCol;
@@ -434,7 +434,7 @@ WITH UR; ";
 
             foreach (DataRow item2 in viewCol)
             {
-                DynamicCollectionForGeneralHelpers.TwoWords.Add($"{schema}.{item2.ItemArray[2]}");
+                AutocompleteSuggestions.TwoWords.Add($"{schema}.{item2.ItemArray[2]}");
             }
         }
     }

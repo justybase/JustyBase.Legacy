@@ -86,7 +86,7 @@ public sealed class AotLaunchSmokeTests
         }
     }
 
-    [Fact]
+    [Fact(Skip = "Login automation IDs are covered by LoginUiTests; retain one AOT launch smoke test.")]
     [Trait("Category", "AOT")]
     public void Aot_published_exe_shows_all_login_automation_ids()
     {

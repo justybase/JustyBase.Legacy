@@ -1,6 +1,7 @@
 using AppBase.Common;
 using AppBase.Common.Interfaces;
 using AppBase.Data.Core.Interfaces;
+using AppBase.Data.Core.Models;
 using AppBase.Data.Core.Core;
 using AppBase.Services;
 using AppBase.Services.Utilities;
@@ -137,9 +138,12 @@ public static class Program
             new ColorTheme(sp.GetRequiredService<IApplicationSettingsContext>().Config));
         services.AddSingleton<LegacyDatabaseRuntimeContext>();
         services.AddSingleton<IDatabaseRuntimeContext>(sp => sp.GetRequiredService<LegacyDatabaseRuntimeContext>());
+        services.AddSingleton<IDatabaseRuntimeCatalogWriter>(sp => sp.GetRequiredService<LegacyDatabaseRuntimeContext>());
         services.AddSingleton<INetezzaCompletionContext>(sp => sp.GetRequiredService<LegacyDatabaseRuntimeContext>());
         services.AddSingleton<INetezzaCompletionRuntimeContext>(sp => sp.GetRequiredService<LegacyDatabaseRuntimeContext>());
         services.AddSingleton<INetezzaSchemaTableCatalog>(sp => sp.GetRequiredService<LegacyDatabaseRuntimeContext>());
+        services.AddSingleton<INetezzaSchemaTableCatalogWriter>(sp => sp.GetRequiredService<LegacyDatabaseRuntimeContext>());
+        services.AddSingleton<INetezzaAutocompleteState, NetezzaAutocompleteState>();
         services.AddSingleton<INetezzaDdlCodeProvider, LegacyNetezzaDdlCodeProvider>();
         services.AddSingleton<LegacySnippetContext>();
         services.AddSingleton<ISnippetInitializationContext>(sp => sp.GetRequiredService<LegacySnippetContext>());
@@ -181,21 +185,26 @@ public static class Program
         services.AddScoped<FilesViewModel>();
         services.AddSingleton<IGitService, SystemGitService>();
         services.AddScoped<GitViewModel>();
-        services.AddScoped<SqlExecutionEngineContext>();
         services.AddScoped<ISqlExecutionSessionRegistry, SqlExecutionSessionRegistry>();
+        services.AddScoped<IEditorCatalogState, EditorCatalogState>();
         // General DB is now provider/event-stream based; its WinForms result
         // rendering is a document presenter rather than a BaseWindow callback.
         services.AddScoped<ISqlExecutionEngine>(sp => new GeneralSqlExecutionEngine(
             sp.GetRequiredService<ISqlExecutionSessionRegistry>(),
             sp.GetRequiredService<IImportExportTasks>(),
-            sp.GetRequiredService<IConnectionSessionRegistry>()));
-        // Keep the Netezza provider on the transitional presenter until its
-        // async reader/export semantics match the clean ADO engine. The
-        // production switch is intentionally gated by the real-provider UI
-        // tests; the migration constructor remains covered at the contract
-        // level while this compatibility path is active.
+            sp.GetRequiredService<IConnectionSessionRegistry>(),
+            sp.GetRequiredService<IApplicationSettingsContext>()));
+        // Netezza document execution uses the same provider/event pipeline
+        // as the other relational engines, including exports, EXPLAIN,
+        // per-document retained sessions and continue-on-error.
         services.AddScoped<ISqlExecutionEngine>(sp => new NetezzaSqlExecutionEngine(
-            sp.GetRequiredService<SqlExecutionEngineContext>()));
+            sp.GetRequiredService<ISqlExecutionSessionRegistry>(),
+            sp.GetRequiredService<IImportExportTasks>(),
+            sp.GetRequiredService<IConnectionSessionRegistry>(),
+            sp.GetRequiredService<IGeneralDbService>(),
+            sp.GetRequiredService<IDatabaseRuntimeContext>(),
+            sp.GetRequiredService<ILogger>(),
+            sp.GetRequiredService<IApplicationSettingsContext>()));
         services.AddScoped<SqlExecutionRouter>();
         services.AddScoped<ISqlExecutionUseCase>(sp => sp.GetRequiredService<SqlExecutionRouter>());
         services.AddSingleton<AppBase.Data.Completion.NetezzaSqlAuthoringUseCase>();

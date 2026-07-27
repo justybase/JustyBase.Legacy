@@ -5,7 +5,7 @@ namespace JustData.UiTests;
 
 public sealed class Phase9PerformanceBaselineTests
 {
-    private const string MainWindowId = "NetezzaSQL_addedFastColored";
+    private const string MainWindowId = "_addedFastColored";
 
     [Fact]
     [Trait("Category", "Performance")]

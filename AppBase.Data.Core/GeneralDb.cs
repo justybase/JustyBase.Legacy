@@ -41,6 +41,8 @@ public abstract partial class GeneralDb : IGeneralDb
 
     public Dictionary<string, Dictionary<string, TypeInDatabase>> objectInSchema { get; set; } = new Dictionary<string, Dictionary<string, TypeInDatabase>>(StringComparer.OrdinalIgnoreCase);
 
+    public IAutocompleteSuggestionStore AutocompleteSuggestions { get; } = new AutocompleteSuggestionStore();
+
     protected Dictionary<string, (string[] colsNames, string[] colTypes, short[] pkSeq, string[] remarks)> columnsOfTables = new Dictionary<string, (string[], string[], short[], string[] remarks)>(StringComparer.OrdinalIgnoreCase);
 
     protected Dictionary<string, (string[] indNames, string moreInfo)> indexesOfTable = new();
@@ -255,9 +257,9 @@ public abstract partial class GeneralDb : IGeneralDb
 
     protected void ResetDynamicCollectionH()
     {
-        DynamicCollectionForGeneralHelpers.OneWord.Clear();
-        DynamicCollectionForGeneralHelpers.TwoWords.Clear();
-        DynamicCollectionForGeneralHelpers.TreeWords.Clear();
+        AutocompleteSuggestions.OneWord.Clear();
+        AutocompleteSuggestions.TwoWords.Clear();
+        AutocompleteSuggestions.TreeWords.Clear();
     }
     abstract public void ResetDynamicCollection();
 

@@ -22,7 +22,7 @@ public sealed class Phase8WorkflowUiTests : IDisposable
 
         AutomationElement editor = UiTestHelpers.WaitFor(
             () => session.MainWindow.FindFirstDescendant(
-                cf => cf.ByAutomationId("NetezzaSQL_addedFastColored")),
+                cf => cf.ByAutomationId("_addedFastColored")),
             "the SQL editor");
         SetEditorText(editor, "SELECT * FROM TEST_TABLE");
         Assert.Equal("SELECT * FROM TEST_TABLE", ReadEditorText(editor));
@@ -90,7 +90,7 @@ public sealed class Phase8WorkflowUiTests : IDisposable
 
         AutomationElement editor = UiTestHelpers.WaitFor(
             () => session.MainWindow.FindFirstDescendant(
-                cf => cf.ByAutomationId("NetezzaSQL_addedFastColored")),
+                cf => cf.ByAutomationId("_addedFastColored")),
             "the SQL editor");
         string csvPath = Path.Combine(_outputDirectory, "phase8.csv");
         string csvCommand = $"___expCsv: SELECT 1 AS EXPORT_VALUE -> {csvPath};";

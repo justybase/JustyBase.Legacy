@@ -5,8 +5,6 @@ namespace AppBase.Data.Core.Models;
 /// </summary>
 public sealed class AutocompleteSuggestionStore : IAutocompleteSuggestionStore
 {
-    public static IAutocompleteSuggestionStore Default { get; } = new AutocompleteSuggestionStore();
-
     public List<string> OneWord { get; set; } = [];
     public List<string> OneWordAdditions { get; set; } = [];
     public List<string> TwoWords { get; set; } = [];

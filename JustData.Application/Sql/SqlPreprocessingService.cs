@@ -66,6 +66,16 @@ public sealed partial class SqlPreprocessingService : ISqlPreprocessingService
             exportDirective = "xlsx";
             sql = XlsxExportRegex().Replace(sql, ";");
         }
+        else
+        {
+            Match legacyExportMatch = LegacyExportRegex().Match(sql);
+            if (legacyExportMatch.Success)
+            {
+                exportFilePath = legacyExportMatch.Groups["filePath"].Value.Trim();
+                exportDirective = legacyExportMatch.Groups["format"].Value.ToLowerInvariant();
+                sql = legacyExportMatch.Groups["sql"].Value.Trim();
+            }
+        }
 
         // Step 5: Apply known parameter values (longest key first)
         if (_knownParameters.Count > 0)
@@ -90,24 +100,32 @@ public sealed partial class SqlPreprocessingService : ISqlPreprocessingService
 
     private string ProcessLetDirectives(string sql)
     {
+        string trimmedSql = sql.TrimStart();
+        if (!trimmedSql.StartsWith("__Let ", StringComparison.OrdinalIgnoreCase)
+            && !trimmedSql.StartsWith("__LetFor ", StringComparison.OrdinalIgnoreCase))
+            return sql;
+        sql = trimmedSql;
+
         // __Let $var1=value1|$var2=value2
         if (sql.StartsWith("__Let ", StringComparison.OrdinalIgnoreCase))
         {
             int newlineIndex = sql.IndexOfAny(_newLines);
-            if (newlineIndex > 0)
-            {
-                string[] variables = sql["__Let ".Length..newlineIndex].Split('|');
-                sql = sql[newlineIndex..];
+            string directive = newlineIndex > 0
+                ? sql["__Let ".Length..newlineIndex]
+                : sql["__Let ".Length..];
+            string[] variables = directive.Split('|');
+            sql = newlineIndex > 0 ? sql[newlineIndex..] : string.Empty;
 
-                foreach (string variable in variables)
+            foreach (string variable in variables)
+            {
+                int equalsIndex = variable.IndexOf('=');
+                if (equalsIndex > 0)
                 {
-                    int equalsIndex = variable.IndexOf('=');
-                    if (equalsIndex > 0)
-                    {
-                        string varName = variable[..equalsIndex].Trim();
-                        string varValue = variable[(equalsIndex + 1)..].Trim();
-                        _knownParameters[varName.ToUpperInvariant()] = varValue;
-                    }
+                    string varName = variable[..equalsIndex].Trim();
+                    string varValue = variable[(equalsIndex + 1)..].Trim();
+                    if (!varName.StartsWith('$'))
+                        varName = '$' + varName;
+                    _knownParameters[varName.ToUpperInvariant()] = varValue;
                 }
             }
         }
@@ -152,7 +170,7 @@ public sealed partial class SqlPreprocessingService : ISqlPreprocessingService
 
         foreach (Match varMatch in variableMatches.Cast<Match>())
         {
-            string varName = varMatch.Groups["var"].Value;
+            string varName = '$' + varMatch.Groups["var"].Value;
             string varKey = varName.ToUpperInvariant();
 
             if (_knownParameters.ContainsKey(varKey) || request.KnownParameters.ContainsKey(varKey))
@@ -328,10 +346,15 @@ public sealed partial class SqlPreprocessingService : ISqlPreprocessingService
         if (string.IsNullOrEmpty(sql))
             return sql;
 
-        // Replace known parameters (longest key first)
-        if (knownParams.Count > 0)
+        // Replace only canonical parameter keys, including the '$' prefix.
+        // Never replace a bare identifier such as 'value'.
+        var parameters = new Dictionary<string, string>(_knownParameters, StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in knownParams)
+            parameters[kvp.Key.StartsWith('$') ? kvp.Key : '$' + kvp.Key] = kvp.Value;
+
+        if (parameters.Count > 0)
         {
-            var ordered = knownParams
+            var ordered = parameters
                 .OrderByDescending(kvp => kvp.Key.Length)
                 .ToArray();
             foreach (var kvp in ordered)
@@ -352,6 +375,9 @@ public sealed partial class SqlPreprocessingService : ISqlPreprocessingService
 
     [GeneratedRegex(@"__xlsx\s+""(?<filepath>[^""]+)""", RegexOptions.IgnoreCase)]
     private static partial Regex XlsxExportRegex();
+
+    [GeneratedRegex(@"___exp(?<format>Csv|Xlsx)\s*:\s*(?<sql>.*?)\s+->\s*(?<filePath>[^;\r\n]+)\s*;?", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    private static partial Regex LegacyExportRegex();
 
     [GeneratedRegex(@"^\s*__SessionVar__(?<sessionVar>\$\w+)\s*=\s*(?<sessionValue>.+)$", RegexOptions.Multiline)]
     private static partial Regex SessionVarDefineRegex();

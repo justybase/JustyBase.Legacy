@@ -89,7 +89,7 @@ public sealed class PreferencesViewModelTests
         vm.SqlResults.CommandTimeout = 20;
         vm.ImportExport.SepInExportedCsv = "|";
         vm.FilesStartup.SimpleStartupRestore = false;
-        vm.Lint.DisabledLintRules.Add("legacy-rule");
+        vm.Lint.DisableLintRule("legacy-rule");
         vm.Terminal.TerminalPanelHeight = 321;
 
         Assert.Equal("SectionFont", vm.Draft.Appearance.FontName);

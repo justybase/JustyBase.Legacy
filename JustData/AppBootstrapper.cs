@@ -2,6 +2,7 @@ using AppBase.Common;
 using AppBase.Common.Interfaces;
 using AppBase.Common.WindowManagement;
 using AppBase.Services;
+using AppBase.Data.Core.Models;
 using CommunityToolkit.Mvvm.Messaging;
 using DatabaseDataGridView.WinForms;
 using DatabaseDataGridView.WinForms.Coloring;
@@ -35,6 +36,7 @@ internal sealed class AppBootstrapper
     private readonly IApplicationSession _applicationSession;
     private readonly GeneralDbSessionAdapter _sessionAdapter;
     private readonly LoginFormFactory _loginFormFactory;
+    private readonly INetezzaAutocompleteState _netezzaAutocompleteState;
 
     public AppBootstrapper(
         IServiceScopeFactory scopeFactory,
@@ -45,7 +47,8 @@ internal sealed class AppBootstrapper
         IUiHelperService uiHelperService,
         IApplicationSession applicationSession,
         GeneralDbSessionAdapter sessionAdapter,
-        LoginFormFactory loginFormFactory)
+        LoginFormFactory loginFormFactory,
+        INetezzaAutocompleteState netezzaAutocompleteState)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _windowManagementService = windowManagementService ?? throw new ArgumentNullException(nameof(windowManagementService));
@@ -56,6 +59,7 @@ internal sealed class AppBootstrapper
         _applicationSession = applicationSession ?? throw new ArgumentNullException(nameof(applicationSession));
         _sessionAdapter = sessionAdapter ?? throw new ArgumentNullException(nameof(sessionAdapter));
         _loginFormFactory = loginFormFactory ?? throw new ArgumentNullException(nameof(loginFormFactory));
+        _netezzaAutocompleteState = netezzaAutocompleteState ?? throw new ArgumentNullException(nameof(netezzaAutocompleteState));
     }
 
     public int Run(string[] args)
@@ -233,7 +237,8 @@ internal sealed class AppBootstrapper
             _settingsPersistence.SaveConfig,
             _settingsPersistence.SaveRecentFiles,
             _uiHelperService,
-            new ColorTheme(_settingsBootstrapContext.Config));
+            new ColorTheme(_settingsBootstrapContext.Config),
+            _netezzaAutocompleteState);
         preferences.ShowInTaskbar = true;
         preferences.FormClosed += (_, _) => Application.ExitThread();
         preferences.Show();

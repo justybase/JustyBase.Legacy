@@ -164,6 +164,22 @@ public sealed class EditorWorkspaceViewModelTests
         Assert.NotNull(bundle.Saved);
         Assert.Equal(["scratch", path], bundle.Saved!.TabsOrder);
         Assert.Equal(1, bundle.Saved.SelectedTabNum);
+        Assert.Equal([memoryDocument.Id, fileDocument.Id], workspace.GetDocumentOrder());
+    }
+
+    [Fact]
+    public void Reorder_keeps_unknown_documents_after_the_requested_order()
+    {
+        var setup = Create(new FakeEditorFileService());
+        using var workspace = setup.Workspace;
+        EditorDocumentViewModel first = workspace.NewDocument("first");
+        EditorDocumentViewModel second = workspace.NewDocument("second");
+        EditorDocumentViewModel third = workspace.NewDocument("third");
+
+        workspace.Reorder([third.Id, first.Id, EditorDocumentId.New()]);
+
+        Assert.Equal([third.Id, first.Id, second.Id], workspace.GetDocumentOrder());
+        Assert.Same(third, workspace.ActiveDocument);
     }
 
     [Fact]

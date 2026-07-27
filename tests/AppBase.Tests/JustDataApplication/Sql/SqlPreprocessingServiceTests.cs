@@ -93,15 +93,15 @@ public sealed class SqlPreprocessingServiceTests
     }
 
     [Fact]
-    public async Task PreprocessAsync_Let_directive_without_newline_does_not_process()
+    public async Task PreprocessAsync_Let_directive_without_newline_does_not_prompt_or_leak_as_sql()
     {
         var service = new SqlPreprocessingService();
         var request = CreateRequest("__Let $x=42");
 
         var result = await service.PreprocessAsync(request);
 
-        Assert.Equal("__Let $x=42", result.ProcessedSql);
-        Assert.Empty(result.UpdatedKnownParameters);
+        Assert.Equal(string.Empty, result.ProcessedSql);
+        Assert.Equal("42", result.UpdatedKnownParameters["$X"]);
     }
 
     // ──────────────────────────────────────────────
@@ -255,6 +255,18 @@ public sealed class SqlPreprocessingServiceTests
         Assert.Null(result.ExportFilePath);
     }
 
+    [Fact]
+    public async Task PreprocessAsync_legacy_csv_export_directive_extracts_query_path_and_format()
+    {
+        var service = new SqlPreprocessingService();
+        var result = await service.PreprocessAsync(CreateRequest(
+            "___expCsv: SELECT 1 AS EXPORT_VALUE -> C:\\reports\\output.csv;"));
+
+        Assert.Equal("SELECT 1 AS EXPORT_VALUE", result.ProcessedSql);
+        Assert.Equal("C:\\reports\\output.csv", result.ExportFilePath);
+        Assert.Equal("csv", result.ExportOptionDirective);
+    }
+
     // ──────────────────────────────────────────────
     // Variable resolution via prompt
     // ──────────────────────────────────────────────
@@ -274,6 +286,17 @@ public sealed class SqlPreprocessingServiceTests
 
         Assert.True(prompt.WasCalled);
         Assert.Equal("users", result.UpdatedKnownParameters["$MY_TABLE"]);
+        Assert.Equal("SELECT * FROM users", result.ProcessedSql);
+    }
+
+    [Fact]
+    public async Task PreprocessAsync_Let_replaces_dollar_variable_but_not_bare_identifier()
+    {
+        var service = new SqlPreprocessingService();
+        var result = await service.PreprocessAsync(CreateRequest(
+            "  __Let $value=42\nSELECT value, $value"));
+
+        Assert.Equal("\nSELECT value, 42", result.ProcessedSql);
     }
 
     [Fact]

@@ -15,10 +15,10 @@ public interface IDatabaseRuntimeContext
     IApplicationConfig Config { get; }
     string ConfigDirectory { get; }
 
-    Dictionary<string, Dictionary<int, DatabaseInfo>> DatabaseDictionary { get; }
-    Dictionary<string, List<NetezzaColumnInfoRow>> ColumnTablesDictionary { get; }
-    Dictionary<string, Dictionary<int, List<int>>> BaseTableConnections { get; }
-    Dictionary<string, Dictionary<string, Dictionary<string, (string owner, int tableId)>>> DatabaseSchemaLookup { get; }
-    Dictionary<string, Dictionary<string, Dictionary<string, string>>> DatabaseOwners { get; }
-    Dictionary<string, Dictionary<string, Dictionary<int, string>>> DatabaseTableDescriptions { get; }
+    IReadOnlyDictionary<string, Dictionary<int, DatabaseInfo>> DatabaseDictionary { get; }
+    IReadOnlyDictionary<string, List<NetezzaColumnInfoRow>> ColumnTablesDictionary { get; }
+    IReadOnlyDictionary<string, Dictionary<int, List<int>>> BaseTableConnections { get; }
+    IReadOnlyDictionary<string, Dictionary<string, Dictionary<string, (string owner, int tableId)>>> DatabaseSchemaLookup { get; }
+    IReadOnlyDictionary<string, Dictionary<string, Dictionary<string, string>>> DatabaseOwners { get; }
+    IReadOnlyDictionary<string, Dictionary<string, Dictionary<int, string>>> DatabaseTableDescriptions { get; }
 }

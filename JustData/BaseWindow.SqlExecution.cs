@@ -20,7 +20,6 @@ using FastColoredTextBoxNS.Helpers;
 using JustDataAdditionalForms;
 using JustyBase.NetezzaDriver;
 using System.Drawing;
-using JustyBase.NetezzaSqlParser.Linter;
 using JustyBaseLegacy.UI.Helpers;
 using JustyBaseLegacy.Services;
 using JustyBaseLegacy.UI.Controls;
@@ -54,26 +53,6 @@ namespace JustyBaseLegacy.UI
 {
     public partial class BaseWindow
     {
-        private readonly NetezzaSqlErrorHighlighter _nzErrorHighlighter = new();
-
-        /// <summary>
-        /// Set when the legacy Netezza executor hits a database error so the VM
-        /// bridge can report <see cref="SqlExecutionOutcome.Failed"/> instead of Success.
-        /// </summary>
-        private string? _legacySqlFailureMessage;
-
-        private void HandleNzErrors(string msg, FastColoredTextBox fctb, int selectionStart, int selectionLength, bool fromOleDB = false)
-        {
-            _nzErrorHighlighter.Highlight(msg, fctb, _colorTheme.CurrentFctbColors.ErrorStyle, selectionStart, selectionLength, fromOleDB);
-        }
-
-        private void RecordLegacySqlFailure(string message)
-        {
-            if (string.IsNullOrWhiteSpace(message))
-                message = "database returned an empty message";
-            _legacySqlFailureMessage = message;
-        }
-
         readonly Dictionary<string, string> _knownParams = new Dictionary<string, string>();
         private static readonly Regex _containsLetter = ContainsAZRegex();
 
@@ -114,7 +93,7 @@ namespace JustyBaseLegacy.UI
                     result[entry.Key] = val;
                     _knownParams[entry.Key] = val;
                     string globalKey = '&' + entry.Value[1..];
-                    _sessionVariableRuntimeContext.GlobalVariables[globalKey] = val;
+                    _sessionVariableRuntimeContext.SetGlobalVariable(globalKey, val);
                     i++;
                 }
                 VariablesRefresh();
@@ -128,17 +107,9 @@ namespace JustyBaseLegacy.UI
 
             // Sync session/global variables from the result
             string tabName = ActiveEditorTabPage?.Text ?? string.Empty;
-            foreach (var kvp in result.UpdatedSessionVariables)
-            {
-                if (!_sessionVariableRuntimeContext.SessionVariables.TryGetValue(tabName, out var tabVars))
-                {
-                    tabVars = new Dictionary<string, string>();
-                    _sessionVariableRuntimeContext.SessionVariables[tabName] = tabVars;
-                }
-                tabVars[kvp.Key] = kvp.Value;
-            }
+            _sessionVariableRuntimeContext.SetSessionVariables(tabName, result.UpdatedSessionVariables);
             foreach (var kvp in result.UpdatedGlobalVariables)
-                _sessionVariableRuntimeContext.GlobalVariables[kvp.Key] = kvp.Value;
+                _sessionVariableRuntimeContext.SetGlobalVariable(kvp.Key, kvp.Value);
 
             // Sync known parameters
             foreach (var kvp in result.UpdatedKnownParameters)
@@ -150,7 +121,9 @@ namespace JustyBaseLegacy.UI
             if (result.ExportOptionDirective is not null)
             {
                 fPath = result.ExportFilePath;
-                eo = ExportOptions.xlsx;
+                eo = result.ExportOptionDirective.Equals("csv", StringComparison.OrdinalIgnoreCase)
+                    ? ExportOptions.csv
+                    : ExportOptions.xlsx;
             }
 
             return (result.ProcessedSql, fPath, eo);
@@ -168,27 +141,24 @@ namespace JustyBaseLegacy.UI
 
         private string ReplaceSessionVariables(string tabName, string query)
         {
-            if (_sessionVariableRuntimeContext.SessionVariables.TryGetValue(tabName, out var tab))
+            foreach (var item in _sessionVariableRuntimeContext.GetSessionVariables(tabName)
+                .OrderByDescending(o => o.Key.Length))
             {
-                foreach (var item in tab.OrderByDescending(o => o.Key.Length))
+                if (query.Contains(item.Key, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (query.Contains(item.Key, StringComparison.OrdinalIgnoreCase))
-                    {
-                        query = query.Replace(item.Key, item.Value, StringComparison.OrdinalIgnoreCase);
-                    }
+                    query = query.Replace(item.Key, item.Value, StringComparison.OrdinalIgnoreCase);
                 }
             }
 
             return query;
         }
 
-        private static readonly DataTable _tableToCompute = new System.Data.DataTable();
-        public static object Evaluate(string expression)
+        private object Evaluate(string expression)
         {
             object result = expression;
             try
             {
-                result = _tableToCompute.Compute(expression, "");
+                result = new DataTable().Compute(expression, "");
             }
             catch (Exception exception)
             {
@@ -261,12 +231,12 @@ namespace JustyBaseLegacy.UI
 
                 if (m1.Success)
                 {
-                    _sessionVariableRuntimeContext.SessionVariables[tabName][name] = val2?.ToString();
+                    _sessionVariableRuntimeContext.SetSessionVariable(tabName, name, val2?.ToString());
                     AddVariable(tabName, name, val2?.ToString());
                 }
                 else if (m2.Success)
                 {
-                    _sessionVariableRuntimeContext.GlobalVariables[name] = val2?.ToString();
+                    _sessionVariableRuntimeContext.SetGlobalVariable(name, val2?.ToString());
                     AddVariable(tabName, null, null);
                 }
                 m = m.NextMatch();
@@ -274,7 +244,7 @@ namespace JustyBaseLegacy.UI
             }
             else
             {
-                if (_sessionVariableRuntimeContext.SessionVariables[tabName].Count > 0)
+                if (_sessionVariableRuntimeContext.GetSessionVariableCount(tabName) > 0)
                 {
                     query = ReplaceSessionVariables(tabName, query);
                 }
@@ -297,7 +267,18 @@ namespace JustyBaseLegacy.UI
                 {
                     if (page.Tag is TabPageResultsTag tag && tag.IsLog)
                     {
-                        tc.SelectedTab = page;
+                        // Log is a mandatory first-class execution view. Keep
+                        // it directly after permanent Diagnostics even when a
+                        // result grid was created before the first log event.
+                        MoveLogTabAfterDiagnostics(tc, page);
+                        // Do not steal focus from a result tab when a later
+                        // execution event appends another log entry.
+                        bool hasResultTab = tc.TabPages.Cast<TabPage>()
+                            .Any(item => item.Tag is TabPageResultsTag resultTag
+                                && !resultTag.IsLog
+                                && !resultTag.IsPermanentDiagnostics);
+                        if (!hasResultTab)
+                            tc.SelectedTab = page;
                         return (TabPagePicture)page;
                     }
                 }
@@ -317,13 +298,36 @@ namespace JustyBaseLegacy.UI
                 ParentControl = tc,
                 IsLog = isLogTab,
                 HasLog = isLogTab,
-                DocumentId = _executingDocumentId.Value ?? CurrentEditorDocumentId
+                DocumentId = CurrentEditorDocumentId
             };
 
-            tc.TabPages.Add(actualTab);
+            if (isLogTab)
+                tc.TabPages.Insert(GetLogTabIndex(tc), actualTab);
+            else
+                tc.TabPages.Add(actualTab);
             tc.SelectedTab = actualTab;
 
             return actualTab;
+        }
+
+        private static int GetLogTabIndex(TabControl tabControl)
+        {
+            for (int index = 0; index < tabControl.TabPages.Count; index++)
+            {
+                if (tabControl.TabPages[index].Tag is TabPageResultsTag { IsPermanentDiagnostics: true })
+                    return index + 1;
+            }
+            return 0;
+        }
+
+        private static void MoveLogTabAfterDiagnostics(TabControl tabControl, TabPage logTab)
+        {
+            int expectedIndex = GetLogTabIndex(tabControl);
+            if (tabControl.TabPages.IndexOf(logTab) == expectedIndex)
+                return;
+
+            tabControl.TabPages.Remove(logTab);
+            tabControl.TabPages.Insert(expectedIndex, logTab);
         }
 
         private void Tc_KeyDown(object sender, KeyEventArgs e)
@@ -563,18 +567,18 @@ namespace JustyBaseLegacy.UI
             Close();
         }
 
-        private static DataTable _dtDoEksportu;
-        private static List<object[]> _dtDoEksportuRows;
+        private DataTable? _dtDoEksportu;
+        private List<object[]>? _dtDoEksportuRows;
 
-        private static DataGridView _currentDataGrid;
-        private static ICustomDataGridView _currentMyGrid;
+        private DataGridView? _currentDataGrid;
+        private ICustomDataGridView? _currentMyGrid;
         private void DataGrid_MouseDown_MouseDown(object sender, MouseEventArgs e)
         {
-            if (sender is DataGridView && (sender as DataGridView).Parent is CustomDataGridView)
+            if (sender is DataGridView dataGrid && dataGrid.Parent is CustomDataGridView customGrid)
             {
-                _dtDoEksportu = ((sender as DataGridView).Parent as CustomDataGridView).CurrentDataTable;
-                _dtDoEksportuRows = ((sender as DataGridView).Parent as CustomDataGridView).RowsList;
-                _currentMyGrid = ((sender as DataGridView).Parent as CustomDataGridView);
+                _dtDoEksportu = customGrid.CurrentDataTable;
+                _dtDoEksportuRows = customGrid.RowsList;
+                _currentMyGrid = customGrid;
             }
             else
             {
@@ -583,13 +587,9 @@ namespace JustyBaseLegacy.UI
                 _currentMyGrid = null;
             }
 
-            _currentDataGrid = (sender as DataGridView);
-            if (e.Button == MouseButtons.Right)
-            {
-                var hti = _currentDataGrid.HitTest(e.X, e.Y);
-            }
+            _currentDataGrid = sender as DataGridView;
         }
-        static void ClearCurrentHelpReferences()
+        private void ClearCurrentHelpReferences()
         {
             _dtDoEksportu = null;
             _dtDoEksportuRows = null;
@@ -700,9 +700,8 @@ namespace JustyBaseLegacy.UI
                 var document = _editorWorkspaceViewModel.Documents
                     .FirstOrDefault(item => item.Id == documentId);
                 document?.UpdateTextFromView(editor.Text);
-                document?.UpdateEditorSelection(editor.SelectionStart, editor.SelectionLength, editor.SelectionStart);
 
-                if (document is not null && !_executionRoutedThroughViewModel.Value)
+                if (document is not null)
                 {
                     // Repeated keyboard input while a document is running is a
                     // no-op at the view boundary. The VM still rejects races
@@ -711,6 +710,17 @@ namespace JustyBaseLegacy.UI
                     // unhandled application-closing exception.
                     if (document.SqlExecution.IsBusy)
                         return;
+
+                    // The panel is an adapter. Capture its current execution
+                    // options before building the immutable request so toggles
+                    // such as Keep connection open select the intended route.
+                    if (_tabManager.CurrentEditorPanel is { } panel)
+                    {
+                        document.ConnectionName = panel.SelectedConnectionName;
+                        document.DatabaseName = panel.SelectedDatabase;
+                        document.KeepConnectionOpen = panel.KeepConnectionOpen;
+                        document.ContinueOnError = panel.ContinueOnError;
+                    }
 
                     JustData.Application.Sql.SqlExecutionMode executionMode = mode switch
                     {
@@ -743,9 +753,38 @@ namespace JustyBaseLegacy.UI
                         }
                     }
 
+                    string sqlText = SelectSqlTextForExecution(editor, mode);
+                    (string preparedSql, string preparedFilePath, ExportOptions directiveOutput) =
+                        await PrepareSQLAsync(sqlText);
+                    if (string.IsNullOrWhiteSpace(preparedSql))
+                        return;
+
+                    sqlText = preparedSql;
+                    if (directiveOutput != ExportOptions.noInfo)
+                    {
+                        outputMode = directiveOutput switch
+                        {
+                            ExportOptions.csv => JustData.Application.Sql.SqlOutputMode.Csv,
+                            ExportOptions.xlsx => JustData.Application.Sql.SqlOutputMode.Xlsx,
+                            ExportOptions.xlsb => JustData.Application.Sql.SqlOutputMode.Xlsb,
+                            ExportOptions.onlyLog => JustData.Application.Sql.SqlOutputMode.LogOnly,
+                            _ => outputMode
+                        };
+                        if (!string.IsNullOrWhiteSpace(preparedFilePath))
+                            filePath = preparedFilePath;
+                    }
+
+                    string executionDriver = _generalDbService.DriverName(document.ConnectionName);
+                    if (!RiskySqlCommand(sqlText,
+                        string.Equals(executionDriver, "NetezzaSQL", StringComparison.OrdinalIgnoreCase)))
+                        return;
+
+                    document.UpdateEditorSelection(editor.SelectionStart, editor.SelectionLength, editor.SelectionStart);
+
                     await document.SqlExecution.RunAsync(
                         document.BuildExecutionRequest(executionMode, outputMode, filePath) with
                         {
+                            SqlText = sqlText,
                             Explain = explain,
                             CommandTimeoutSeconds = _applicationSettingsContext.Config.CommandTimeout,
                             RowLimit = _applicationSettingsContext.Config.ResultRowsLimit
@@ -767,7 +806,11 @@ namespace JustyBaseLegacy.UI
             switch (driver)
             {
                 case "NetezzaSQL":
-                    await RunNzSQLCore(CurrentUpper.KeepConnectionOpen, mode, exportOption, explain, filePath);
+                    _loggerLoud.MessageBox_Show(this,
+                        "SQL execution requires an editor document.",
+                        "SQL",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
                     break;
                 case "DB2":
                 case "Microsoft.ACE.OLEDB.12.0":
@@ -799,6 +842,27 @@ namespace JustyBaseLegacy.UI
             }
         }
 
+        /// <summary>
+        /// Preserves the legacy Run behavior at the WinForms boundary: an
+        /// explicit selection wins; otherwise execute the statement containing
+        /// the caret. Run-to-cursor intentionally uses all text before the
+        /// active selection end.
+        /// </summary>
+        private static string SelectSqlTextForExecution(FastColoredTextBox editor, int mode)
+        {
+            if (mode == 4)
+            {
+                int selectionEnd = editor.SelectionStart + editor.SelectionLength;
+                editor.SelectionStart = 0;
+                editor.SelectionLength = Math.Clamp(selectionEnd, 0, editor.TextLength);
+            }
+
+            if (editor.Selection.TextLength < 2)
+                editor.SelectBetweenSemicolons();
+
+            return editor.Selection.Text;
+        }
+
 
 
         public void RefreshTabKeepConnectionProperty()
@@ -813,155 +877,6 @@ namespace JustyBaseLegacy.UI
             }
         }
 
-        public async Task RunNzSQL(bool keepConnectionOpen, int mode = 0, ExportOptions opcjaEksportu = ExportOptions.grid, bool explain = false, string filePath = null) =>
-            await RunNzSQLCore(keepConnectionOpen, mode, opcjaEksportu, explain, filePath);
-
-        async IAsyncEnumerable<JustData.Application.Sql.SqlExecutionEvent> ExecuteSqlForDocumentAsync(
-            JustData.Application.Sql.SqlExecutionRequest request,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (_documentIdsByEditor.FirstOrDefault(item => item.Value == request.DocumentId).Key is { } editor
-                && !editor.IsDisposed)
-            {
-                if (_documentIdsByTab.FirstOrDefault(item => item.Value == request.DocumentId).Key is { } tab)
-                    _tabManager.SelectTab(tab);
-
-                if (!string.Equals(editor.Text, request.SqlText, StringComparison.Ordinal))
-                    editor.Text = request.SqlText;
-                editor.SelectionStart = Math.Clamp(request.SelectionStart, 0, editor.TextLength);
-                editor.SelectionLength = Math.Clamp(request.SelectionLength, 0, editor.TextLength - editor.SelectionStart);
-            }
-
-            int mode = request.Mode switch
-            {
-                JustData.Application.Sql.SqlExecutionMode.RunToCursor => 4,
-                JustData.Application.Sql.SqlExecutionMode.SingleBatch => 1,
-                _ => 0
-            };
-            ExportOptions output = request.OutputMode switch
-            {
-                JustData.Application.Sql.SqlOutputMode.Csv => ExportOptions.csv,
-                JustData.Application.Sql.SqlOutputMode.Xlsx => ExportOptions.xlsx,
-                JustData.Application.Sql.SqlOutputMode.Xlsb => ExportOptions.xlsb,
-                JustData.Application.Sql.SqlOutputMode.LogOnly => ExportOptions.onlyLog,
-                _ => ExportOptions.grid
-            };
-            bool previousRouteValue = _executionRoutedThroughViewModel.Value;
-            EditorDocumentId? previousExecutionDocumentId = _executingDocumentId.Value;
-            HashSet<string> existingResultSetIds = _resultGridRegistry.GetDocument(request.DocumentId)
-                .Select(item => item.ResultSetId)
-                .ToHashSet(StringComparer.Ordinal);
-            using CancellationTokenRegistration cancellationRegistration = cancellationToken.Register(
-                () => CancelActiveDocumentExecution(request.DocumentId, request.ConnectionName));
-            FastColoredTextBox? scriptEditor = null;
-            int originalSelectionStart = 0;
-            int originalSelectionLength = 0;
-            if (request.Mode == JustData.Application.Sql.SqlExecutionMode.Script
-                && _documentIdsByEditor.FirstOrDefault(item => item.Value == request.DocumentId).Key is { } candidateEditor
-                && !candidateEditor.IsDisposed)
-            {
-                scriptEditor = candidateEditor;
-                originalSelectionStart = candidateEditor.SelectionStart;
-                originalSelectionLength = candidateEditor.SelectionLength;
-                candidateEditor.SelectionStart = 0;
-                candidateEditor.SelectionLength = candidateEditor.TextLength;
-            }
-            _executionRoutedThroughViewModel.Value = true;
-            _executingDocumentId.Value = request.DocumentId;
-            try
-            {
-                await RunSQL(mode, output, request.Explain, request.OutputPath).WaitAsync(cancellationToken);
-                if (_sqlExecutionSessionRegistry.TryConsumeCancellation(request.DocumentId))
-                {
-                    _legacySqlFailureMessage = null;
-                    yield return JustData.Application.Sql.SqlExecutionEvent.Completed(
-                        request.DocumentId,
-                        JustData.Application.Sql.SqlExecutionOutcome.Cancelled,
-                        "SQL execution was cancelled.");
-                    yield break;
-                }
-
-                string? legacyFailure = _legacySqlFailureMessage;
-                _legacySqlFailureMessage = null;
-
-                foreach (var resultEntry in _resultGridRegistry.GetDocument(request.DocumentId)
-                    .Where(item => !existingResultSetIds.Contains(item.ResultSetId))
-                    .Select((item, index) => (item.ResultSetId, item.Grid, index)))
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    string resultSetId = resultEntry.ResultSetId;
-                    CustomDataGridView grid = resultEntry.Grid;
-                    if (grid.IsDisposed || grid.CurrentDataTable is null)
-                        continue;
-
-                    TabPage? tab = grid.Parent as TabPage;
-                    TabPageResultsTag? tag = tab?.Tag as TabPageResultsTag;
-                    JustData.Application.Sql.ResultSetDescriptor descriptor = new(
-                        resultSetId,
-                        tab?.Text ?? resultSetId,
-                        grid.CurrentDataTable.Columns
-                            .Cast<DataColumn>()
-                            .Select((column, ordinal) => new JustData.Application.Sql.ResultColumnDescriptor(
-                                ordinal,
-                                column.ColumnName,
-                                column.DataType.Name,
-                                column.AllowDBNull))
-                        .ToArray(),
-                        StatementIndex: resultEntry.index,
-                        IsPinned: tag?.Docked == true);
-                    yield return JustData.Application.Sql.SqlExecutionEvent.Result(request.DocumentId, descriptor);
-
-                    // The legacy grid already owns the only full row buffer.
-                    // Report its count without cloning rows back through the VM.
-                    yield return JustData.Application.Sql.SqlExecutionEvent.RowsObserved(
-                        request.DocumentId,
-                        grid.RowsList.Count,
-                        resultSetId: resultSetId);
-                }
-
-                if (!string.IsNullOrWhiteSpace(legacyFailure))
-                {
-                    yield return JustData.Application.Sql.SqlExecutionEvent.Completed(
-                        request.DocumentId,
-                        JustData.Application.Sql.SqlExecutionOutcome.Failed,
-                        legacyFailure);
-                }
-                else
-                {
-                    yield return JustData.Application.Sql.SqlExecutionEvent.Completed(
-                        request.DocumentId,
-                        JustData.Application.Sql.SqlExecutionOutcome.Success);
-                }
-            }
-            finally
-            {
-                if (scriptEditor is not null && !scriptEditor.IsDisposed)
-                {
-                    scriptEditor.SelectionStart = Math.Clamp(originalSelectionStart, 0, scriptEditor.TextLength);
-                    scriptEditor.SelectionLength = Math.Clamp(
-                        originalSelectionLength,
-                        0,
-                        scriptEditor.TextLength - scriptEditor.SelectionStart);
-                }
-                _executionRoutedThroughViewModel.Value = previousRouteValue;
-                _executingDocumentId.Value = previousExecutionDocumentId;
-            }
-        }
-
-        private void CancelActiveDocumentExecution(
-            JustData.Application.Editor.EditorDocumentId documentId,
-            string connectionName)
-        {
-            _ = _sqlExecutionSessionRegistry.CancelAsync(documentId);
-
-            if (!string.IsNullOrWhiteSpace(connectionName)
-                && _connectionSessions.TryGetValue(connectionName, out var generalDb))
-            {
-                _ = generalDb.AbortAsync("x");
-            }
-        }
-
         private void SynchronizeSelectedResult(EditorDocumentId documentId)
         {
             if (_documentIdsByTab.FirstOrDefault(item => item.Value == documentId).Key is not { } tab)
@@ -969,10 +884,10 @@ namespace JustyBaseLegacy.UI
 
             TabControl? results = (_tabManager.GetSplitContainerForTab(tab)?.Tag as ResultData)
                 ?.TabControlSQLResults;
-            string? resultSetId = (results?.SelectedTab?.Tag as TabPageResultsTag)?.ResultSetId;
+            ResultSetKey? key = (results?.SelectedTab?.Tag as TabPageResultsTag)?.Key;
             _editorWorkspaceViewModel.Documents
                 .FirstOrDefault(document => document.Id == documentId)
-                ?.SqlExecution.SelectResult(resultSetId);
+                ?.SqlExecution.SelectResultKey(key);
         }
 
         private void RegisterLegacyResultGrid(TabPage tab, CustomDataGridView grid)
@@ -984,10 +899,10 @@ namespace JustyBaseLegacy.UI
                 return;
 
             string resultSetId = tag.ResultSetId;
-            if (_resultGridRegistry.TryGet(documentId, resultSetId, out _))
+            if (_resultGridRegistry.TryGet(new ResultSetKey(documentId, resultSetId), out _))
                 resultSetId = Guid.NewGuid().ToString("N");
             tag.ResultSetId = resultSetId;
-            _resultGridRegistry.Register(documentId, resultSetId, grid);
+            _resultGridRegistry.Register(new ResultSetKey(documentId, resultSetId), grid);
             PrepareDocumentationShowcaseAfterFirstResult();
         }
 

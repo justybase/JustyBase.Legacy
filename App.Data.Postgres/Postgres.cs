@@ -200,7 +200,7 @@ public sealed class Postgres : GeneralDb
         }
         foreach (DataRow user in _users.Rows)
         {
-            DynamicCollectionForGeneralHelpers.OneWord.Add(user.ItemArray[1] as string);
+            AutocompleteSuggestions.OneWord.Add(user.ItemArray[1] as string);
         }
 
         foreach (DataRow itx in _users.Rows)
@@ -217,7 +217,7 @@ public sealed class Postgres : GeneralDb
                 {
                     tabName = $"\"{tabName}\"";
                 }
-                DynamicCollectionForGeneralHelpers.TwoWords.Add($"{user}.{tabName}");
+                AutocompleteSuggestions.TwoWords.Add($"{user}.{tabName}");
             }
 
             DataRow[] viewCol;
@@ -225,7 +225,7 @@ public sealed class Postgres : GeneralDb
 
             foreach (DataRow item in viewCol)
             {
-                DynamicCollectionForGeneralHelpers.TwoWords.Add($"{user}.{item.ItemArray[2]}");
+                AutocompleteSuggestions.TwoWords.Add($"{user}.{item.ItemArray[2]}");
             }
         }
     }

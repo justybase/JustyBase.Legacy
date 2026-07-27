@@ -18,6 +18,8 @@ public sealed class LegacyDbCompletionFallback
 
     private string _cacheText1;
     private string _cacheText2;
+    private List<(string hint, string description)> _cacheList1 = [];
+    private List<(string hint, string description)> _cacheList2 = [];
 
     public LegacyDbCompletionFallback(
         INetezzaCompletionContext completionContext,
@@ -33,7 +35,8 @@ public sealed class LegacyDbCompletionFallback
     {
         _cacheText1 = null;
         _cacheText2 = null;
-        DynamicCollectionForNettezaHelpers.ResetCache();
+        _cacheList1.Clear();
+        _cacheList2.Clear();
     }
 
     public IEnumerable<AutocompleteItem> GetCompletions(string text)
@@ -46,8 +49,9 @@ public sealed class LegacyDbCompletionFallback
 
         string selectedConnectionName = _completionContext.SelectedConnectionName;
 
-        if (!DynamicCollectionForNettezaHelpers.DatabaseArray.TryGetValue(selectedConnectionName, out var selectedDatabaseList))
+        if (!_completionContext.DatabaseDictionary.TryGetValue(selectedConnectionName, out var selectedDatabases))
             yield break;
+        string[] selectedDatabaseList = selectedDatabases.Values.Select(database => database.DatabaseName).ToArray();
 
         _schemaTables.TablesByConnection.TryGetValue(selectedConnectionName, out var databasesTablesSelected);
         _completionContext.DatabaseSchemaLookup.TryGetValue(selectedConnectionName, out var databaseSchemaDictionarySelected);
@@ -165,12 +169,12 @@ public sealed class LegacyDbCompletionFallback
                 if (_cacheText2 is null || !text.StartsWith(_cacheText2, StringComparison.OrdinalIgnoreCase))
                 {
                     _cacheText2 = text;
-                    DynamicCollectionForNettezaHelpers.CacheList2 = candidates
+                    _cacheList2 = candidates
                         .Select(arg => (arg.Key, TryGetTableDesc(databasesTablesSelected, arg.TableId, out var d) ? d : ""))
                         .ToList();
                 }
 
-                foreach (var (hint, description) in DynamicCollectionForNettezaHelpers.CacheList2)
+                foreach (var (hint, description) in _cacheList2)
                     yield return Table($"{firstWord}.{hint}", description);
             }
         }
@@ -223,13 +227,13 @@ public sealed class LegacyDbCompletionFallback
             if (candidateCount < 1000)
             {
                 if (_cacheText1 is null || !text.StartsWith(_cacheText1, StringComparison.OrdinalIgnoreCase)
-                    || DynamicCollectionForNettezaHelpers.CacheList1.Count == 0)
+                    || _cacheList1.Count == 0)
                 {
                     _cacheText1 = text;
-                    DynamicCollectionForNettezaHelpers.CacheList1 = popCandidate.ToList();
+                    _cacheList1 = popCandidate.ToList();
                 }
 
-                foreach (var (hint, description) in DynamicCollectionForNettezaHelpers.CacheList1)
+                foreach (var (hint, description) in _cacheList1)
                     yield return Table(hint, description);
             }
         }

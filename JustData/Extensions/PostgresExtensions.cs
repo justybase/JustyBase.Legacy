@@ -22,7 +22,7 @@ namespace JustyBaseLegacy.UI.Extensions
         {
             treeView.Invoke(()=>
             {
-                DynamicCollectionForGeneralHelpers.oneWord.Clear();
+                database.AutocompleteSuggestions.OneWord.Clear();
                 database.indexes = null;
                 int a1 = treeView.Nodes.IndexOfKey(connName);
                 if (a1 != -1)
@@ -65,7 +65,7 @@ namespace JustyBaseLegacy.UI.Extensions
                     n1.ImageIndex = 1;
                     n1.SelectedImageIndex = 1;
                     tnList.Add((n1.Nodes, n1.Text));
-                    DynamicCollectionForGeneralHelpers.oneWord.Add(user.ItemArray[0] as string);
+                    database.AutocompleteSuggestions.OneWord.Add(user.ItemArray[0] as string);
                 }
 
                 foreach (var itx in tnList)
@@ -115,7 +115,7 @@ namespace JustyBaseLegacy.UI.Extensions
                         tmpNode.ImageIndex = 15;
                         tmpNode.SelectedImageIndex = 15;
                         tmpNode.Nodes.Add("fool");
-                        DynamicCollectionForGeneralHelpers.twoWords.Add($"{user}.{tabName}");
+                        database.AutocompleteSuggestions.TwoWords.Add($"{user}.{tabName}");
                         if (!database.objectInSchema[user].ContainsKey(tabName))
                         {
                             database.objectInSchema[user].Add(tabName, TypeInDatabase.table);
@@ -139,7 +139,7 @@ namespace JustyBaseLegacy.UI.Extensions
                         tmpNode.ImageIndex = 11;
                         tmpNode.SelectedImageIndex = 11;
                         tmpNode.Nodes.Add("fool");
-                        DynamicCollectionForGeneralHelpers.twoWords.Add($"{user}.{item.ItemArray[1]}");
+                        database.AutocompleteSuggestions.TwoWords.Add($"{user}.{item.ItemArray[1]}");
                         if (!database.objectInSchema[user].ContainsKey(item.ItemArray[1] as string))
                         {
                             database.objectInSchema[user].Add(item.ItemArray[1] as string, TypeInDatabase.view);

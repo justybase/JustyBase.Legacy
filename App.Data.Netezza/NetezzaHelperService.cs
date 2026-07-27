@@ -49,7 +49,7 @@ public sealed class NetezzaHelperService : INetezzaHelperService
     public const string SEARCH_PROCEDURE_SQL = NetezzaHelpers.SEARCH_PROCEDURE_SQL;
     public readonly string USER_GROUPS = NetezzaHelpers.USER_GROUPS;
 
-    private Dictionary<string, Dictionary<int, NetezzaTableInfo>> BaseTableDictionary => _schemaTables.TablesByConnection;
+    private IReadOnlyDictionary<string, Dictionary<int, NetezzaTableInfo>> BaseTableDictionary => _schemaTables.TablesByConnection;
 
     public string ServerVersion = "";
     public bool SqliteInProgress = false;

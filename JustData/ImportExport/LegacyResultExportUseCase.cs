@@ -2,6 +2,7 @@ using AppBase.Common.Interfaces;
 using AppBase.Common;
 using DatabaseDataGridView.WinForms;
 using JustData.Application.ImportExport;
+using JustData.Application.Sql;
 using SpreadSheetTasks;
 using System.Data;
 using System.Text;
@@ -30,7 +31,7 @@ public sealed class WinFormsResultExportUseCase : IResultExportUseCase
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.ResultSetId)
-            || !_grids.TryGet(request.DocumentId, request.ResultSetId, out CustomDataGridView? grid)
+            || !_grids.TryGet(new ResultSetKey(request.DocumentId, request.ResultSetId), out CustomDataGridView? grid)
             || grid is null || grid.IsDisposed || grid.CurrentDataTable is null)
         {
             yield return new ExportProgress(

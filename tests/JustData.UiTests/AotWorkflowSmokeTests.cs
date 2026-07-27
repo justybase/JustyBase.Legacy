@@ -14,7 +14,7 @@ namespace JustData.UiTests;
 /// </summary>
 public sealed class AotWorkflowSmokeTests
 {
-    private const string MainWindowId = "NetezzaSQL_addedFastColored";
+    private const string MainWindowId = "_addedFastColored";
 
     private static readonly string RepoRoot = Path.GetFullPath(
         Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));

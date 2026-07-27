@@ -1,5 +1,6 @@
 using AppBase.Common;
 using AppBase.Common.Interfaces;
+using AppBase.Data.Core.Models;
 using DatabaseDataGridView.WinForms;
 using DatabaseDataGridView.WinForms.Coloring;
 using System;
@@ -26,7 +27,8 @@ internal sealed class PreferencesDockContent : DockContent
         Action saveConfig,
         Action saveRecentFiles,
         IUiHelperService uiHelperService,
-        IColorTheme colorTheme)
+        IColorTheme colorTheme,
+        INetezzaAutocompleteState netezzaAutocompleteState)
     {
         Text = "JustyBase Settings";
         TabText = "JustyBase Settings";
@@ -44,7 +46,8 @@ internal sealed class PreferencesDockContent : DockContent
             saveConfig,
             saveRecentFiles,
             uiHelperService,
-            colorTheme);
+            colorTheme,
+            netezzaAutocompleteState);
         _preferencesForm.PrepareForDocumentHost();
         _preferencesForm.FormClosed += PreferencesForm_FormClosed;
         Controls.Add(_preferencesForm);

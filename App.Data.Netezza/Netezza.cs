@@ -21,10 +21,13 @@ namespace AppBase.Data;
 
 public sealed class Netezza : GeneralDb, INetezza
 {
+    private readonly IDatabaseRuntimeCatalogWriter _catalogWriter;
+
     public override DatabaseTypeEnum DatabaseType => DatabaseTypeEnum.Netezza;
     public Netezza(IDatabaseRuntimeContext databaseRuntimeContext, ILogger logger, IImportExportTasks importExportTasks, IGeneralDbService generalDbService) : base(databaseRuntimeContext, logger, importExportTasks, generalDbService)
     {
-
+        _catalogWriter = databaseRuntimeContext as IDatabaseRuntimeCatalogWriter
+            ?? throw new InvalidOperationException("Netezza requires the schema catalog write port.");
     }
 
     public static List<string> GetDatabaseList(int connectionTimeout, string server, string user, string port, string pass)
@@ -174,34 +177,19 @@ public sealed class Netezza : GeneralDb, INetezza
             
 
 
-            lock (_databaseRuntimeContext.DatabaseTableDescriptions)
+            // BAZY_TABELE_OPISY
+            var cmDescNz = connTemp.CreateCommand();
+            cmDescNz.CommandText = NetezzaHelpers.GetDescSql(database);
+            using var rdDesc = cmDescNz.ExecuteReader();
+            while (rdDesc.Read())
             {
-                if (!_databaseRuntimeContext.DatabaseTableDescriptions.TryGetValue(connectionName, out Dictionary<string, Dictionary<int, string>> val1))
+                int tableId = (rdDesc.GetValue(0) as int?) ?? -1;
+                string? tableDescription = null;
+                if (!rdDesc.IsDBNull(1))
                 {
-                    val1 = new Dictionary<string, Dictionary<int, string>>();
-                    _databaseRuntimeContext.DatabaseTableDescriptions[connectionName] = val1;
+                    tableDescription = rdDesc.GetString(1);
                 }
-                if (!val1.TryGetValue(database, out Dictionary<int, string> val2))
-                {
-                    val2 = new Dictionary<int, string>();
-                    val1[database] = val2;
-                }
-                //BAZY_TABELE_OPISY
-                var cmDescNz = connTemp.CreateCommand();
-
-                cmDescNz.CommandText = NetezzaHelpers.GetDescSql(database);
-                using var rdDesc = cmDescNz.ExecuteReader();
-                while (rdDesc.Read())
-                {
-                    int tableId = (rdDesc.GetValue(0) as int?) ?? -1;
-                    string? tableDescription = null;
-                    if (!rdDesc.IsDBNull(1))
-                    {
-                        tableDescription = rdDesc.GetString(1);
-                    }                    
-                    val2[tableId] = tableDescription;
-                }
-
+                _catalogWriter.SetTableDescription(connectionName, database, tableId, tableDescription);
             }
 
             //KEYS_IN_TABLES
@@ -381,13 +369,7 @@ public sealed class Netezza : GeneralDb, INetezza
                     rd1 = cm1.ExecuteReader();
                     DatabaseIdToName.Clear();
 
-                    if (_databaseRuntimeContext.BaseTableConnections.TryGetValue(connectionName, out Dictionary<int, List<int>> value))
-                    {
-                        value.Clear();
-                    }
-
-                    _databaseRuntimeContext.DatabaseDictionary[connectionName] = new();
-                    _databaseRuntimeContext.BaseTableConnections[connectionName] = new Dictionary<int, List<int>>();
+                    _catalogWriter.ClearDatabaseConnection(connectionName);
 
                     while (rd1.Read())
                     {
@@ -407,13 +389,11 @@ public sealed class Netezza : GeneralDb, INetezza
                         //string databaseOwner = ownerB;
                         string schemaName = rd1.GetString(4);
 
-                        _databaseRuntimeContext.DatabaseDictionary[connectionName][databaseId] = new DatabaseInfo(schemaId, databaseName, databaseOwner, schemaName);
-                        _databaseRuntimeContext.BaseTableConnections[connectionName][databaseId] = new List<int>();
+                        _catalogWriter.SetDatabase(connectionName, databaseId, new DatabaseInfo(schemaId, databaseName, databaseOwner, schemaName));
+                        _catalogWriter.EnsureBaseTableConnection(connectionName, databaseId);
                         bases.Add(databaseName);
                     }
-                    DynamicCollectionForNettezaHelpers.DatabaseArray[connectionName] = _databaseRuntimeContext.DatabaseDictionary.TryGetValue(connectionName, out var dbDict)
-                        ? dbDict.Values.Select(arg => arg.DatabaseName).ToArray()
-                        : Array.Empty<string>();
+                    var databaseSnapshot = _catalogWriter.GetDatabaseSnapshot();
 
                     DatabasesCount = bases.Count;
 
@@ -421,7 +401,8 @@ public sealed class Netezza : GeneralDb, INetezza
 
                     if (DatabasesCount > 0)
                     {
-                        _databaseRuntimeContext.Config.CachedDatabaseDictionary = _databaseRuntimeContext.DatabaseDictionary;
+                        _databaseRuntimeContext.Config.CachedDatabaseDictionary = databaseSnapshot
+                            .ToDictionary(pair => pair.Key, pair => new Dictionary<int, DatabaseInfo>(pair.Value));
                     }
      
 

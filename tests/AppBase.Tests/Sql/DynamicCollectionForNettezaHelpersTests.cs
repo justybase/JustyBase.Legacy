@@ -52,15 +52,4 @@ public sealed class DynamicCollectionForNettezaHelpersTests
         Assert.Equal(["zeta", "alpha", "beta", "gamma"], items.Select(i => i.Item1).ToArray());
     }
 
-    [Fact]
-    public void ResetCache_clears_both_cache_lists()
-    {
-        DynamicCollectionForNettezaHelpers.CacheList1.Add(("x", "y"));
-        DynamicCollectionForNettezaHelpers.CacheList2.Add(("a", "b"));
-
-        DynamicCollectionForNettezaHelpers.ResetCache();
-
-        Assert.Empty(DynamicCollectionForNettezaHelpers.CacheList1);
-        Assert.Empty(DynamicCollectionForNettezaHelpers.CacheList2);
-    }
 }

@@ -14,20 +14,51 @@ public sealed class LegacyRuntimeContextTests
         var context = new LegacySessionVariableContext();
         int changed = 0;
         context.Changed += (_, _) => changed++;
-        context.SessionVariables["document-1"] = new Dictionary<string, string>
-        {
-            ["&local"] = "42"
-        };
+        context.SetSessionVariable("document-1", "&local", "42");
 
         Assert.Equal("42", context.GetSessionVariables("document-1")["&local"]);
         Assert.Empty(context.GetSessionVariables("missing"));
 
-        context.GlobalVariables["&portfolio"] = "top-class";
+        context.SetGlobalVariable("&portfolio", "top-class");
         Assert.Equal("SELECT 'top-class'", context.ReplaceGlobalVariables("SELECT '&PORTFOLIO'"));
 
         context.ClearGlobalVariables();
         Assert.Equal(1, changed);
         Assert.Empty(context.GlobalVariables);
+    }
+
+    [Fact]
+    public void Variable_reads_are_immutable_snapshots()
+    {
+        var context = new LegacySessionVariableContext();
+        context.SetSessionVariable("document-1", "&local", "42");
+        context.SetGlobalVariable("&portfolio", "top-class");
+
+        IReadOnlyDictionary<string, string> sessionSnapshot = context.GetSessionVariables("document-1");
+        IReadOnlyDictionary<string, string> globalSnapshot = context.GlobalVariables;
+        context.SetSessionVariable("document-1", "&later", "43");
+        context.SetGlobalVariable("&later", "next");
+
+        Assert.Equal("42", sessionSnapshot["&local"]);
+        Assert.DoesNotContain("&later", sessionSnapshot.Keys);
+        Assert.Equal("top-class", globalSnapshot["&portfolio"]);
+        Assert.DoesNotContain("&later", globalSnapshot.Keys);
+    }
+
+    [Fact]
+    public void Database_catalog_reads_are_independent_snapshots()
+    {
+        IApplicationSettingsContext settings = Substitute.For<IApplicationSettingsContext>();
+        var context = new LegacyDatabaseRuntimeContext(settings);
+        IDatabaseRuntimeCatalogWriter writer = context;
+        writer.SetDatabase("connection", 1, new DatabaseInfo(10, "SYSTEM", "ADMIN", "SYSTEM"));
+
+        IReadOnlyDictionary<string, Dictionary<int, DatabaseInfo>> snapshot = context.DatabaseDictionary;
+        writer.SetDatabase("connection", 2, new DatabaseInfo(11, "TEST", "ADMIN", "TEST"));
+        writer.SetDatabase("later", 1, new DatabaseInfo(12, "LATER", "ADMIN", "LATER"));
+
+        Assert.Single(snapshot["connection"]);
+        Assert.DoesNotContain("later", snapshot.Keys);
     }
 
     [Fact]
