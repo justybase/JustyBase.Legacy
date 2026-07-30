@@ -81,25 +81,22 @@ public sealed class NetezzaHelperService : INetezzaHelperService
         string connectionName, int objectID, string overrideTableName = null, string middleCode = null, string endingCode = null, List<string> distOverride = null
         ,bool forceNotOnline = false)
     {
+        // forceNotOnline retained for API compatibility; single-object DDL always uses the live path.
+        _ = forceNotOnline;
+
         if (!_connectionSessions.TryGetValue(connectionName, out var gdb) || gdb is not INetezza)
         {
             throw new Exception("actual connection is not netezza");
         }
 
-        if (databaseRuntimeContext.Config.OnlineOnlyDdls && !forceNotOnline)
-        {
-            await _schemaRefreshHost?.RefreshTableListInternalAsync(connectionName, false);
-        }
-
-        var input = LegacyDdlSchemaAdapter.BuildTableInput(
+        NetezzaTableDdlInput input = await LoadTableInputOnlineAsync(
+            gdb,
             databaseRuntimeContext,
-            _schemaTables,
-            _connectionSessions,
             connectionName,
             objectID,
             overrideTableName,
             middleCode,
-            endingCode);
+            endingCode).ConfigureAwait(false);
 
         StringBuilder sb = stringBuilder ?? new();
         var result = _ddlBuilder.AppendCreateTable(sb, input, distOverride);
@@ -116,17 +113,17 @@ public sealed class NetezzaHelperService : INetezzaHelperService
     public async ValueTask<NzGetTableCodeResult> GetRecreateTableCodeById(AppBase.Common.Interfaces.IDatabaseRuntimeContext databaseRuntimeContext,
             string connectionName, int objectID, List<string> distOverride = null)
     {
-        if (databaseRuntimeContext.Config.OnlineOnlyDdls)
+        if (!_connectionSessions.TryGetValue(connectionName, out var gdb) || gdb is not INetezza)
         {
-            await _schemaRefreshHost?.RefreshTableListInternalAsync(connectionName, false);
+            throw new Exception("actual connection is not netezza");
         }
 
-        var input = LegacyDdlSchemaAdapter.BuildTableInput(
+        NetezzaTableDdlInput input = await LoadTableInputOnlineAsync(
+            gdb,
             databaseRuntimeContext,
-            _schemaTables,
-            _connectionSessions,
             connectionName,
-            objectID);
+            objectID).ConfigureAwait(false);
+
         StringBuilder sb = new();
         var result = _ddlBuilder.AppendRecreateTable(sb, input);
 
@@ -135,6 +132,54 @@ public sealed class NetezzaHelperService : INetezzaHelperService
             Dystr = result.DistributeColumns.Select((name, index) => ((byte)(index + 1), name)).ToList(),
             OrganizeList = result.OrganizeColumns.Select((name, index) => ((byte)(index + 1), name)).ToList()
         };
+    }
+
+    public async Task<string> GetAllTablesDdlAsync(string connectionName, string databaseName, CancellationToken cancellationToken = default)
+    {
+        if (!_connectionSessions.TryGetValue(connectionName, out var gdb) || gdb is not INetezza)
+            throw new Exception("actual connection is not netezza");
+        if (string.IsNullOrWhiteSpace(databaseName))
+            throw new ArgumentException("Database name is required.", nameof(databaseName));
+
+        return await OnlineBatchTableDdlLoader.LoadTablesDdlAsync(
+            gdb, databaseName, schemaFilter: null, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<NetezzaTableDdlInput> LoadTableInputOnlineAsync(
+        IGeneralDb database,
+        AppBase.Common.Interfaces.IDatabaseRuntimeContext databaseRuntimeContext,
+        string connectionName,
+        int objectId,
+        string overrideTableName = null,
+        string middleCode = null,
+        string endingCode = null)
+    {
+        if (!_schemaTables.TablesByConnection.TryGetValue(connectionName, out var tables)
+            || !tables.TryGetValue(objectId, out var tableInfo))
+        {
+            throw new InvalidOperationException($"Object {objectId} not found in schema for {connectionName}");
+        }
+
+        string databaseName = databaseRuntimeContext.DatabaseDictionary.TryGetValue(connectionName, out var dbDict)
+            && dbDict.TryGetValue(tableInfo.DATABASE_ID, out var dbInfo)
+            ? dbInfo.DatabaseName
+            : string.Empty;
+        if (string.IsNullOrWhiteSpace(databaseName))
+            throw new InvalidOperationException($"Database for object {objectId} not found in schema for {connectionName}");
+
+        string schema = string.IsNullOrWhiteSpace(tableInfo.TABLE_SCHEMA)
+            ? tableInfo.TABLE_OWNER
+            : tableInfo.TABLE_SCHEMA;
+
+        return await OnlineTableDdlLoader.LoadAsync(
+            database,
+            databaseName,
+            schema,
+            tableInfo.TABLE_NAME,
+            tableInfo.TABLE_OBJECT_OWNER,
+            overrideTableName,
+            middleCode,
+            endingCode).ConfigureAwait(false);
     }
 
     public async Task<string> GetViewCodeById(AppBase.Common.Interfaces.IDatabaseRuntimeContext databaseRuntimeContext, int objectId, string connectionName)

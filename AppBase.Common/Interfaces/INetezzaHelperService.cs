@@ -33,6 +33,7 @@ public interface INetezzaHelperService
     ValueTask<NzGetTableCodeResult> GetRecreateTableCodeById(
         IDatabaseRuntimeContext databaseRuntimeContext,
         string connectionName, int objectID, List<string>? distOverride = null);
+    Task<string> GetAllTablesDdlAsync(string connectionName, string databaseName, CancellationToken cancellationToken = default);
     Task<string> GetExternaTableCode(IDatabaseRuntimeContext databaseRuntimeContext, int OBJECT_ID, string connectionName, bool force = false);
     Task<string> GetViewCodeById(IDatabaseRuntimeContext databaseRuntimeContext, int objectId, string connectionName);
     void Initialize(INetezzaSchemaRefreshHost schemaRefreshHost);
