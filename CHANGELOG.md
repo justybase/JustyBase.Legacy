@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0.3] - 2026-07-30
+
+### Added
+- Online Netezza DDL loading path with coverage.
+- SQL execution risk gate with host confirmation port and streamlined execution UI.
+- SQL authoring performance improvements for large scripts.
+
+### Changed
+- Removed legacy `ObjectExplorerControl` in favor of MVVM database explorer.
+- Schema refresh refactored through coordinator, repository modes, and editor catalog projection.
+- Netezza schema refresh flags moved to `INetezzaHelperService` and gated downloads.
+- Connection credentials injected via profile catalog instead of `LoginDataDic`.
+- Editor workspace document logic centralized for tabs and docking.
+- Autocomplete suggestion handling refactored across database classes.
+- Netezza dynamic collection helpers renamed to `NetezzaLegacyCompletionHelpers`.
+- FlaUI tests aligned with explorer and SQL execution refactors.
+- Registered new application ports in DI and wired `BaseWindow` shell dependencies.
+
+### Fixed
+- SQL result grid second-run behavior and virtual row metrics policy.
+
+### Internal
+- Updated `.gitignore` to exclude local live-test gallery run logs.
+
 ## [1.0.0.2] - 2026-07-26
 
 ### Added
