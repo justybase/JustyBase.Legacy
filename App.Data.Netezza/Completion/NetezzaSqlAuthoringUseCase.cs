@@ -24,7 +24,12 @@ public sealed class NetezzaSqlAuthoringUseCase : ISqlAuthoringUseCase
         CancellationToken cancellationToken = default)
     {
         IReadOnlyList<LintIssue> issues = await _authoringServices
-            .LintAsync(request.SqlText, request.DocumentId.ToString(), cancellationToken)
+            .LintAsync(
+                request.SqlText,
+                request.DocumentId.ToString(),
+                cancellationToken,
+                request.KnownLineCount,
+                request.Invocation)
             .ConfigureAwait(false);
         return new SqlLintResult(
             request.DocumentId,

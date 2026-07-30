@@ -107,6 +107,7 @@ namespace JustyBaseLegacy.UI
             closeAllTabsMenuItem = new ToolStripMenuItem();
             closeOtherTabsMenuItem = new ToolStripMenuItem();
             cmsOpenInExplorer = new ToolStripMenuItem();
+            cmsCopyFullFilepath = new ToolStripMenuItem();
             cmsSave = new ToolStripMenuItem();
             cmsRenameTab = new ToolStripMenuItem();
             runToCursorToolStripMenuItem = new ToolStripMenuItem();
@@ -821,7 +822,7 @@ namespace JustyBaseLegacy.UI
             // 
             // tabContextMenuStrip
             // 
-            tabContextMenuStrip.Items.AddRange(new ToolStripItem[] { closeAllTabsMenuItem, closeOtherTabsMenuItem, cmsOpenInExplorer, cmsSave, cmsRenameTab });
+            tabContextMenuStrip.Items.AddRange(new ToolStripItem[] { closeAllTabsMenuItem, closeOtherTabsMenuItem, cmsOpenInExplorer, cmsCopyFullFilepath, cmsSave, cmsRenameTab });
             tabContextMenuStrip.Name = "tabContextMenuStrip";
             tabContextMenuStrip.Size = new Size(175, 114);
             // 
@@ -843,8 +844,15 @@ namespace JustyBaseLegacy.UI
             // 
             cmsOpenInExplorer.Name = "cmsOpenInExplorer";
             cmsOpenInExplorer.Size = new Size(174, 22);
-            cmsOpenInExplorer.Text = "Open in explorer";
+            cmsOpenInExplorer.Text = "Show in explorer";
             cmsOpenInExplorer.Click += OpenInExplorerEvenHandler;
+            // 
+            // cmsCopyFullFilepath
+            // 
+            cmsCopyFullFilepath.Name = "cmsCopyFullFilepath";
+            cmsCopyFullFilepath.Size = new Size(174, 22);
+            cmsCopyFullFilepath.Text = "Copy full filepath";
+            cmsCopyFullFilepath.Click += CopyFullFilepathEventHandler;
             // 
             // cmsSave
             // 
@@ -1619,6 +1627,7 @@ namespace JustyBaseLegacy.UI
         private ToolStripMenuItem cmsSave;
         private ToolStripMenuItem cmsRenameTab;
         private ToolStripMenuItem cmsOpenInExplorer;
+        private ToolStripMenuItem cmsCopyFullFilepath;
         private ToolStripMenuItem renameTab;
         private ToolStripMenuItem zamknijKarte;
         private ToolStripMenuItem zamknijWszytkieKarty;

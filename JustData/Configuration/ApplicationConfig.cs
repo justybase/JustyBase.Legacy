@@ -112,6 +112,8 @@ public sealed class ApplicationConfig : IApplicationConfig
     public bool ForceDecimalFormat { get; set; }
     public bool AutoCompleteBrackets { get; set; }
     public bool BracketFolding { get; set; }
+    public int LargeScriptCharThreshold { get; set; } = 150_000;
+    public int LargeScriptLineThreshold { get; set; } = 500;
     public bool DontUseIndent { get; set; }
     public int CurrentWordLengthLimit { get; set; }
     public Dictionary<string, List<string>> ContextScripts { get; set; }

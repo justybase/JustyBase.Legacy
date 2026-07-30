@@ -16,4 +16,14 @@ public interface IEditorConfig
     bool DontUseIndent { get; set; }
     bool AutoCompleteBrackets { get; set; }
     string EditorHotkeys { get; set; }
+
+    /// <summary>
+    /// Character threshold for the cheap typing path (mirrors SqlPerformancePolicy.LargeScriptCharThreshold).
+    /// </summary>
+    int LargeScriptCharThreshold { get; set; }
+
+    /// <summary>
+    /// Line threshold for the cheap typing path (mirrors SqlPerformancePolicy.LargeScriptLineThreshold).
+    /// </summary>
+    int LargeScriptLineThreshold { get; set; }
 }

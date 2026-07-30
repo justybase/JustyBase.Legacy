@@ -336,7 +336,6 @@ namespace JustyBaseLegacy.UI
             AddToggleVisual(cbBracketFolding);
             AddToggleVisual(cbResetSchema);
             AddToggleVisual(cbLoadSourcesOnStartup);
-            AddToggleVisual(cbOnlineOnlyDdls);
             AddToggleVisual(cbUseSpecialTabNames);
             AddToggleVisual(cbPinDataByDefault);
             AddToggleVisual(cbDetectScale);
@@ -796,11 +795,10 @@ namespace JustyBaseLegacy.UI
                 AddFullRow(body, cbWordWrapAutoIndent);
             });
             AddPreferenceCard(cards, "Search", "Set the maximum time used for file searches.", 104, body => AddField(body, "File search timeout", nuFileSearchTimeout, "Milliseconds."));
-            AddPreferenceCard(cards, "Schema", "Choose when sources and DDLs are refreshed and how much parallel work is allowed.", 188, body =>
+            AddPreferenceCard(cards, "Schema", "Choose when sources are refreshed and how much parallel work is allowed.", 160, body =>
             {
                 AddFullRow(body, cbResetSchema);
                 AddFullRow(body, cbLoadSourcesOnStartup);
-                AddFullRow(body, cbOnlineOnlyDdls);
                 AddField(body, "Schema parallelism", nuMaxSchemaParallelism, "Maximum concurrent refresh operations.");
             });
             AddPreferenceCard(cards, "Query warnings", "Warn about running or expensive queries using minute-based thresholds.", 190, body =>

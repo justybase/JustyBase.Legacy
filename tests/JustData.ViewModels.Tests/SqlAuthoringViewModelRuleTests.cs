@@ -156,6 +156,74 @@ public sealed class SqlAuthoringViewModelRuleTests
         Assert.True(vm.LintOnSave);
     }
 
+    [Fact]
+    public async Task ScheduleLintAsync_huge_script_skips_use_case_and_clears_diagnostics()
+    {
+        var documentId = EditorDocumentId.New();
+        var useCase = new SeedThenCountAuthoringUseCase();
+        using var vm = new SqlAuthoringViewModel(documentId, useCase);
+        await vm.LintNowAsync("select 1");
+        Assert.Equal(1, useCase.LintCount);
+        Assert.Single(vm.Diagnostics);
+
+        IReadOnlyList<SqlDiagnostic>? received = null;
+        vm.DiagnosticsChanged += d => received = d;
+
+        await vm.ScheduleLintAsync(
+            "select 1",
+            debounce: TimeSpan.Zero,
+            knownLineCount: JustyBase.NetezzaSqlParser.Authoring.SqlPerformancePolicy.HugeScriptLineThreshold + 1);
+
+        Assert.Equal(1, useCase.LintCount);
+        Assert.Empty(vm.Diagnostics);
+        Assert.NotNull(received);
+        Assert.Empty(received!);
+    }
+
+    [Fact]
+    public async Task LintNowAsync_save_on_huge_script_still_calls_use_case()
+    {
+        var documentId = EditorDocumentId.New();
+        var useCase = new CountingAuthoringUseCase();
+        using var vm = new SqlAuthoringViewModel(documentId, useCase);
+
+        await vm.LintOnSaveAsync(
+            "select 1",
+            knownLineCount: JustyBase.NetezzaSqlParser.Authoring.SqlPerformancePolicy.HugeScriptLineThreshold + 1);
+
+        Assert.Equal(1, useCase.LintCount);
+        Assert.Equal(
+            JustyBase.NetezzaSqlParser.Authoring.SqlLintInvocation.Save,
+            useCase.LastInvocation);
+    }
+
+    private sealed class SeedThenCountAuthoringUseCase : ISqlAuthoringUseCase
+    {
+        private int _lintCount;
+        public int LintCount => Volatile.Read(ref _lintCount);
+
+        public Task<SqlLintResult> LintAsync(SqlLintRequest request, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _lintCount);
+            return Task.FromResult(new SqlLintResult(
+                request.DocumentId,
+                [new SqlDiagnostic(SqlDiagnosticSeverity.Warning, "seed")]));
+        }
+
+        public Task<IReadOnlyList<SqlCompletionItem>> CompleteAsync(SqlCompletionRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<SqlCompletionItem>>([]);
+
+        public Task<SqlSignatureHelp?> GetSignatureHelpAsync(SqlSignatureHelpRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult<SqlSignatureHelp?>(null);
+
+        public Task<IReadOnlyList<SqlCodeAction>> GetCodeActionsAsync(SqlCodeActionRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<SqlCodeAction>>([]);
+
+        public void DisableRule(string ruleId) { }
+        public void EnableRule(string ruleId) { }
+        public void Release(EditorDocumentId documentId) { }
+    }
+
     private sealed class SimpleAuthoringUseCase : ISqlAuthoringUseCase
     {
         public EditorDocumentId? ReleasedDocumentId { get; private set; }
@@ -188,10 +256,12 @@ public sealed class SqlAuthoringViewModelRuleTests
     {
         private int _lintCount;
         public int LintCount => Volatile.Read(ref _lintCount);
+        public JustyBase.NetezzaSqlParser.Authoring.SqlLintInvocation? LastInvocation { get; private set; }
 
         public Task<SqlLintResult> LintAsync(SqlLintRequest request, CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref _lintCount);
+            LastInvocation = request.Invocation;
             return Task.FromResult(new SqlLintResult(request.DocumentId, []));
         }
 

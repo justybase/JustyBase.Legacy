@@ -1,5 +1,8 @@
 ﻿
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
@@ -58,33 +61,37 @@ public sealed partial class SqlTextModifyDefaultSqlImplementations
             (fctb.Tag as TbInfo).PopupMenu.MinFragmentLength = 3;
             (fctb.Tag as TbInfo).PopupMenu.AppearInterval = _editorConfig.PopupMenuDefaultAppearInterval;
 
-            if (_editorConfig.TypoCorrect && e.InsertingText == " " || e.InsertingText == "\n" || e.InsertingText == "\r\n" || e.InsertingText == "\t")
+            if (e.InsertingText == " " || e.InsertingText == "\n" || e.InsertingText == "\r\n" || e.InsertingText == "\t")
             {
-
                 int pos = fctb.SelectionStart;
                 (var typoCandidate, var len) = fctb.CurrentWord(_editorConfig.CurrentWordLengthLimit);
                 int l = len;
 
-                foreach (var correctWord in _editorConfig.TypoPatternList)
+                if (_editorConfig.TypoCorrect && !IsCheapTypingPath(fctb))
                 {
-                    int dist = DamerauLevenshteinDistance(typoCandidate, correctWord);
-                    if (dist <= _editorConfig.TypoLimit && dist >= 1) //default config.TypoLimit = 1 <=> 1 typo allowed
+                    foreach (var correctWord in _editorConfig.TypoPatternList)
                     {
-                        fctb.SelectionStart = pos - l;
-                        fctb.SelectionLength = l;
-                        fctb.InsertText(correctWord);
-                        break;
+                        int dist = DamerauLevenshteinDistance(typoCandidate, correctWord);
+                        if (dist <= _editorConfig.TypoLimit && dist >= 1) //default config.TypoLimit = 1 <=> 1 typo allowed
+                        {
+                            fctb.SelectionStart = pos - l;
+                            fctb.SelectionLength = l;
+                            fctb.InsertText(correctWord);
+                            break;
+                        }
                     }
                 }
-                if (_editorConfig.QuickSnippets.ContainsKey(typoCandidate)) // sx -> select etc.
+
+                // Quick snippets (SX -> SELECT) are O(1); keep enabled on large scripts.
+                if (TryResolveQuickSnippet(typoCandidate, out string snippetText))
                 {
                     fctb.SelectionStart = pos - l;
                     fctb.SelectionLength = l;
 
-                    if (_editorConfig.QuickSnippets[typoCandidate].Contains('^'))
+                    if (snippetText.Contains('^'))
                     {
-                        string txt = _editorConfig.QuickSnippets[typoCandidate];
-                        int n = _editorConfig.QuickSnippets[typoCandidate].IndexOf('^');
+                        string txt = snippetText;
+                        int n = snippetText.IndexOf('^');
 
                         string c = "";
                         if (n > 0)
@@ -107,7 +114,7 @@ public sealed partial class SqlTextModifyDefaultSqlImplementations
                     }
                     else
                     {
-                        fctb.InsertText(_editorConfig.QuickSnippets[typoCandidate]);
+                        fctb.InsertText(snippetText);
                     }
                 }
             }
@@ -120,24 +127,53 @@ public sealed partial class SqlTextModifyDefaultSqlImplementations
 
 
     private static readonly string[] _multilineComments = new string[] { "/*", "*/" };
+    private readonly HashSet<int> _editorsNeedingVisibleRestyle = [];
+    private long _lastFullCommentScanTick;
+
     public string HandleSqlTextModification(TextChangedEventArgs e, FastColoredTextBox fctb, FctbColors fastColors, ref string empty
         , string cleanSqlText)
     {
-        if (_multilineCharDeleted || e.ChangedRange.Text.ContainsAny(_multilineComments) || !MiscellaneousHelper.AreQuotesBalanced(e.ChangedRange.Chars))
-        {
-            cleanSqlText = RecolorizeVisibleRange(fctb, fastColors, ref empty, cleanSqlText);
-        }
-        return cleanSqlText;
+        int editorId = RuntimeHelpers.GetHashCode(fctb);
+        bool cheapPath = IsCheapTypingPath(fctb);
+        bool needsVisibleRestyle = _editorsNeedingVisibleRestyle.Remove(editorId)
+            || _multilineCharDeleted
+            || e.ChangedRange.Text.ContainsAny(_multilineComments)
+            || !MiscellaneousHelper.AreQuotesBalanced(e.ChangedRange.Chars);
+
+        if (!needsVisibleRestyle)
+            return cleanSqlText;
+
+        return RecolorizeVisibleRange(fctb, fastColors, ref empty, cleanSqlText, cheapPath);
     }
-    private string RecolorizeVisibleRange(FastColoredTextBox fctb, FctbColors fctbColors, ref string empty, string cleanSqlText)
+    private string RecolorizeVisibleRange(FastColoredTextBox fctb, FctbColors fctbColors, ref string empty, string cleanSqlText, bool cheapPath)
     {
         Place p1 = fctb.VisibleRange.Start;
-        Place p2 = fctb.Range.End;
+        Place p2 = fctb.VisibleRange.End;
         FastColoredTextBoxNS.Range r = new FastColoredTextBoxNS.Range(fctb, p1, p2);
 
-        MiscellaneousHelper.UpdateAdditionStyles(r, fctbColors, _editorConfig.BracketFolding);
+        MiscellaneousHelper.UpdateAdditionStyles(r, fctbColors, _editorConfig.BracketFolding, cheapPath);
 
-        cleanSqlText = fctb.GetTextCommentRanges(fctbColors, ref empty, cleanSqlText);
+        // Full-document comment/string scan is the dominant cost on large scripts.
+        // Keep it off the typing path; rebuild clean SQL only after a longer idle.
+        if (!cheapPath)
+        {
+            using (SqlTypingPerfLocal.Measure("comment_scan", fctb.TextLength, fctb.LinesCount, "path=delayed-full"))
+            {
+                cleanSqlText = fctb.GetTextCommentRanges(fctbColors, ref empty, cleanSqlText);
+            }
+            _lastFullCommentScanTick = Environment.TickCount64;
+        }
+        else
+        {
+            // Large scripts: never run full-document comment/string rebuild while typing.
+            // cleanSqlText refresh belongs to save/manual/outline refresh, not delayed idle.
+            if (SqlTypingPerfLocal.Enabled)
+            {
+                Trace.WriteLine(
+                    $"[SqlTypingPerf] op=editor.comment_scan phase=skipped chars={fctb.TextLength} lines={fctb.LinesCount} meta=path=delayed-cheap-typing");
+            }
+        }
+
         _multilineCharDeleted = false;
         return cleanSqlText;
     }
@@ -148,104 +184,127 @@ public sealed partial class SqlTextModifyDefaultSqlImplementations
         ref string currentColumn, bool isNetezza)
     {
         _cleanSqlText = cleanSqlText;
-        MiscellaneousHelper.UpdateAdditionStyles(e.ChangedRange, fctbColors, _editorConfig.BracketFolding);
-
-        var rangesTmp = fctb.VisibleRange;
-        int fromLine = rangesTmp.FromLine;
-        int toLine = rangesTmp.ToLine;
-
-        //Stopwatch st = Stopwatch.StartNew();
-        for (int i = fromLine; i < toLine; i++)
+        bool cheapPath = IsCheapTypingPath(fctb);
+        using (SqlTypingPerfLocal.Measure(
+                   "handle_text_changed",
+                   fctb.TextLength,
+                   fctb.LinesCount,
+                   cheapPath ? "cheap=1" : "cheap=0"))
         {
-            if (fctb.LineInfos[i].VisibleState == VisibleState.Visible)
+            MiscellaneousHelper.UpdateAdditionStyles(e.ChangedRange, fctbColors, _editorConfig.BracketFolding, cheapPath);
+
+            // For large scripts, avoid restyling every visible line and skip the full-document
+            // comment/string scan on the keystroke path — deferred to TextChangedDelayed.
+            if (!cheapPath)
             {
-                var range = new FastColoredTextBoxNS.Range(fctb, i);
-                MiscellaneousHelper.UpdateAdditionStyles(range, fctbColors, _editorConfig.BracketFolding);
+                var rangesTmp = fctb.VisibleRange;
+                int fromLine = rangesTmp.FromLine;
+                int toLine = rangesTmp.ToLine;
+
+                for (int i = fromLine; i < toLine; i++)
+                {
+                    if (fctb.LineInfos[i].VisibleState == VisibleState.Visible)
+                    {
+                        var range = new FastColoredTextBoxNS.Range(fctb, i);
+                        MiscellaneousHelper.UpdateAdditionStyles(range, fctbColors, _editorConfig.BracketFolding);
+                    }
+                }
+
+                using (SqlTypingPerfLocal.Measure("comment_scan", fctb.TextLength, fctb.LinesCount, "path=immediate"))
+                {
+                    _cleanSqlText = fctb.GetTextCommentRanges(fctbColors, ref empty, _cleanSqlText);
+                }
+                _lastFullCommentScanTick = Environment.TickCount64;
+            }
+            else
+            {
+                _editorsNeedingVisibleRestyle.Add(RuntimeHelpers.GetHashCode(fctb));
             }
         }
 
-        _cleanSqlText = fctb.GetTextCommentRanges(fctbColors, ref empty, _cleanSqlText);
-
         if (isNetezza)
         {
-            if (e.ChangedRange.Length < 200)
+            if (!cheapPath)
             {
-                string txt = e.ChangedRange.Text;
-
-                var m = _rx1.Match(e.ChangedRange.Text);
-                currentColumn = m.Groups["column"].Value;
-
-                if (!_wasPreviouslyDot)
+                if (e.ChangedRange.Length < 200)
                 {
-                    bool isAftrerAs = false;
-                    var sel = fctb.Selection.Start;
+                    string txt = e.ChangedRange.Text;
 
-                    if (sel.iChar >= 2)
+                    var m = _rx1.Match(e.ChangedRange.Text);
+                    currentColumn = m.Groups["column"].Value;
+
+                    if (!_wasPreviouslyDot)
                     {
-                        var thisLine = fctb.Lines[sel.iLine];
-                        int num = sel.iChar - 1;
+                        bool isAftrerAs = false;
+                        var sel = fctb.Selection.Start;
 
-                        while (thisLine.Length > num && thisLine[num] != ' ' && num > 0)
+                        if (sel.iChar >= 2)
                         {
-                            num--;
-                        }
-                        if (num > thisLine.Length)
-                        {
-                            return cleanSqlText;
-                        }
+                            var thisLine = fctb.Lines[sel.iLine];
+                            int num = sel.iChar - 1;
 
-                        for (int i = num; i >= 1; i--)
-                        {
-                            var c = thisLine[i];
-                            if (c == ' ')
+                            while (thisLine.Length > num && thisLine[num] != ' ' && num > 0)
                             {
-                                continue;
+                                num--;
                             }
-                            else if ((c == 's' || c == 'S') && (thisLine[i - 1] == 'a' || thisLine[i - 1] == 'A'))
+                            if (num > thisLine.Length)
                             {
-                                if (thisLine[i - 1] == 'a' || thisLine[i - 1] == 'A')
+                                return _cleanSqlText;
+                            }
+
+                            for (int i = num; i >= 1; i--)
+                            {
+                                var c = thisLine[i];
+                                if (c == ' ')
                                 {
-                                    isAftrerAs = true;
-                                    break;
+                                    continue;
+                                }
+                                else if ((c == 's' || c == 'S') && (thisLine[i - 1] == 'a' || thisLine[i - 1] == 'A'))
+                                {
+                                    if (thisLine[i - 1] == 'a' || thisLine[i - 1] == 'A')
+                                    {
+                                        isAftrerAs = true;
+                                        break;
+                                    }
+                                    else
+                                    {
+                                        break;
+                                    }
                                 }
                                 else
                                 {
                                     break;
                                 }
                             }
-                            else
+                        }
+
+                        if (isAftrerAs)
+                        {
+                            var tg = fctb.Tag as TbInfo;
+                            if (tg is not null)
                             {
-                                break;
+                                //https://github.com/KrzysztofDusko/Just-Data/issues/98
+                                tg.PopupMenu.MinFragmentLength = 123;
                             }
                         }
                     }
-
-                    if (isAftrerAs)
-                    {
-                        var tg = fctb.Tag as TbInfo;
-                        if (tg is not null)
-                        {
-                            //https://github.com/KrzysztofDusko/Just-Data/issues/98
-                            tg.PopupMenu.MinFragmentLength = 123;
-                        }
-                    }
                 }
-            }
-            else
-            {
-                currentColumn = null;
-            }
+                else
+                {
+                    currentColumn = null;
+                }
 
-            if (TimerAutoCompletition == null)
-            {
-                TimerAutoCompletition = new System.Windows.Forms.Timer();
-                TimerAutoCompletition.Interval = _editorConfig.GenerateToolTipTime;
-                TimerAutoCompletition.Tick += (s,e) => TimerTickMethod(s, fctb);
+                if (TimerAutoCompletition == null)
+                {
+                    TimerAutoCompletition = new System.Windows.Forms.Timer();
+                    TimerAutoCompletition.Interval = _editorConfig.GenerateToolTipTime;
+                    TimerAutoCompletition.Tick += (s,e) => TimerTickMethod(s, fctb);
+                }
+                TimerAutoCompletition.Stop(); // Resets the timer
+                TimerAutoCompletition.Start();
             }
-            TimerAutoCompletition.Stop(); // Resets the timer
-            TimerAutoCompletition.Start();
         }
-        else if (!fctb.Name.StartsWith("TXT"))
+        else if (!fctb.Name.StartsWith("TXT") && !cheapPath)
         {
             if (TimerAutoCompletition == null)
             {
@@ -258,7 +317,30 @@ public sealed partial class SqlTextModifyDefaultSqlImplementations
             TimerAutoCompletition.Start();
         }
     
-        return cleanSqlText;
+        return _cleanSqlText;
+    }
+
+    private bool IsCheapTypingPath(FastColoredTextBox fctb)
+    {
+        int charThreshold = _editorConfig.LargeScriptCharThreshold > 0
+            ? _editorConfig.LargeScriptCharThreshold
+            : 150_000;
+        int lineThreshold = _editorConfig.LargeScriptLineThreshold > 0
+            ? _editorConfig.LargeScriptLineThreshold
+            : 500;
+        return fctb.TextLength > charThreshold || fctb.LinesCount > lineThreshold;
+    }
+
+    private bool TryResolveQuickSnippet(string typoCandidate, out string snippetText)
+    {
+        snippetText = string.Empty;
+        if (string.IsNullOrEmpty(typoCandidate))
+            return false;
+
+        if (_editorConfig.QuickSnippets.TryGetValue(typoCandidate, out snippetText))
+            return true;
+
+        return _editorConfig.QuickSnippets.TryGetValue(typoCandidate.ToUpperInvariant(), out snippetText);
     }
 
     private async void TimerTickMethod(object sender, FastColoredTextBox fastColoredTextBox)
@@ -271,7 +353,12 @@ public sealed partial class SqlTextModifyDefaultSqlImplementations
         timer.Stop();
         try
         {
-            await _autocompleteClass.AddAutocompleteForNZ(fastColoredTextBox.SelectionStart, _cleanSqlText);
+            if (IsCheapTypingPath(fastColoredTextBox))
+                return;
+
+            await _autocompleteClass.AddAutocompleteForNZ(
+                fastColoredTextBox.SelectionStart,
+                _cleanSqlText);
         }
         catch (Exception ex)
         {

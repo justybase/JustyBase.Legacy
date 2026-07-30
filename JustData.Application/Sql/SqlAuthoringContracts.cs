@@ -1,4 +1,5 @@
 using JustData.Application.Editor;
+using JustyBase.NetezzaSqlParser.Authoring;
 
 namespace JustData.Application.Sql;
 
@@ -6,7 +7,9 @@ public sealed record SqlLintRequest(
     EditorDocumentId DocumentId,
     string SqlText,
     string ConnectionName = "",
-    bool IncludeQuickFixes = true);
+    bool IncludeQuickFixes = true,
+    int KnownLineCount = -1,
+    SqlLintInvocation Invocation = SqlLintInvocation.Live);
 
 public sealed record SqlLintResult(
     EditorDocumentId DocumentId,

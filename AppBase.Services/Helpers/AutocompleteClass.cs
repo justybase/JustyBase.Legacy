@@ -8,6 +8,8 @@ using AppBase.Data.Core.Interfaces;
 using AppBase.Data.Core.Models;
 using FastColoredTextBoxNS.Helpers;
 using JustData.Application.Sql;
+using JustyBase.NetezzaSqlParser.Authoring;
+using SqlTypingPerfProbe = FastColoredTextBoxNS.Helpers.SqlTypingPerfProbe;
 using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -49,6 +51,9 @@ public partial class AutocompleteClass : IAutocompleteClass
             return;
         }
         _suggestionSearchInProgress = true;
+        long autocompleteStarted = Environment.TickCount64;
+        bool skipDeepScan = false;
+        int sqlLength = cleanSqlText?.Length ?? 0;
 
         try
         {
@@ -62,14 +67,31 @@ public partial class AutocompleteClass : IAutocompleteClass
         var additionalTabletData = _editorHost.AdditionalTabletData;
 
         int selStart = selectionStart;
+        skipDeepScan = SqlPerformancePolicy.ShouldSkipDeepAutocompleteScan(-1, sqlLength)
+            || SqlPerformancePolicy.ExceedsLineThreshold(cleanSqlText, SqlPerformancePolicy.HugeScriptLineThreshold);
 
-        if (_stopwatchAfterTableSearch.ElapsedMilliseconds > _withTempTablesMinInterval || !_stopwatchAfterTableSearch.IsRunning) // not more often than 1 second from the end
+        if (skipDeepScan)
+            return;
+
+        // Cap lookback so typing at the end of a huge single-statement script
+        // does not walk/allocate the entire document on every autocomplete tick.
+        string scanSql = cleanSqlText ?? string.Empty;
+        int scanStart = selStart;
+        if (sqlLength > SqlPerformancePolicy.AutocompleteLookbackCharLimit)
+        {
+            int windowStart = Math.Max(0, selStart - SqlPerformancePolicy.AutocompleteLookbackCharLimit);
+            int windowEnd = Math.Min(sqlLength, selStart + 4_096);
+            scanSql = cleanSqlText!.Substring(windowStart, windowEnd - windowStart);
+            scanStart = selStart - windowStart;
+        }
+
+        if (!skipDeepScan && (_stopwatchAfterTableSearch.ElapsedMilliseconds > _withTempTablesMinInterval || !_stopwatchAfterTableSearch.IsRunning)) // not more often than 1 second from the end
         {
             await Task.Run(() =>
             {
                 if (selectionStart == -1)
                     return;
-                if (MakeCteTask(additionalDataWith, selStart, cleanSqlText) != -1)
+                if (MakeCteTask(additionalDataWith, scanStart, scanSql) != -1)
                 {
                     List<string> ls = new List<string>();
                     foreach (var item in additionalDataWith)
@@ -80,7 +102,7 @@ public partial class AutocompleteClass : IAutocompleteClass
                     dynamicCollectionNz.HintWithTable = ls;
                 }
 
-                if (MakeTempTableHintsTask(additionalTabletData, cleanSqlText) != -1)
+                if (MakeTempTableHintsTask(additionalTabletData, scanSql) != -1)
                 {
                     foreach (var item in additionalTabletData)
                     {
@@ -102,7 +124,7 @@ public partial class AutocompleteClass : IAutocompleteClass
             string betweenParentheses = "";
             try
             {
-                betweenParentheses = BetweenParenthesesOrBrackets(selStart, cleanSqlText);
+                betweenParentheses = BetweenParenthesesOrBrackets(scanStart, scanSql);
             }
             catch (Exception)
             {
@@ -341,6 +363,14 @@ public partial class AutocompleteClass : IAutocompleteClass
         }
         finally
         {
+            // #region agent perf
+            SqlTypingPerfProbe.Instance.EnsureInitialized();
+            SqlTypingPerfProbe.Instance.Emit(
+                "autocomplete.nz_delayed",
+                "end",
+                Environment.TickCount64 - autocompleteStarted,
+                meta: $"sel={selectionStart};chars={sqlLength};skipDeep={skipDeepScan}");
+            // #endregion
             _suggestionSearchInProgress = false;
         }
     }

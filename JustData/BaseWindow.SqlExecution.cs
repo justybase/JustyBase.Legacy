@@ -19,6 +19,7 @@ using FastColoredTextBoxNS;
 using FastColoredTextBoxNS.Helpers;
 using JustDataAdditionalForms;
 using JustyBase.NetezzaDriver;
+using JustyBase.NetezzaSqlParser.Authoring;
 using System.Drawing;
 using JustyBaseLegacy.UI.Helpers;
 using JustyBaseLegacy.Services;
@@ -492,7 +493,10 @@ namespace JustyBaseLegacy.UI
                 return;
             }
 
-            document.UpdateTextFromView(editor.Text);
+            string editorSql = SqlPerformancePolicy.IsLargeScriptDocument(editor.LinesCount, editor.TextLength)
+                ? editor.TextFast
+                : editor.Text;
+            document.UpdateTextFromView(editorSql, editor.LinesCount);
 
             // Repeated keyboard input while a document is running is a
             // no-op at the view boundary. The VM still rejects races

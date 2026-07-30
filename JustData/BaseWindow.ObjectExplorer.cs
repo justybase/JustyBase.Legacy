@@ -19,6 +19,7 @@ using DatabaseDataGridView.WinForms;
 using DatabaseDataGridView.WinForms.Coloring;
 using FastColoredTextBoxNS;
 using JustyBase.NetezzaSqlParser.Authoring;
+using SqlTypingPerfProbe = FastColoredTextBoxNS.Helpers.SqlTypingPerfProbe;
 using FastColoredTextBoxNS.Helpers;
 using JustDataAdditionalForms;
 using JustData.Application.Schema;
@@ -388,36 +389,74 @@ namespace JustyBaseLegacy.UI
 
         public void FctbTextChanged(object sender, TextChangedEventArgs e)
         {
-            if (sender is FastColoredTextBox fctb)
-            {
-                if (_documentIdsByEditor.TryGetValue(fctb, out var documentId))
-                {
-                    var document = _editorWorkspaceViewModel.Documents.FirstOrDefault(item => item.Id == documentId);
-                    document?.UpdateTextFromView(fctb.Text);
-                }
+            if (sender is not FastColoredTextBox fctb)
+                return;
 
-                string? currentColumn = _netezzaAutocompleteState.CurrentColumn;
-                _cleanSqlText = _sqlTextChangingDefaultSqlImplementation.HandleTextChanged(fctb, e, _colorTheme.CurrentFctbColors, ref _empty, _cleanSqlText, ref currentColumn,
+            // #region agent perf
+            SqlTypingPerfProbe.Instance.EnsureInitialized();
+            SqlTypingPerfLocal.Enabled = SqlTypingPerfProbe.Instance.Enabled;
+            // #endregion
+
+            string documentKey = _documentIdsByEditor.TryGetValue(fctb, out var documentId)
+                ? documentId.ToString()
+                : fctb.GetHashCode().ToString();
+
+            int textLength = fctb.TextLength;
+            fctb.DelayedTextChangedInterval = SqlPerformancePolicy.GetTypingDelayedMs(fctb.LinesCount, textLength);
+            // #region agent perf
+            SqlTypingPerfProbe.Instance.MarkDocChange(documentKey, textLength, fctb.LinesCount, e.ChangedRange.Length);
+            // #endregion
+
+            string? currentColumn = _netezzaAutocompleteState.CurrentColumn;
+            // #region agent perf
+            using (SqlTypingPerfProbe.Instance.Measure(
+                       "host.fctb_text_changed",
+                       documentKey: documentKey,
+                       chars: textLength,
+                       lines: fctb.LinesCount,
+                       changedChars: e.ChangedRange.Length,
+                       meta: "HandleTextChanged"))
+            // #endregion
+            {
+                _cleanSqlText = _sqlTextChangingDefaultSqlImplementation.HandleTextChanged(
+                    fctb,
+                    e,
+                    _colorTheme.CurrentFctbColors,
+                    ref _empty,
+                    _cleanSqlText,
+                    ref currentColumn,
                     fctb.Name.StartsWith("NetezzaSQL") || _generalDbService.DriverName(SelectedConnectionName) == "NetezzaSQL");
-                _netezzaAutocompleteState.CurrentColumn = currentColumn;
             }
+
+            _netezzaAutocompleteState.CurrentColumn = currentColumn;
         }
 
-        public async void FctbTextChangedDelayed(object sender, TextChangedEventArgs e)
+        public void FctbTextChangedDelayed(object sender, TextChangedEventArgs e)
         {
             if (sender is not FastColoredTextBox fastColored || fastColored.IsDisposed)
                 return;
 
+            // #region agent perf
+            SqlTypingPerfProbe.Instance.EnsureInitialized();
+            long delayedStarted = Environment.TickCount64;
+            // #endregion
             try
             {
+                int lineCount = fastColored.LinesCount;
+                int charCount = fastColored.TextLength;
+                bool isLargeDoc = SqlPerformancePolicy.IsLargeScriptDocument(lineCount, charCount);
+
                 EditorDocumentViewModel? document = null;
                 bool workspaceTextIsClean = false;
                 if (_documentIdsByEditor.TryGetValue(fastColored, out var documentId))
                 {
                     document = _editorWorkspaceViewModel.Documents.FirstOrDefault(item => item.Id == documentId);
-                    document?.UpdateTextFromView(fastColored.Text);
-                    workspaceTextIsClean = document is { IsDirty: false }
-                        && string.Equals(document.Text, fastColored.Text, StringComparison.Ordinal);
+                    if (isLargeDoc)
+                        document?.MarkEditorDirty();
+                    else
+                        document?.UpdateTextFromView(fastColored.Text, lineCount);
+
+                    workspaceTextIsClean = document is { IsDirty: false };
                 }
 
                 TabPageMainTag? tag = fastColored.FindAncestorTabPage()?.Tag as TabPageMainTag;
@@ -440,7 +479,7 @@ namespace JustyBaseLegacy.UI
                     : document.ConnectionName;
                 bool isNetezza = fastColored.Name.StartsWith("NetezzaSQL", StringComparison.Ordinal)
                     || _generalDbService.DriverName(connectionName) == "NetezzaSQL";
-                if (isNetezza)
+                if (isNetezza && !isLargeDoc)
                 {
                     EditorDocumentViewModel? workspaceDocument = document ?? EnsureWorkspaceDocument(fastColored);
                     if (workspaceDocument is not null)
@@ -450,31 +489,50 @@ namespace JustyBaseLegacy.UI
                     }
                 }
 
-                // Object-explorer text is global presentation state. A delayed
-                // callback from a background document must not overwrite the
-                // active document's parsed text after a tab switch.
                 if (ReferenceEquals(fastColored, CurrentTB))
                 {
-                    _cleanSqlText = _sqlTextChangingDefaultSqlImplementation.HandleSqlTextModification(
-                        e,
-                        fastColored,
-                        _colorTheme.CurrentFctbColors,
-                        ref _empty,
-                        _cleanSqlText);
-                    if (_applicationSettingsContext.Config.DoLegend && _leftTabs.SelectedTab?.Text == "Outline")
-                        RebuildObjectExplorer(_cleanSqlText);
-                }
+                    // #region agent perf
+                    using (SqlTypingPerfProbe.Instance.Measure(
+                               "host.fctb_text_changed_delayed",
+                               chars: charCount,
+                               lines: lineCount,
+                               meta: isLargeDoc ? "large=1" : "large=0"))
+                    // #endregion
+                    {
+                        _cleanSqlText = _sqlTextChangingDefaultSqlImplementation.HandleSqlTextModification(
+                            e,
+                            fastColored,
+                            _colorTheme.CurrentFctbColors,
+                            ref _empty,
+                            _cleanSqlText);
+                    }
 
-                if (document is not null)
-                    await document.SqlAuthoring.LintNowAsync(fastColored.Text, connectionName);
+                    if (!isLargeDoc
+                        && _applicationSettingsContext.Config.DoLegend
+                        && _leftTabs.SelectedTab?.Text == "Outline"
+                        && !SqlPerformancePolicy.ShouldSkipOutline(lineCount, charCount))
+                    {
+                        RebuildObjectExplorer(_cleanSqlText);
+                    }
+                }
             }
             catch (OperationCanceledException)
             {
-                // A newer delayed edit superseded this lint pass.
             }
             catch (Exception exception)
             {
                 Trace.WriteLine($"Object explorer refresh failed: {exception.GetType().Name}");
+            }
+            finally
+            {
+                // #region agent perf
+                SqlTypingPerfProbe.Instance.Emit(
+                    "host.fctb_text_changed_delayed_total",
+                    "end",
+                    Environment.TickCount64 - delayedStarted,
+                    chars: fastColored.TextLength,
+                    lines: fastColored.LinesCount);
+                // #endregion
             }
         }
         readonly Regex _baseTableNZ = RegexBaseTableNZ();
@@ -705,15 +763,30 @@ namespace JustyBaseLegacy.UI
 
         private void ApplySemanticClassification(FastColoredTextBox editor, string documentUri)
         {
-            // The classifier owns SQL semantics. FCTB's base SQL styles continue to render
-            // comments, strings and numbers; this call warms the shared per-document cache.
-            // Keep the captured text check so an obsolete delayed event never becomes visible.
-            string text = editor.Text;
-            var tokens = _legacySqlAuthoringServices.ClassifySemanticTokens(text, documentUri);
-            if (editor.IsDisposed || !string.Equals(editor.Text, text, StringComparison.Ordinal))
+            if (editor.IsDisposed)
                 return;
 
-            ApplySemanticStyling(editor, tokens, _colorTheme.CurrentFctbColors);
+            int lineCount = editor.LinesCount;
+            int charCount = editor.TextLength;
+            if (SqlPerformancePolicy.ShouldSkipSemanticClassification(lineCount, charCount)
+                || SqlPerformancePolicy.IsLargeScriptDocument(lineCount, charCount))
+                return;
+
+            // #region agent perf
+            using (SqlTypingPerfProbe.Instance.Measure(
+                       "host.semantic",
+                       chars: charCount,
+                       lines: lineCount,
+                       meta: "Classify+Apply"))
+            // #endregion
+            {
+                string text = editor.Text;
+                var tokens = _legacySqlAuthoringServices.ClassifySemanticTokens(text, documentUri);
+                if (editor.IsDisposed || !string.Equals(editor.Text, text, StringComparison.Ordinal))
+                    return;
+
+                ApplySemanticStyling(editor, tokens, _colorTheme.CurrentFctbColors);
+            }
         }
 
         private static void ApplySemanticStyling(FastColoredTextBox editor, IReadOnlyList<SemanticTokenSpan> tokens, FctbColors colors)

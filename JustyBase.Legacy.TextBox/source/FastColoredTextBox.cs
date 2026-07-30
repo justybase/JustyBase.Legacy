@@ -20,6 +20,7 @@
 //
 // #define Styles32
 
+using FastColoredTextBoxNS.Helpers;
 using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
@@ -1001,6 +1002,13 @@ namespace FastColoredTextBoxNS
             get { return timer.Interval; }
             set { timer.Interval = value; }
         }
+
+        /// <summary>
+        /// Skip built-in syntax highlighter on huge documents (legacy SQL uses custom styling).
+        /// </summary>
+        public static int LargeScriptSyntaxSkipCharThreshold { get; set; } = 150_000;
+
+        public static int LargeScriptSyntaxSkipLineThreshold { get; set; } = 500;
 
         /// <summary>
         /// Minimal delay(ms) for TextChangedDelayed event.
@@ -6338,15 +6346,42 @@ namespace FastColoredTextBoxNS
 #if debug
             var sw = Stopwatch.StartNew();
             #endif
+            // #region agent perf
+            SqlTypingPerfProbe.Instance.EnsureInitialized();
+            int perfChars = TextLength;
+            int perfLines = LinesCount;
+            int perfChanged = args.ChangedRange?.Length ?? -1;
+            // #endregion
             CancelToolTip();
             ClearHints();
             IsChanged = true;
             TextVersion++;
-            MarkLinesAsChanged(args.ChangedRange);
-            ClearFoldingState(args.ChangedRange);
+            // #region agent perf
+            using (SqlTypingPerfProbe.Instance.Measure(
+                       "fctb.core",
+                       chars: perfChars,
+                       lines: perfLines,
+                       changedChars: perfChanged,
+                       meta: "MarkLines+ClearFolding"))
+            // #endregion
+            {
+                MarkLinesAsChanged(args.ChangedRange);
+                ClearFoldingState(args.ChangedRange);
+            }
             //
             if (wordWrap)
-                RecalcWordWrap(args.ChangedRange.Start.iLine, args.ChangedRange.End.iLine);
+            {
+                // #region agent perf
+                using (SqlTypingPerfProbe.Instance.Measure(
+                           "fctb.wordwrap",
+                           chars: perfChars,
+                           lines: perfLines,
+                           changedChars: perfChanged))
+                // #endregion
+                {
+                    RecalcWordWrap(args.ChangedRange.Start.iLine, args.ChangedRange.End.iLine);
+                }
+            }
             //
             base.OnTextChanged(args);
 
@@ -6359,15 +6394,34 @@ namespace FastColoredTextBoxNS
             needRiseTextChangedDelayed = true;
             ResetTimer(timer2);
             //
-            OnSyntaxHighlight(args);
+            // #region agent perf
+            using (SqlTypingPerfProbe.Instance.Measure(
+                       "fctb.syntax_highlight",
+                       chars: perfChars,
+                       lines: perfLines,
+                       changedChars: perfChanged))
+            // #endregion
+            {
+                OnSyntaxHighlight(args);
+            }
             //
-            if (TextChanged != null)
-                TextChanged(this, args);
-            //
-            if (BindingTextChanged != null)
-                BindingTextChanged(this, EventArgs.Empty);
-            //
-            base.OnTextChanged(EventArgs.Empty);
+            // #region agent perf
+            using (SqlTypingPerfProbe.Instance.Measure(
+                       "fctb.subscribers",
+                       chars: perfChars,
+                       lines: perfLines,
+                       changedChars: perfChanged,
+                       meta: "TextChanged+Binding+base"))
+            // #endregion
+            {
+                if (TextChanged != null)
+                    TextChanged(this, args);
+                //
+                if (BindingTextChanged != null)
+                    BindingTextChanged(this, EventArgs.Empty);
+                //
+                base.OnTextChanged(EventArgs.Empty);
+            }
             //
 #if debug
             Console.WriteLine("OnTextChanged: " + sw.ElapsedMilliseconds);
@@ -7542,6 +7596,10 @@ namespace FastColoredTextBoxNS
 
         public virtual void OnSyntaxHighlight(TextChangedEventArgs args)
         {
+            if (TextLength > LargeScriptSyntaxSkipCharThreshold
+                || LinesCount > LargeScriptSyntaxSkipLineThreshold)
+                return;
+
             #if debug
             Stopwatch sw = Stopwatch.StartNew();
             #endif

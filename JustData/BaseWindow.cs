@@ -26,6 +26,7 @@ using FastColoredTextBoxNS.Helpers;
 using JustDataAdditionalForms;
 using JustyBase.NetezzaDriver;
 using System.Drawing;
+using JustyBase.NetezzaSqlParser.Authoring;
 using JustyBase.NetezzaSqlParser.Linter;
 using JustyBaseLegacy.UI.Helpers;
 using JustyBaseLegacy.Services;
@@ -61,6 +62,7 @@ using SpreadSheetTasks;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
@@ -531,10 +533,12 @@ namespace JustyBaseLegacy.UI
 
             InitializeComponent();
 
+            tabContextMenuStrip.Opening += TabContextMenuStrip_Opening;
             _tabManager.Initialize(_tabControlMain);
 
             if (_tabManager is DockSuiteTabManager dsm)
             {
+                dsm.SetDocumentTabContextMenu(tabContextMenuStrip);
                 dsm.TabCloseRequested = tabPage => _ = DoClosingOfTabAsync(_tabControlMain, tabPage);
                 dsm.ActiveDocumentChanged = documentId =>
                 {
@@ -605,7 +609,11 @@ namespace JustyBaseLegacy.UI
             ApplyShellLayout();
             LayoutMainSplitter();
             HandleCreated += (_, _) => RefreshTitleBarChrome();
-            Shown += (_, _) => RefreshTitleBarChrome();
+            Shown += (_, _) =>
+            {
+                RefreshTitleBarChrome();
+                TryOpenUiTestFileAfterShown();
+            };
             Load += (_, _) =>
             {
                 ApplyShellLayout();
@@ -639,6 +647,30 @@ namespace JustyBaseLegacy.UI
             _regularActionTimer.Interval = 1_000 * 60 * _applicationSettingsContext.Config.RegularActionTimerMinutes;
             _regularActionTimer.Tick += RegularActionTimer_Tick;
             _regularActionTimer.Start();
+        }
+
+        private bool _uiTestOpenFileScheduled;
+
+        private void TryOpenUiTestFileAfterShown()
+        {
+            if (_uiTestOpenFileScheduled)
+                return;
+            if (!StartupArguments.TryGetUiTestOpenFile(Environment.GetCommandLineArgs(), out string filePath))
+                return;
+            if (!File.Exists(filePath))
+            {
+                Trace.WriteLine($"[UiTest] open-file missing: {filePath}");
+                return;
+            }
+
+            _uiTestOpenFileScheduled = true;
+            // Defer so login/schema startup can settle before loading a huge script.
+            BeginInvoke(new Action(() =>
+            {
+                _ = RunUiEventAsync(
+                    nameof(OpenSqlFileAsync),
+                    () => OpenSqlFileAsync(filePath));
+            }));
         }
 
         private async Task LoadSourceTextCacheFromMenuAsync()
@@ -1276,14 +1308,6 @@ namespace JustyBaseLegacy.UI
                         break;
                     }
                 }
-                if (CurrentTB is null)
-                {
-                    cmsOpenInExplorer.Enabled = false;
-                }
-                else
-                {
-                    cmsOpenInExplorer.Enabled = true;
-                }
             }
         }
 
@@ -1494,6 +1518,10 @@ namespace JustyBaseLegacy.UI
 
 
             sqlUpper.CurrentTb.DelayedTextChangedInterval = _applicationSettingsContext.Config.DelayedTextChangedInterval;
+            _applicationSettingsContext.Config.LargeScriptCharThreshold = SqlPerformancePolicy.LargeScriptCharThreshold;
+            _applicationSettingsContext.Config.LargeScriptLineThreshold = SqlPerformancePolicy.LargeScriptLineThreshold;
+            FastColoredTextBox.LargeScriptSyntaxSkipCharThreshold = SqlPerformancePolicy.LargeScriptCharThreshold;
+            FastColoredTextBox.LargeScriptSyntaxSkipLineThreshold = SqlPerformancePolicy.LargeScriptLineThreshold;
 
             _sessionVariableRuntimeContext.ActualTabTitleText = ActiveEditorTabPage?.Text ?? string.Empty;
 
@@ -1654,25 +1682,37 @@ namespace JustyBaseLegacy.UI
             CloseOtherTabs();
         }
 
+        private void TabContextMenuStrip_Opening(object? sender, CancelEventArgs e)
+        {
+            string? path = TryGetEditorFilePath(ActiveEditorTabPage);
+            bool hasPath = !string.IsNullOrWhiteSpace(path);
+            cmsOpenInExplorer.Enabled = hasPath && File.Exists(path);
+            cmsCopyFullFilepath.Enabled = hasPath;
+        }
+
+        private static string? TryGetEditorFilePath(TabPage? tab)
+        {
+            if (tab?.Tag is TabPageMainTag tag && !string.IsNullOrWhiteSpace(tag.Filename))
+                return tag.Filename;
+
+            if (!string.IsNullOrWhiteSpace(tab?.Text) && File.Exists(tab.Text))
+                return tab.Text;
+
+            return null;
+        }
+
         private void OpenInExplorerEvenHandler(object sender, EventArgs e)
         {
-            if (ActiveEditorTabPage is not TabPage currentTab)
-            {
+            if (TryGetEditorFilePath(ActiveEditorTabPage) is not { } path || !File.Exists(path))
                 return;
-            }
 
-            if (currentTab.Tag != null)
-            {
-                if (File.Exists((currentTab.Tag as TabPageMainTag).Filename))
-                {
-                    Process.Start("explorer.exe", $"/select, {(currentTab.Tag as TabPageMainTag).Filename}");
-                }
-            }
-            else if (File.Exists(currentTab.Text))
-            {
-                Process.Start("explorer.exe", $"/select, {currentTab.Text}");
-            }
+            Process.Start("explorer.exe", $"/select, {path}");
+        }
 
+        private void CopyFullFilepathEventHandler(object sender, EventArgs e)
+        {
+            if (TryGetEditorFilePath(ActiveEditorTabPage) is { } path)
+                Clipboard.SetText(path);
         }
 
 

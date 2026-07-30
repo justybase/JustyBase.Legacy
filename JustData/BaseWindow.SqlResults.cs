@@ -618,7 +618,11 @@ namespace JustyBaseLegacy.UI
         {
             try
             {
-                await document.SqlAuthoring.LintNowAsync(document.Text, document.ConnectionName);
+                await document.SqlAuthoring.LintNowAsync(
+                    document.Text,
+                    document.ConnectionName,
+                    JustyBase.NetezzaSqlParser.Authoring.SqlLintInvocation.Manual,
+                    JustyBase.NetezzaSqlParser.Authoring.SqlPerformancePolicy.CountLines(document.Text));
             }
             catch (OperationCanceledException)
             {

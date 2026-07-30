@@ -11,18 +11,29 @@ public static class SqlTextCursorParser
 {
     public static string BetweenSemicolons(int position, string sqlText)
     {
+        (int start, int end) = GetStatementBounds(position, sqlText);
+        if (start < 0 || end < start)
+            return string.Empty;
+        return sqlText[start..end];
+    }
+
+    /// <summary>
+    /// Top-level statement bounds around <paramref name="position"/> (semicolon-delimited, quote-aware).
+    /// </summary>
+    public static (int Start, int End) GetStatementBounds(int position, string sqlText)
+    {
         ArgumentNullException.ThrowIfNull(sqlText);
 
-        bool quoteBalance = true;
-        bool doubleQuoteBalance = true;
         int length = sqlText.Length;
+        if (position == -1 || length == 0)
+            return (-1, -1);
 
         if (position >= length)
             position = length - 1;
-        int start = position > 0 ? position - 1 : position;
 
-        if (position == -1)
-            return string.Empty;
+        bool quoteBalance = true;
+        bool doubleQuoteBalance = true;
+        int start = position > 0 ? position - 1 : position;
 
         while (start > 0 && start < length)
         {
@@ -32,7 +43,8 @@ public static class SqlTextCursorParser
                 start++;
                 break;
             }
-            else if (c == '\'')
+
+            if (c == '\'')
                 quoteBalance = !quoteBalance;
             else if (c == '"')
                 doubleQuoteBalance = !doubleQuoteBalance;
@@ -47,16 +59,18 @@ public static class SqlTextCursorParser
             char c = sqlText[end];
             if (c == ';' && quoteBalance && doubleQuoteBalance)
                 break;
-            else if (c == '\'')
+
+            if (c == '\'')
                 quoteBalance = !quoteBalance;
             else if (c == '"')
                 doubleQuoteBalance = !doubleQuoteBalance;
             end++;
         }
 
-        return end > length || end < start
-            ? sqlText[start..length]
-            : sqlText[start..end];
+        if (end > length || end < start)
+            return (start, length);
+
+        return (start, end);
     }
 
     public static string BetweenParenthesesOrBrackets(int position, string sqlText)

@@ -7,6 +7,7 @@ using FlaUI.Core.WindowsAPI;
 using FlaUI.UIA3;
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows.Forms;
 
@@ -262,6 +263,132 @@ internal static class UiTestHelpers
         return ReadClipboardText();
     }
 
+    private static readonly string FlaUiStepLogPath = Path.Combine(
+        Path.GetTempPath(),
+        "justybase-flaui-steps.log");
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    internal static void FlaUiStep(string message)
+    {
+        string line = $"{DateTime.Now:HH:mm:ss.fff} {message}";
+        Trace.WriteLine("[FlaUI] " + line);
+        try
+        {
+            File.AppendAllText(FlaUiStepLogPath, line + Environment.NewLine);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// After login: schema refresh + startup file restore (BIG.SQL) should settle.
+    /// </summary>
+    internal static void WaitForPostLoginIdle(Window main, TimeSpan? schemaTimeout = null)
+    {
+        FlaUiStep("WaitForPostLoginIdle: start");
+        TimeSpan timeout = schemaTimeout ?? TimeSpan.FromSeconds(90);
+        try
+        {
+            WaitFor(
+                () =>
+                {
+                    var status = main.FindFirstDescendant(cf => cf.ByAutomationId("statusTextBox"));
+                    string? text = status?.AsTextBox()?.Text;
+                    return text?.Contains("Schema downloaded", StringComparison.OrdinalIgnoreCase) == true
+                        ? status
+                        : null;
+                },
+                "schema downloaded (status bar)",
+                timeout: timeout);
+        }
+        catch (TimeoutException)
+        {
+            FlaUiStep("WaitForPostLoginIdle: schema status not seen; continuing after fixed delay");
+        }
+
+        Thread.Sleep(2_000);
+        FlaUiStep("WaitForPostLoginIdle: done (+2s after schema)");
+    }
+
+    internal static void BringSessionToForeground(UiSession session)
+    {
+        FlaUiStep("BringSessionToForeground");
+        try
+        {
+            if (!session.Process.HasExited && session.Process.MainWindowHandle != IntPtr.Zero)
+                SetForegroundWindow(session.Process.MainWindowHandle);
+        }
+        catch (Exception ex)
+        {
+            FlaUiStep("SetForegroundWindow failed: " + ex.GetType().Name);
+        }
+
+        try
+        {
+            session.MainWindow.Focus();
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+        }
+
+        Thread.Sleep(300);
+    }
+
+    internal static AutomationElement FindSqlEditor(Window main) =>
+        WaitFor(
+            () =>
+            {
+                AutomationElement? editor = main.FindFirstDescendant(cf => cf.ByAutomationId("NetezzaSQL_addedFastColored"))
+                    ?? main.FindFirstDescendant(cf => cf.ByAutomationId("_addedFastColored"));
+                if (editor is null)
+                    return null;
+                var rect = editor.BoundingRectangle;
+                if (rect.Width < 20 || rect.Height < 20)
+                    return null;
+                return editor;
+            },
+            "the visible SQL editor",
+            timeout: TimeSpan.FromSeconds(120));
+
+    /// <summary>
+    /// Mouse focus on FCTB then Ctrl+End (FCTB GoLastLine — scroll + caret to last line).
+    /// </summary>
+    internal static void FocusSqlEditorAtDocumentEnd(Window main, UiSession session)
+    {
+        FlaUiStep("FocusSqlEditorAtDocumentEnd: start");
+        BringSessionToForeground(session);
+
+        Window window = WaitFor(
+            () => TryFindMainWindow(session.Application, session.Automation),
+            "main window (refreshed)",
+            timeout: TimeSpan.FromSeconds(30));
+        AutomationElement editor = FindSqlEditor(window);
+
+        Keyboard.Press(VirtualKeyShort.ESCAPE);
+        Thread.Sleep(200);
+
+        var rect = editor.BoundingRectangle;
+        FlaUiStep($"editor rect=({rect.X},{rect.Y},{rect.Width}x{rect.Height})");
+
+        // Click lower area so caret lands near visible bottom before GoLastLine.
+        int x = (int)(rect.X + Math.Max(40, rect.Width / 2));
+        int y = (int)(rect.Y + rect.Height - 40);
+        Mouse.MoveTo(x, y);
+        Thread.Sleep(100);
+        Mouse.Click(MouseButton.Left);
+        Thread.Sleep(600);
+
+        FlaUiStep("sending Ctrl+End (GoLastLine)");
+        Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.END);
+        Thread.Sleep(2_000);
+        Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.END);
+        Thread.Sleep(1_000);
+        FlaUiStep("FocusSqlEditorAtDocumentEnd: done");
+    }
+
     internal static string ReadClipboardText()
     {
         string? result = null;
@@ -375,7 +502,9 @@ internal static class UiTestHelpers
         string? exePath = null,
         bool useDarkTheme = false,
         bool navigateDocumentationDimDate = false,
-        bool documentationShowcaseLayout = false)
+        bool documentationShowcaseLayout = false,
+        string? openSqlFilePath = null,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         MinimizeAllWindows();
         KillExistingInstances();
@@ -397,12 +526,25 @@ internal static class UiTestHelpers
             launchArguments.Add("--ui-test-showcase-layout");
         }
 
-        var application = FlaUI.Core.Application.Launch(new ProcessStartInfo
+        if (!string.IsNullOrWhiteSpace(openSqlFilePath))
+        {
+            launchArguments.Add("--ui-test-open-file=" + openSqlFilePath);
+        }
+
+        var startInfo = new ProcessStartInfo
         {
             FileName = exePath,
-            Arguments = string.Join(' ', launchArguments),
             UseShellExecute = false
-        });
+        };
+        foreach (string argument in launchArguments)
+            startInfo.ArgumentList.Add(argument);
+        if (environment is not null)
+        {
+            foreach (var pair in environment)
+                startInfo.Environment[pair.Key] = pair.Value;
+        }
+
+        var application = FlaUI.Core.Application.Launch(startInfo);
         var automation = new UIA3Automation();
         var process = Process.GetProcessById(application.ProcessId);
 

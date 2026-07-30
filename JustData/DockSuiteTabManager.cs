@@ -60,6 +60,7 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
     private QueryWatchDockContent? _queryWatchContent;
     private readonly Dictionary<TabPage, TabControl> _perTabResults = new();
     private TabControl? _mainTabControl;
+    private ContextMenuStrip? _documentTabContextMenuStrip;
 
     public DockSuiteTabManager(IUiDispatcher uiDispatcher)
     {
@@ -98,6 +99,16 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
         // retired DockPanel and reattached to a freshly created one during a
         // theme switch (see ApplyTheme).
         _dockPanel.ActiveDocumentChanged += OnActiveDocumentChanged;
+    }
+
+    /// <summary>
+    /// Assigns the shared context menu shown when right-clicking a SQL document tab.
+    /// </summary>
+    public void SetDocumentTabContextMenu(ContextMenuStrip? menu)
+    {
+        _documentTabContextMenuStrip = menu;
+        foreach (var dockContent in _tabToDockContent.Values)
+            dockContent.TabPageContextMenuStrip = menu;
     }
 
     private void OnActiveDocumentChanged(object? sender, EventArgs e)
@@ -149,6 +160,9 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
         // right-click works inside the editor document window.
         if (tabPage.ContextMenuStrip is not null)
             dockContent.ContextMenuStrip = tabPage.ContextMenuStrip;
+
+        if (_documentTabContextMenuStrip is not null)
+            dockContent.TabPageContextMenuStrip = _documentTabContextMenuStrip;
 
         // Redirect DockContent close button to the existing close logic
         // so save-confirm and cleanup are handled consistently.

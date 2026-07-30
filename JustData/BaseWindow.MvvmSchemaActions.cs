@@ -297,14 +297,13 @@ public partial class BaseWindow
 
     private async Task OpenAllTableDdlAsync(ExplorerNodeViewModel node)
     {
-        await _databaseExplorerViewModel.ExpandAsync(node);
-        var ddl = new StringBuilder();
-        foreach (ExplorerNodeViewModel table in node.Children.Where(child => child.Kind == SchemaNodeKind.Table))
-        {
-            ddl.AppendLine(await GetSchemaDdlTextAsync(table, SchemaDdlKind.Create));
-            ddl.AppendLine();
-        }
-        AddMainTab(null, $"ddl {node.Path.Database}.{node.Name} tables", ddl.ToString());
+        string connectionName = node.Path.Connection;
+        string databaseName = node.Path.Database ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(databaseName))
+            throw new InvalidOperationException("Database is required for DDL Tables.");
+
+        string ddl = await _netezzaHelperService.GetAllTablesDdlAsync(connectionName, databaseName);
+        AddMainTab(null, $"ddl {databaseName} tables", ddl);
     }
 
     private void OpenGroomForm(string databaseName, string tableName)
