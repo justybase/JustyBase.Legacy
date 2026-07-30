@@ -15,6 +15,15 @@ public partial class BaseWindow
             return true;
         }
 
+        if ((keyData & Keys.Control) != 0
+            && (keyData & Keys.Alt) == 0
+            && (keyData & Keys.Shift) == 0
+            && key == Keys.P)
+        {
+            ShowQuickOpen();
+            return true;
+        }
+
         if ((keyData & Keys.Control) != 0 && key == Keys.Tab && EditorTabPages.Count > 1)
         {
             int currentIndex = ActiveEditorTabPage is TabPage activeTab
