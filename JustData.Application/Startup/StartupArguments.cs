@@ -23,6 +23,25 @@ public static class StartupArguments
     public static bool IsDocumentationDarkTheme(IReadOnlyList<string> args) =>
         args.Any(argument => argument.Equals("--dark", StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// Optional FlaUI/perf hook: <c>--ui-test-open-file=C:\path\big.sql</c> opens that file after main window load.
+    /// </summary>
+    public static bool TryGetUiTestOpenFile(IReadOnlyList<string> args, out string filePath)
+    {
+        const string prefix = "--ui-test-open-file=";
+        foreach (string argument in args)
+        {
+            if (!argument.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            filePath = argument[prefix.Length..].Trim().Trim('"');
+            return !string.IsNullOrWhiteSpace(filePath);
+        }
+
+        filePath = string.Empty;
+        return false;
+    }
+
     public static bool ShouldForwardToExistingInstance(bool ownsMutex, IReadOnlyList<string> args) =>
         !ownsMutex && args.Count >= 1 && !IsSilentOrScript(args[0]);
 
@@ -45,7 +64,8 @@ public static class StartupArguments
     private static bool IsDocumentationLaunchModifier(string argument) =>
         argument.Equals("--dark", StringComparison.OrdinalIgnoreCase)
         || argument.Equals("--ui-test-navigate-dimdate", StringComparison.OrdinalIgnoreCase)
-        || argument.Equals("--ui-test-showcase-layout", StringComparison.OrdinalIgnoreCase);
+        || argument.Equals("--ui-test-showcase-layout", StringComparison.OrdinalIgnoreCase)
+        || argument.StartsWith("--ui-test-open-file=", StringComparison.OrdinalIgnoreCase);
 
     public static bool ShouldRestoreStartupFiles(bool enabled, bool encryptedFileExists, bool plainFileExists) =>
         enabled && (encryptedFileExists || plainFileExists);

@@ -162,6 +162,11 @@ namespace FastColoredTextBoxNS
                 Selected(this, args);
         }
 
+        /// <summary>
+        /// Set by <see cref="AutocompleteListView.DoAutocomplete"/> — large-script engine runs only when true.
+        /// </summary>
+        public bool LastAutocompleteForced { get; internal set; }
+
         public new AutocompleteListView Items
         {
             get { return listView; }
@@ -425,6 +430,7 @@ namespace FastColoredTextBoxNS
 
         internal void DoAutocomplete(bool forced)
         {
+            Menu.LastAutocompleteForced = forced;
             if (!Menu.Enabled)
             {
                 Menu.Close();
@@ -535,7 +541,7 @@ namespace FastColoredTextBoxNS
             {
                 if (tb.HotkeysMapping.ContainsKey(e.KeyData) && tb.HotkeysMapping[e.KeyData] == FCTBAction.AutocompleteMenu)
                 {
-                    DoAutocomplete();
+                    DoAutocomplete(true);
                     e.Handled = true;
                 }
                 else

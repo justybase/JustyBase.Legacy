@@ -83,6 +83,21 @@ public sealed class StartupArgumentsTests
         Assert.False(StartupArguments.IsDocumentationNavigateDimDate(["--dark"]));
     }
 
+    [Fact]
+    public void TryGetUiTestOpenFile_when_switch_present_returns_path()
+    {
+        Assert.True(
+            StartupArguments.TryGetUiTestOpenFile(["--ui-test-open-file=C:\\temp\\big.sql"], out string path));
+        Assert.Equal(@"C:\temp\big.sql", path);
+    }
+
+    [Fact]
+    public void TryGetUiTestOpenFile_without_switch_returns_false()
+    {
+        Assert.False(StartupArguments.TryGetUiTestOpenFile(["--dark"], out string path));
+        Assert.Equal(string.Empty, path);
+    }
+
     // ── IsPreferencesUiTest ──
 
     [Fact]

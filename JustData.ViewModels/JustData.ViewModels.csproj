@@ -10,4 +10,10 @@
   <ItemGroup>
     <ProjectReference Include="..\JustData.Application\JustData.Application.csproj" />
   </ItemGroup>
+  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' == 'true'">
+    <ProjectReference Include="$(JustyBaseLocalNetezzaSqlParserProject)" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' != 'true'">
+    <PackageReference Include="JustyBase.NetezzaSqlParser" />
+  </ItemGroup>
 </Project>

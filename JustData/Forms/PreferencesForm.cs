@@ -296,7 +296,6 @@ namespace JustyBaseLegacy.UI
 
             cbResetSchema.Checked = _config.ResetSchema;
             cbLoadSourcesOnStartup.Checked = _config.LoadSourcesOnStartup;
-            cbOnlineOnlyDdls.Checked = _config.OnlineOnlyDdls;
             nuMaxSchemaParallelism.Value = _config.MaxSchemaParallelism;
             cbSimpleStarupRestore.Checked = _config.SimpleStartupRestore;
 
@@ -589,7 +588,6 @@ namespace JustyBaseLegacy.UI
 
             _config.ResetSchema = cbResetSchema.Checked;
             _config.LoadSourcesOnStartup = cbLoadSourcesOnStartup.Checked;
-            _config.OnlineOnlyDdls = cbOnlineOnlyDdls.Checked;
             _config.MaxSchemaParallelism = (int)this.nuMaxSchemaParallelism.Value;
             _config.SimpleStartupRestore = cbSimpleStarupRestore.Checked;
 

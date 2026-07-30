@@ -3,6 +3,7 @@ using JustData.Application;
 using JustData.Application.Editor;
 using JustData.Application.Sql;
 using JustData.ViewModels.Sql;
+using JustyBase.NetezzaSqlParser.Authoring;
 using System.Collections.ObjectModel;
 
 namespace JustData.ViewModels.Editor;
@@ -165,16 +166,28 @@ public sealed class EditorDocumentViewModel : ObservableObject, IDisposable
     public event Action<EditorDocumentViewModel, EditorFileChange>? ExternalChangeDetected;
     public event Action<EditorDocumentViewModel, IReadOnlyList<SqlDiagnostic>>? DiagnosticsChanged;
 
-    public void UpdateTextFromView(string text)
+    /// <summary>
+    /// Marks the document dirty without copying editor text into <see cref="Text"/>.
+    /// Used for huge scripts where full sync on every delayed edit freezes the UI.
+    /// Save/run/sync paths still call <see cref="UpdateTextFromView"/>.
+    /// </summary>
+    public void MarkEditorDirty()
+    {
+        ThrowIfDisposed();
+        if (!IsDirty)
+            IsDirty = true;
+    }
+
+    public void UpdateTextFromView(string text, int knownLineCount = -1)
     {
         ThrowIfDisposed();
         text ??= string.Empty;
-        if (string.Equals(Text, text, StringComparison.Ordinal))
+        if (Text.Length == text.Length && string.Equals(Text, text, StringComparison.Ordinal))
             return;
 
         Text = text;
         IsDirty = true;
-        _ = SqlAuthoring.ScheduleLintAsync(Text, ConnectionName);
+        _ = SqlAuthoring.ScheduleLintAsync(Text, ConnectionName, knownLineCount: knownLineCount);
     }
 
     public void SetLoadedText(string text)
@@ -183,7 +196,8 @@ public sealed class EditorDocumentViewModel : ObservableObject, IDisposable
         Text = text ?? string.Empty;
         IsDirty = false;
         ExternalChangePending = false;
-        _ = SqlAuthoring.ScheduleLintAsync(Text, ConnectionName);
+        int knownLineCount = SqlPerformancePolicy.CountLines(Text);
+        _ = SqlAuthoring.ScheduleLintAsync(Text, ConnectionName, knownLineCount: knownLineCount);
     }
 
     public void MarkSaved()
@@ -192,7 +206,7 @@ public sealed class EditorDocumentViewModel : ObservableObject, IDisposable
         IsDirty = false;
         ExternalChangePending = false;
         if (SqlAuthoring.LintOnSave)
-            _ = SqlAuthoring.LintOnSaveAsync(Text, ConnectionName);
+            _ = SqlAuthoring.LintOnSaveAsync(Text, ConnectionName, SqlPerformancePolicy.CountLines(Text));
     }
 
     /// <summary>Copies the active editor's selection into document state.</summary>

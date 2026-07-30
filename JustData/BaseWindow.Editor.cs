@@ -25,6 +25,8 @@ using FastColoredTextBoxNS.Helpers;
 using JustDataAdditionalForms;
 using JustyBase.NetezzaDriver;
 using System.Drawing;
+using JustyBase.NetezzaSqlParser.Authoring;
+using SqlTypingPerfProbe = FastColoredTextBoxNS.Helpers.SqlTypingPerfProbe;
 using JustyBase.NetezzaSqlParser.Linter;
 using JustyBaseLegacy.UI.Helpers;
 using JustyBaseLegacy.Services;
@@ -239,6 +241,22 @@ namespace JustyBaseLegacy.UI
 
         public void FctbSelectionChangedDelayed(object sender, EventArgs e)
         {
+            // #region agent perf
+            SqlTypingPerfProbe.Instance.EnsureInitialized();
+            FastColoredTextBox? perfEditor = sender as FastColoredTextBox ?? CurrentTB;
+            using (SqlTypingPerfProbe.Instance.Measure(
+                       "host.selection_delayed",
+                       chars: perfEditor?.TextLength ?? -1,
+                       lines: perfEditor?.LinesCount ?? -1,
+                       meta: "same-words+cursor"))
+            // #endregion
+            {
+                FctbSelectionChangedDelayedCore(sender, e);
+            }
+        }
+
+        private void FctbSelectionChangedDelayedCore(object sender, EventArgs e)
+        {
             if (sender is FastColoredTextBox editor
                 && _documentIdsByEditor.TryGetValue(editor, out var documentId))
             {
@@ -253,6 +271,9 @@ namespace JustyBaseLegacy.UI
             }
             var tmp = CurrentTB.Selection.Start;
             this.cursorPositionTextBox.Text = $"(col:{tmp.iChar + 1} row:{(tmp.iLine + 1).ToString("N0")})";
+
+            if (SqlPerformancePolicy.IsLargeScriptDocument(CurrentTB.LinesCount, CurrentTB.TextLength))
+                return;
 
             CurrentTB.Range.ClearStyle(_colorTheme.CurrentFctbColors.SameWordsStyle);
 

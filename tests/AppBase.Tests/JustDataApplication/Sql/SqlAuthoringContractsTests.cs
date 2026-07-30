@@ -1,5 +1,6 @@
 using JustData.Application.Editor;
 using JustData.Application.Sql;
+using JustyBase.NetezzaSqlParser.Authoring;
 
 namespace AppBase.Tests.JustDataApplication.Sql;
 
@@ -14,15 +15,25 @@ public sealed class SqlAuthoringContractsTests
         Assert.Equal("SELECT 1", req.SqlText);
         Assert.Equal("", req.ConnectionName);
         Assert.True(req.IncludeQuickFixes);
+        Assert.Equal(-1, req.KnownLineCount);
+        Assert.Equal(SqlLintInvocation.Live, req.Invocation);
     }
 
     [Fact]
     public void SqlLintRequest_with_optional_fields()
     {
         var docId = EditorDocumentId.New();
-        var req = new SqlLintRequest(docId, "SELECT 1", "my_conn", false);
+        var req = new SqlLintRequest(
+            docId,
+            "SELECT 1",
+            "my_conn",
+            IncludeQuickFixes: false,
+            KnownLineCount: 42,
+            Invocation: SqlLintInvocation.Save);
         Assert.Equal("my_conn", req.ConnectionName);
         Assert.False(req.IncludeQuickFixes);
+        Assert.Equal(42, req.KnownLineCount);
+        Assert.Equal(SqlLintInvocation.Save, req.Invocation);
     }
 
     [Fact]

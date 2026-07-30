@@ -116,7 +116,7 @@ public sealed partial class MiscellaneousHelper
         return true;
     }
 
-    public static void UpdateAdditionStyles(FastColoredTextBoxNS.Range range, FctbColors colorTheme, bool bracketFolding)
+    public static void UpdateAdditionStyles(FastColoredTextBoxNS.Range range, FctbColors colorTheme, bool bracketFolding, bool cheapTypingPath = false)
     {
         try
         {
@@ -125,8 +125,11 @@ public sealed partial class MiscellaneousHelper
                 colorTheme.NumberStyle, colorTheme.MyCommandsStyle, colorTheme.ParamStyle);
             range.SetStyle(colorTheme.NumberStyle, _rxNumericValues);
 
-            range.SetStyle(colorTheme.BoldUnderlineStyle, _rxTableWithPodreslanie);
-            range.SetStyle(colorTheme.BoldUnderlineStyle, _rxWithPodreslanie2); // , name AS (
+            if (!cheapTypingPath)
+            {
+                range.SetStyle(colorTheme.BoldUnderlineStyle, _rxTableWithPodreslanie);
+                range.SetStyle(colorTheme.BoldUnderlineStyle, _rxWithPodreslanie2); // , name AS (
+            }
 
             //SQL params highlighting
             range.SetStyle(colorTheme.ParamStyle, _rxZmienna);
@@ -139,7 +142,12 @@ public sealed partial class MiscellaneousHelper
 
             //myCommandsStyle
             range.SetStyle(colorTheme.MyCommandsStyle, _rxMyCommands);
-            range.SetStyle(colorTheme.MyCommandsStyle, RxXlsx);
+            if (!cheapTypingPath)
+                range.SetStyle(colorTheme.MyCommandsStyle, RxXlsx);
+
+            // Folding marker refresh on every keystroke is very expensive on huge scripts.
+            if (cheapTypingPath)
+                return;
         }
         catch (Exception ex)
         {
@@ -149,9 +157,10 @@ public sealed partial class MiscellaneousHelper
         range.ClearFoldingMarkers();
 
         //set folding markers
-        range.SetFoldingMarkers(@"--[ \t]*region\b", @"--[ \t]*end[ \t]{0,1}region\b", RegexOptions.IgnoreCase);//allow to collapse --region blocks
+        if (!cheapTypingPath)
+            range.SetFoldingMarkers(@"--[ \t]*region\b", @"--[ \t]*end[ \t]{0,1}region\b", RegexOptions.IgnoreCase);//allow to collapse --region blocks
         range.SetFoldingMarkers(@"{", @"}");
-        if (bracketFolding)
+        if (bracketFolding && !cheapTypingPath)
         {
             range.SetFoldingMarkers(@"\(", @"\)");//allow to collapse brackets block
             range.SetFoldingMarkers(@"/\*", @"\*/");//allow to collapse comment block

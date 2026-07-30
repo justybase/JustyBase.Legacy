@@ -37,7 +37,6 @@
             this.cbLoadSourcesOnStartup = new System.Windows.Forms.CheckBox();
             this.nuMaxSchemaParallelism = new System.Windows.Forms.NumericUpDown();
             this.labelMaxSchemaParallelism = new System.Windows.Forms.Label();
-            this.cbOnlineOnlyDdls = new System.Windows.Forms.CheckBox();
             tabControls = new JustyBaseLegacy.UI.Controls.BorderlessTabControl();
             tabGeneral = new System.Windows.Forms.TabPage();
             groupBox5 = new System.Windows.Forms.GroupBox();
@@ -981,7 +980,6 @@
             // 
             // groupBox8
             // 
-            this.groupBox8.Controls.Add(this.cbOnlineOnlyDdls);
             this.groupBox8.Controls.Add(this.nuMaxSchemaParallelism);
             this.groupBox8.Controls.Add(this.labelMaxSchemaParallelism);
             this.groupBox8.Controls.Add(this.cbLoadSourcesOnStartup);
@@ -1241,19 +1239,9 @@
             this.cbLoadSourcesOnStartup.TabIndex = 5;
             this.cbLoadSourcesOnStartup.Text = "Load sources on startup";
             this.cbLoadSourcesOnStartup.UseVisualStyleBackColor = true;
-            // 
-            // cbOnlineOnlyDdls
-            // 
-            this.cbOnlineOnlyDdls.AutoSize = true;
-            this.cbOnlineOnlyDdls.Location = new System.Drawing.Point(10, 47);
-            this.cbOnlineOnlyDdls.Name = "cbOnlineOnlyDdls";
-            this.cbOnlineOnlyDdls.Size = new System.Drawing.Size(118, 19);
-            this.cbOnlineOnlyDdls.TabIndex = 8;
-            this.cbOnlineOnlyDdls.Text = "Online only DDLs";
-            this.cbOnlineOnlyDdls.UseVisualStyleBackColor = true;
-            // 
+            //
             // nuMaxSchemaParallelism
-            // 
+            //
             this.nuMaxSchemaParallelism.Location = new System.Drawing.Point(7, 95);
             this.nuMaxSchemaParallelism.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             this.nuMaxSchemaParallelism.Maximum = new decimal(new int[] { 64, 0, 0, 0 });
@@ -1753,7 +1741,6 @@
         private System.Windows.Forms.CheckBox cbLoadSourcesOnStartup;
         private System.Windows.Forms.NumericUpDown nuMaxSchemaParallelism;
         private System.Windows.Forms.Label labelMaxSchemaParallelism;
-        private System.Windows.Forms.CheckBox cbOnlineOnlyDdls;
         private System.Windows.Forms.CheckBox cbWordWrap;
         private System.Windows.Forms.CheckBox cbWordWrapAutoIndent;
         private System.Windows.Forms.GroupBox groupBox5;

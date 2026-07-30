@@ -119,6 +119,21 @@ public sealed class SqlTextCursorParserTests
     }
 
     [Fact]
+    public void GetStatementBounds_finds_trailing_statement_after_huge_prefix()
+    {
+        string prefix = new string('x', 200_000) + ";";
+        const string tail = "SELECT * FROM t WHERE d.";
+        string sql = prefix + tail;
+        int cursor = sql.Length;
+
+        (int start, int end) = SqlTextCursorParser.GetStatementBounds(cursor - 1, sql);
+
+        Assert.Equal(prefix.Length, start);
+        Assert.Equal(sql.Length, end);
+        Assert.Equal(tail, sql[start..end]);
+    }
+
+    [Fact]
     public void BetweenSemicolons_throws_for_null_text()
     {
         Assert.Throws<ArgumentNullException>(() => SqlTextCursorParser.BetweenSemicolons(0, null!));

@@ -21,6 +21,7 @@ using FastColoredTextBoxNS;
 using FastColoredTextBoxNS.Helpers;
 using JustDataAdditionalForms;
 using JustyBase.NetezzaDriver;
+using JustyBase.NetezzaSqlParser.Authoring;
 using JustData.Application.Editor;
 using System.Drawing;
 using JustyBase.NetezzaSqlParser.Linter;
@@ -386,7 +387,10 @@ namespace JustyBaseLegacy.UI
                 {
                     // Keep the workspace authoritative when a legacy editor
                     // control is saved through the old menu/shortcut surface.
-                    document.UpdateTextFromView(fctb.Text);
+                    string saveSql = SqlPerformancePolicy.IsLargeScriptDocument(fctb.LinesCount, fctb.TextLength)
+                        ? fctb.TextFast
+                        : fctb.Text;
+                    document.UpdateTextFromView(saveSql, fctb.LinesCount);
                     saved = await _editorWorkspaceViewModel.SaveAsAsync(
                         documentId,
                         filename,

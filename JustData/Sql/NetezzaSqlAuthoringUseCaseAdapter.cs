@@ -44,7 +44,12 @@ public sealed class NetezzaSqlAuthoringUseCaseAdapter : ISqlAuthoringUseCase
             return actions;
 
         IReadOnlyList<LintIssue> issues = await _legacyServices
-            .LintAsync(request.SqlText, request.DocumentId.ToString(), cancellationToken)
+            .LintAsync(
+                request.SqlText,
+                request.DocumentId.ToString(),
+                cancellationToken,
+                knownLineCount: -1,
+                invocation: SqlLintInvocation.Manual)
             .ConfigureAwait(false);
         LintIssue? issue = issues.FirstOrDefault(candidate =>
             string.Equals(candidate.RuleId, request.Diagnostic.Code, StringComparison.OrdinalIgnoreCase)

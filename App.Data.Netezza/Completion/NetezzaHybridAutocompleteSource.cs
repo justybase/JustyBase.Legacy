@@ -6,6 +6,8 @@ using AppBase.Data.Core.Core;
 using AppBase.Data.Core.Models;
 using FastColoredTextBoxNS;
 using FastColoredTextBoxNS.Helpers;
+using JustData.Application.Sql;
+using JustyBase.NetezzaSqlParser.Authoring;
 using JustyBase.NetezzaSqlParser.Completion;
 using JustyBase.NetezzaSqlParser.Visitor;
 using System.Collections;
@@ -161,11 +163,11 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         // shared DocumentParsingCoordinator. Do not cache the mapped FCTB list:
         // AliasHints and HintWithTable are intentionally mutated asynchronously
         // by AutocompleteClass and must be reflected immediately.
-        foreach (var item in BuildSqlCompletions(fragmentText, sql, cursorOffset))
+        foreach (var item in BuildSqlCompletions(fragmentText, sql, cursorOffset, tb.LinesCount))
             yield return item;
     }
 
-    private IEnumerable<AutocompleteItem> BuildSqlCompletions(string text, string sql, int cursorOffset)
+    private IEnumerable<AutocompleteItem> BuildSqlCompletions(string text, string sql, int cursorOffset, int lineCount)
     {
         var ddTables = FctbCompletionMapper.MapDatabaseDoubleDotTables(
             text, _schemaProvider, _completionServices.MetadataSnapshot);
@@ -174,6 +176,17 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
             foreach (var item in ddTables)
                 yield return item;
             yield break;
+        }
+
+        bool largeDoc = SqlPerformancePolicy.ShouldSkipDeepAutocompleteScan(lineCount, sql.Length);
+        bool forced = _menu.LastAutocompleteForced;
+        if (largeDoc && !forced)
+        {
+            int probe = Math.Min(cursorOffset, Math.Max(0, sql.Length - 1));
+            (int stmtStart, _) = SqlTextCursorParser.GetStatementBounds(probe, sql);
+            int stmtChars = stmtStart >= 0 ? cursorOffset - stmtStart : sql.Length;
+            if (stmtChars > SqlPerformancePolicy.PassiveAutocompleteStatementCharLimit)
+                yield break;
         }
 
         if (!string.IsNullOrWhiteSpace(_state.CurrentColumn))
@@ -188,7 +201,8 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
             AliasHints.Sort(NetezzaLegacyCompletionHelpers.SortMethodAliases(_keyValuePairsForAutocomplete));
         }
 
-        var engineItems = _completionEngine.GetCompletions(sql, cursorOffset).ToList();
+        (string engineSql, int engineCursor) = SliceSqlForEngine(sql, cursorOffset, largeDoc, forced);
+        var engineItems = _completionEngine.GetCompletions(engineSql, engineCursor).ToList();
         var mappedEngineItems = FctbCompletionMapper.MapEngineItems(
             engineItems, text, _schemaProvider, _completionServices.MetadataSnapshot, sql).ToList();
         var emittedLabels = BuildEmittedLabelSet(engineItems, text);
@@ -213,6 +227,36 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
 
         foreach (var item in YieldSupplementalAliasHints(engineItems, emittedLabels))
             yield return item;
+    }
+
+    public static (string Sql, int CursorOffset) SliceSqlForEngine(
+        string sql,
+        int cursorOffset,
+        bool largeDoc,
+        bool forcedAutocomplete = true)
+    {
+        if (!largeDoc || sql.Length <= SqlPerformancePolicy.AutocompleteLookbackCharLimit)
+            return (sql, cursorOffset);
+
+        int probe = Math.Min(cursorOffset, Math.Max(0, sql.Length - 1));
+        (int stmtStart, _) = SqlTextCursorParser.GetStatementBounds(probe, sql);
+        if (stmtStart >= 0)
+        {
+            int stmtChars = cursorOffset - stmtStart;
+            int stmtLimit = forcedAutocomplete
+                ? SqlPerformancePolicy.AutocompleteLookbackCharLimit
+                : SqlPerformancePolicy.PassiveAutocompleteStatementCharLimit;
+            if (stmtChars > 0 && stmtChars <= stmtLimit)
+            {
+                string block = sql.Substring(stmtStart, stmtChars);
+                return (block, block.Length);
+            }
+        }
+
+        int windowStart = Math.Max(0, cursorOffset - SqlPerformancePolicy.AutocompleteLookbackCharLimit);
+        int windowEnd = Math.Min(sql.Length, cursorOffset + 4_096);
+        string window = sql.Substring(windowStart, windowEnd - windowStart);
+        return (window, cursorOffset - windowStart);
     }
 
     private IEnumerable<AutocompleteItem> YieldSupplementalAliasHints(
