@@ -13,7 +13,7 @@ namespace JustyBase.Ai.Fim.LlamaSharp;
 /// <summary>
 /// Process-lifetime host for a GGUF FIM model (load once, reuse StatelessExecutor).
 /// </summary>
-public sealed class LlamaSharpModelHost : IAsyncDisposable
+public sealed class LlamaSharpModelHost : IAsyncDisposable, IDisposable
 {
     private readonly IFimModelStore _modelStore;
     private readonly Func<int> _getGpuLayerCount;
@@ -265,13 +265,9 @@ public sealed class LlamaSharpModelHost : IAsyncDisposable
         return result.TrimEnd('\0', '\r', '\n');
     }
 
-    public ValueTask DisposeAsync()
+    public void Dispose()
     {
-        if (_disposed)
-        {
-            return ValueTask.CompletedTask;
-        }
-
+        if (_disposed) return;
         _disposed = true;
         _executor = null;
         _weights?.Dispose();
@@ -279,6 +275,11 @@ public sealed class LlamaSharpModelHost : IAsyncDisposable
         _parameters = null;
         _loadedModelPath = null;
         _initGate.Dispose();
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        Dispose();
         return ValueTask.CompletedTask;
     }
 }
@@ -286,7 +287,7 @@ public sealed class LlamaSharpModelHost : IAsyncDisposable
 public readonly record struct FimInferTiming(string Text, int YieldCount, int RawChars, long ElapsedMs);
 
 /// <summary>ICompletionProvider backed by embedded LLamaSharp FIM inference.</summary>
-public sealed class LlamaSharpCompletionProvider : ICompletionProvider, IAsyncDisposable
+public sealed class LlamaSharpCompletionProvider : ICompletionProvider, IAsyncDisposable, IDisposable
 {
     private readonly LlamaSharpModelHost _host;
     private readonly IFimPromptBuilder _promptBuilder;
@@ -363,5 +364,6 @@ public sealed class LlamaSharpCompletionProvider : ICompletionProvider, IAsyncDi
         return t.TrimEnd();
     }
 
+    public void Dispose() => _host.Dispose();
     public ValueTask DisposeAsync() => _host.DisposeAsync();
 }

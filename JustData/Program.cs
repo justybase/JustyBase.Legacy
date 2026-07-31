@@ -80,7 +80,7 @@ public static class Program
     /// The process entry point. Application startup is delegated to AppBootstrapper.
     /// </summary>
     [STAThread]
-    static async Task Main(params string[] args)
+    static void Main(params string[] args)
     {
         LogToFile(StartupLogPath, "Starting Main");
         ServiceProvider? provider = null;
@@ -123,16 +123,17 @@ public static class Program
         finally
         {
             // Unregister exception handlers so disposal faults do not
-            // surface as user-visible dialogs (the WinForms ThreadException
-            // handler intercepts cross-thread OLE/STA errors from FCTB).
+            // surface as user-visible dialogs.
             Application.ThreadException -= OnThreadException;
             AppDomain.CurrentDomain.UnhandledException -= OnUnhandledException;
 
-            // Use async disposal to handle IAsyncDisposable-only services
-            // (e.g. LlamaSharpCompletionProvider) without throwing.
+            // Synchronous disposal on the STA thread avoids cross-thread
+            // OLE/STA errors from DockPanel Suite and other WinForms controls.
+            // LlamaSharpCompletionProvider now implements IDisposable (no-op)
+            // so the DI container can dispose it synchronously.
             if (provider is not null)
             {
-                try { await provider.DisposeAsync().ConfigureAwait(false); }
+                try { provider.Dispose(); }
                 catch { /* Dispose errors are non-fatal during shutdown */ }
             }
         }
