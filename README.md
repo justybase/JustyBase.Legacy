@@ -62,6 +62,7 @@ Light and dark themes are both first-class (`UseSpecialColoring`).
 ## Features
 
 - **Netezza-first SQL editor** — syntax highlighting, completion, and linting aimed at NPS SQL
+- **Quick Open (`Ctrl+P`)** — VS Code–style search across `.sql` file names and contents in the Files panel roots, the selected Git repo (when set), and open SQL tabs; Enter opens/focuses the file and jumps to a content match line when applicable
 - **Virtual-mode result grid** — large result sets, filter/export to CSV / Excel
 - **Object explorer** — connections, databases, tables; open DDL and navigate into objects
 - **Docked Preferences** — General, Colors & Editor, Snippets, Execution, Results — as a document tab, not a modal
