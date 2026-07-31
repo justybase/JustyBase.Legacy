@@ -34,6 +34,7 @@ using JustyBaseLegacy.UI.Sql;
 using JustData.Application.History;
 using JustData.Application.Git;
 using JustData.ViewModels.Git;
+using JustyBaseLegacy.UI.Fim;
 using JustyBaseLegacy.UI.Git;
 using JustyBaseLegacy.UI.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -79,9 +80,10 @@ public static class Program
     /// The process entry point. Application startup is delegated to AppBootstrapper.
     /// </summary>
     [STAThread]
-    static void Main(params string[] args)
+    static async Task Main(params string[] args)
     {
         LogToFile(StartupLogPath, "Starting Main");
+        ServiceProvider? provider = null;
         try
         {
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
@@ -94,7 +96,7 @@ public static class Program
 
             ServiceCollection services = new();
             ConfigureServices(services);
-            using ServiceProvider provider = services.BuildServiceProvider();
+            provider = services.BuildServiceProvider();
             LogToFile(StartupLogPath, "Services built, starting AppBootstrapper");
             provider.GetRequiredService<AppBootstrapper>().Run(args);
             LogToFile(StartupLogPath, "Main completed successfully");
@@ -116,6 +118,16 @@ public static class Program
             {
                 // A message box may be unavailable during very early startup;
                 // the sanitized error is already persisted in errors.log.
+            }
+        }
+        finally
+        {
+            // Use async disposal to handle IAsyncDisposable-only services
+            // (e.g. LlamaSharpCompletionProvider) without throwing.
+            if (provider is not null)
+            {
+                try { await provider.DisposeAsync().ConfigureAwait(false); }
+                catch { /* Dispose errors are non-fatal during shutdown */ }
             }
         }
     }
@@ -186,6 +198,7 @@ public static class Program
         services.AddSingleton<IFilePickerService, WinFormsFilePickerService>();
         services.AddScoped<FilesViewModel>();
         services.AddSingleton<IGitService, SystemGitService>();
+        services.AddEmbeddedFimCompletion();
         services.AddScoped<GitViewModel>();
         services.AddScoped<ISqlExecutionSessionRegistry, SqlExecutionSessionRegistry>();
         services.AddScoped<IEditorCatalogState, EditorCatalogState>();

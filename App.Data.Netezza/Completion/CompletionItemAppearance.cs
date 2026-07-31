@@ -65,6 +65,7 @@ public static class CompletionItemAppearance
         CompletionKind.Snippet => CompletionIconKind.Snippet,
         CompletionKind.DataType => CompletionIconKind.DataType,
         CompletionKind.Variable => CompletionIconKind.Variable,
+        CompletionKind.ExternalTable => CompletionIconKind.Table,
         _ => CompletionIconKind.Reference
     };
 }

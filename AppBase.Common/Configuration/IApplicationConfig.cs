@@ -86,6 +86,23 @@ public interface IApplicationConfig : IColorConfig, IEditorConfig
     List<string> DisabledLintRules { get; set; }
     bool LintEditorHighlightShown { get; set; }
     List<string> DisabledHighlightRules { get; set; }
+
+    // Embedded FIM (local GGUF)
+    bool EnableEmbeddedFimAi { get; set; }
+    string EmbeddedFimModelId { get; set; }
+    int EmbeddedFimDebounceMs { get; set; }
+    int EmbeddedFimDebounceSeconds { get; set; }
+    int EmbeddedFimMaxTokens { get; set; }
+    string EmbeddedFimPreset { get; set; }
+    int EmbeddedFimMaxPromptTokens { get; set; }
+    double EmbeddedFimPrefixPercentage { get; set; }
+    double EmbeddedFimSuffixPercentage { get; set; }
+    string EmbeddedFimContextWindow { get; set; }
+    bool EmbeddedFimPreferVulkan { get; set; }
+    int EmbeddedFimGpuLayers { get; set; }
+    List<string> EmbeddedFimAcceptedLicenseModelIds { get; set; }
+    bool EmbeddedFimAutoPresetApplied { get; set; }
+
     public Dictionary<string, Dictionary<int, DatabaseInfo>> CachedDatabaseDictionary { get; set; }
     public void MakeChangesInWrongConfigValues();
 

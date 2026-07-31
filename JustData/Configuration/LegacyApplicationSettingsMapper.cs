@@ -17,6 +17,7 @@ public static class LegacyApplicationSettingsMapper
         MapFilesStartupToDraft(config, draft.FilesStartup);
         MapLintToDraft(config, draft.Lint);
         MapTerminalToDraft(config, draft.Terminal);
+        MapEmbeddedFimToDraft(config, draft.EmbeddedFim);
         draft.Snippets = snippets?.Clone() ?? new SnippetSettings();
         return new ApplicationSettingsSnapshot(draft);
     }
@@ -46,6 +47,7 @@ public static class LegacyApplicationSettingsMapper
         ApplyFilesStartupToLegacy(draft.FilesStartup, config);
         ApplyLintToLegacy(draft.Lint, config);
         ApplyTerminalToLegacy(draft.Terminal, config);
+        ApplyEmbeddedFimToLegacy(draft.EmbeddedFim, config);
     }
 
     public static SnippetSettings CloneSnippets(SnippetSettings snippets) => snippets.Clone();
@@ -356,6 +358,42 @@ public static class LegacyApplicationSettingsMapper
         target.TerminalPanelVisible = source.TerminalPanelVisible;
         target.TerminalPanelHeight = source.TerminalPanelHeight;
         target.TerminalShell = source.TerminalShell;
+    }
+
+    private static void MapEmbeddedFimToDraft(IApplicationConfig source, EmbeddedFimSettings target)
+    {
+        target.EnableEmbeddedFimAi = source.EnableEmbeddedFimAi;
+        target.EmbeddedFimModelId = source.EmbeddedFimModelId;
+        target.EmbeddedFimDebounceMs = source.EmbeddedFimDebounceMs;
+        target.EmbeddedFimDebounceSeconds = source.EmbeddedFimDebounceSeconds;
+        target.EmbeddedFimMaxTokens = source.EmbeddedFimMaxTokens;
+        target.EmbeddedFimPreset = source.EmbeddedFimPreset;
+        target.EmbeddedFimMaxPromptTokens = source.EmbeddedFimMaxPromptTokens;
+        target.EmbeddedFimPrefixPercentage = source.EmbeddedFimPrefixPercentage;
+        target.EmbeddedFimSuffixPercentage = source.EmbeddedFimSuffixPercentage;
+        target.EmbeddedFimContextWindow = source.EmbeddedFimContextWindow;
+        target.EmbeddedFimPreferVulkan = source.EmbeddedFimPreferVulkan;
+        target.EmbeddedFimGpuLayers = source.EmbeddedFimGpuLayers;
+        target.EmbeddedFimAcceptedLicenseModelIds = source.EmbeddedFimAcceptedLicenseModelIds;
+        target.EmbeddedFimAutoPresetApplied = source.EmbeddedFimAutoPresetApplied;
+    }
+
+    private static void ApplyEmbeddedFimToLegacy(EmbeddedFimSettings source, ApplicationConfig target)
+    {
+        target.EnableEmbeddedFimAi = source.EnableEmbeddedFimAi;
+        target.EmbeddedFimModelId = source.EmbeddedFimModelId;
+        target.EmbeddedFimDebounceMs = source.EmbeddedFimDebounceMs;
+        target.EmbeddedFimDebounceSeconds = source.EmbeddedFimDebounceSeconds;
+        target.EmbeddedFimMaxTokens = source.EmbeddedFimMaxTokens;
+        target.EmbeddedFimPreset = source.EmbeddedFimPreset;
+        target.EmbeddedFimMaxPromptTokens = source.EmbeddedFimMaxPromptTokens;
+        target.EmbeddedFimPrefixPercentage = source.EmbeddedFimPrefixPercentage;
+        target.EmbeddedFimSuffixPercentage = source.EmbeddedFimSuffixPercentage;
+        target.EmbeddedFimContextWindow = source.EmbeddedFimContextWindow;
+        target.EmbeddedFimPreferVulkan = source.EmbeddedFimPreferVulkan;
+        target.EmbeddedFimGpuLayers = source.EmbeddedFimGpuLayers;
+        target.EmbeddedFimAcceptedLicenseModelIds = source.EmbeddedFimAcceptedLicenseModelIds;
+        target.EmbeddedFimAutoPresetApplied = source.EmbeddedFimAutoPresetApplied;
     }
 
     private static Dictionary<string, Dictionary<int, DatabaseInfoSnapshot>> ConvertCacheToSnapshot(

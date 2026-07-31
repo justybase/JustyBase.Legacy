@@ -88,12 +88,12 @@ public static class FctbCompletionMapper
         foreach (var ci in engineItems)
         {
             if (databaseFilter is not null
-                && ci.Kind is CompletionKind.Table or CompletionKind.View
+                && ci.Kind is CompletionKind.Table or CompletionKind.View or CompletionKind.ExternalTable
                 && schema is not null
                 && !TableBelongsToDatabase(schema, ci.Label, databaseFilter))
                 continue;
 
-            if (ci.Kind is CompletionKind.Table or CompletionKind.View)
+            if (ci.Kind is CompletionKind.Table or CompletionKind.View or CompletionKind.ExternalTable)
             {
                 if (!seen.Add(ci.Label))
                     continue;
@@ -127,21 +127,31 @@ public static class FctbCompletionMapper
         }
 
         if (ci.Kind is CompletionKind.Column or CompletionKind.Table or CompletionKind.View
+            or CompletionKind.ExternalTable
             or CompletionKind.Schema or CompletionKind.Database or CompletionKind.Cte
             or CompletionKind.Alias or CompletionKind.Function)
         {
             var item = new MethodAutocompleteItem2(QualifyLabel(ci.Label, fragmentText));
-            if (ci.Kind is CompletionKind.Table or CompletionKind.View)
+            if (ci.Kind is CompletionKind.Table or CompletionKind.View or CompletionKind.ExternalTable)
             {
                 var table = metadata?.Tables.FirstOrDefault(t =>
                     t.Name.Equals(ci.Label, StringComparison.OrdinalIgnoreCase));
-                item.ToolTipTitle = ci.Kind == CompletionKind.View ? "View" : "Table";
-                item.ToolTipText = table?.Description;
+                var detail = ci.Kind switch
+                {
+                    CompletionKind.View => "View",
+                    CompletionKind.ExternalTable => "External",
+                    _ => "Table"
+                };
+                string description = string.IsNullOrWhiteSpace(ci.Documentation)
+                    ? table?.Description
+                    : ci.Documentation;
+                item.ToolTipTitle = detail;
+                item.ToolTipText = description;
                 CompletionItemAppearance.Apply(
                     item,
                     ci.Kind == CompletionKind.View ? CompletionIconKind.View : CompletionIconKind.Table,
-                    ci.Kind == CompletionKind.View ? "View" : "Table",
-                    table?.Description);
+                    detail,
+                    description);
             }
             else if (ci.Kind == CompletionKind.Column)
             {
@@ -149,13 +159,16 @@ public static class FctbCompletionMapper
                 string columnDetail = column?.DataType
                     ?? (ci.Detail?.Contains('.') == true ? null : ci.Detail)
                     ?? ci.Kind.ToString();
+                string description = string.IsNullOrWhiteSpace(ci.Documentation)
+                    ? column?.Description
+                    : ci.Documentation;
                 item.ToolTipTitle = columnDetail;
-                item.ToolTipText = column?.Description;
+                item.ToolTipText = description;
                 CompletionItemAppearance.Apply(
                     item,
                     CompletionIconKind.Column,
                     columnDetail,
-                    column?.Description);
+                    description);
             }
             else
             {
@@ -198,7 +211,7 @@ public static class FctbCompletionMapper
                 var documented = metadata?.Tables
                     .FirstOrDefault(t => t.Name.Equals(table.Name, StringComparison.OrdinalIgnoreCase))?
                     .Columns?.FirstOrDefault(c => c.Name.Equals(columnName, StringComparison.OrdinalIgnoreCase));
-                return (documented?.DataType ?? exact.DataType, documented?.Description);
+                return (documented?.DataType ?? exact.DataType, documented?.Description ?? exact.Description);
             }
 
             string resolvedTableName = ResolveRelationTableName(sql, qualifier);
@@ -218,7 +231,7 @@ public static class FctbCompletionMapper
                 {
                     var documented = resolvedMetadata?.Columns?.FirstOrDefault(c =>
                         c.Name.Equals(columnName, StringComparison.OrdinalIgnoreCase));
-                    return (documented?.DataType ?? schemaColumn.DataType, documented?.Description);
+                    return (documented?.DataType ?? schemaColumn.DataType, documented?.Description ?? schemaColumn.Description);
                 }
             }
         }

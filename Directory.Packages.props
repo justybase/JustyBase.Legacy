@@ -31,5 +31,9 @@
     <PackageVersion Include="FlaUI.UIA3" Version="5.0.0" />
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageVersion Include="NSubstitute" Version="6.0.0" />
+    <PackageVersion Include="LLamaSharp" Version="0.27.0" />
+    <PackageVersion Include="LLamaSharp.Backend.Cpu" Version="0.27.0" />
+    <PackageVersion Include="LLamaSharp.Backend.Vulkan" Version="0.27.0" />
+    <PackageVersion Include="LLamaSharp.Backend.Cuda12" Version="0.27.0" />
   </ItemGroup>
 </Project>

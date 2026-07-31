@@ -82,6 +82,69 @@ public sealed class NetezzaCompletionMapperTests
     }
 
     [Fact]
+    public void MapEngineItems_PrefersEngineDocumentationWithoutMetadata()
+    {
+        var item = Assert.Single(FctbCompletionMapper.MapEngineItems(
+            [new CompletionItem("PRODUCT_ID", CompletionKind.Column, "INTEGER", Documentation: "Product identifier")],
+            "FS.",
+            schema: null!));
+
+        Assert.Equal("INTEGER", item.ToolTipTitle);
+        Assert.Equal("Product identifier", item.ToolTipText);
+        Assert.Equal("Product identifier", item.DescriptionText);
+    }
+
+    [Fact]
+    public void MapEngineItems_PrefersEngineDocumentationOverMetadataDescription()
+    {
+        var schema = new InMemorySchemaProvider();
+        schema.AddTable(new TableInfo(
+            "FACT_SALES_2",
+            "ADMIN",
+            "JUST_DATA_2",
+            Columns: [new ColumnInfo("PRODUCT_ID", DataType: "INTEGER")]));
+        var metadata = new NetezzaSchemaSnapshot([
+            new NetezzaSchemaTable(
+                "FACT_SALES_2",
+                "ADMIN",
+                "JUST_DATA_2",
+                Columns: [new NetezzaSchemaColumn(
+                    "PRODUCT_ID", "INTEGER", Description: "Metadata description")])]);
+
+        var item = Assert.Single(FctbCompletionMapper.MapEngineItems(
+            [new CompletionItem("PRODUCT_ID", CompletionKind.Column, "FS.PRODUCT_ID", Documentation: "Engine documentation")],
+            "FS.", schema, metadata));
+
+        Assert.Equal("INTEGER", item.ToolTipTitle);
+        Assert.Equal("Engine documentation", item.ToolTipText);
+    }
+
+    [Fact]
+    public void MapEngineItems_FallsBackToMetadataWhenDocumentationIsNull()
+    {
+        var schema = new InMemorySchemaProvider();
+        schema.AddTable(new TableInfo(
+            "FACT_SALES_2",
+            "ADMIN",
+            "JUST_DATA_2",
+            Columns: [new ColumnInfo("PRODUCT_ID", DataType: "INTEGER")]));
+        var metadata = new NetezzaSchemaSnapshot([
+            new NetezzaSchemaTable(
+                "FACT_SALES_2",
+                "ADMIN",
+                "JUST_DATA_2",
+                Columns: [new NetezzaSchemaColumn(
+                    "PRODUCT_ID", "INTEGER", Description: "Metadata description")])]);
+
+        var item = Assert.Single(FctbCompletionMapper.MapEngineItems(
+            [new CompletionItem("PRODUCT_ID", CompletionKind.Column, "FS.PRODUCT_ID")],
+            "FS.", schema, metadata));
+
+        Assert.Equal("INTEGER", item.ToolTipTitle);
+        Assert.Equal("Metadata description", item.ToolTipText);
+    }
+
+    [Fact]
     public void MapEngineItems_ShowsColumnTypeAndDescription()
     {
         var schema = new InMemorySchemaProvider();
@@ -108,6 +171,24 @@ public sealed class NetezzaCompletionMapperTests
     }
 
     [Fact]
+    public void MapEngineItems_UsesSchemaProviderColumnDescription()
+    {
+        var schema = new InMemorySchemaProvider();
+        schema.AddTable(new TableInfo(
+            "FACT_SALES_2",
+            "ADMIN",
+            "JUST_DATA_2",
+            Columns: [new ColumnInfo("PRODUCT_ID", DataType: "INTEGER", Description: "Provider description")]));
+
+        var item = Assert.Single(FctbCompletionMapper.MapEngineItems(
+            [new CompletionItem("PRODUCT_ID", CompletionKind.Column, "FACT_SALES_2.PRODUCT_ID")],
+            "FACT_SALES_2.", schema, metadata: null!));
+
+        Assert.Equal("INTEGER", item.ToolTipTitle);
+        Assert.Equal("Provider description", item.ToolTipText);
+    }
+
+    [Fact]
     public void MapEngineItems_ShowsTableDescription()
     {
         var schema = new InMemorySchemaProvider();
@@ -123,6 +204,57 @@ public sealed class NetezzaCompletionMapperTests
 
         Assert.Equal("Table", item.ToolTipTitle);
         Assert.Equal("Sales fact table", item.ToolTipText);
+    }
+
+    [Fact]
+    public void MapEngineItems_PrefersEngineDocumentationForTableOverMetadata()
+    {
+        var schema = new InMemorySchemaProvider();
+        schema.AddTable(new TableInfo("FACT_SALES_2", "ADMIN", "JUST_DATA_2"));
+        var metadata = new NetezzaSchemaSnapshot([
+            new NetezzaSchemaTable(
+                "FACT_SALES_2", "ADMIN", "JUST_DATA_2",
+                Description: "Metadata table description")]);
+
+        var item = Assert.Single(FctbCompletionMapper.MapEngineItems(
+            [new CompletionItem("FACT_SALES_2", CompletionKind.Table, Documentation: "Engine table documentation")],
+            "", schema, metadata));
+
+        Assert.Equal("Table", item.ToolTipTitle);
+        Assert.Equal("Engine table documentation", item.ToolTipText);
+        Assert.Equal("Engine table documentation", item.DescriptionText);
+    }
+
+    [Fact]
+    public void MapEngineItems_PrefersEngineDocumentationForViewWithoutMetadata()
+    {
+        var schema = new InMemorySchemaProvider();
+        schema.AddTable(new TableInfo("SALES_VIEW", "ADMIN", "JUST_DATA_2", IsView: true));
+
+        var item = Assert.Single(FctbCompletionMapper.MapEngineItems(
+            [new CompletionItem("SALES_VIEW", CompletionKind.View, Documentation: "View definition summary")],
+            "", schema, metadata: null!));
+
+        Assert.Equal("View", item.ToolTipTitle);
+        Assert.Equal("View definition summary", item.ToolTipText);
+    }
+
+    [Fact]
+    public void MapEngineItems_FallsBackToMetadataForTableWhenDocumentationIsEmpty()
+    {
+        var schema = new InMemorySchemaProvider();
+        schema.AddTable(new TableInfo("FACT_SALES_2", "ADMIN", "JUST_DATA_2"));
+        var metadata = new NetezzaSchemaSnapshot([
+            new NetezzaSchemaTable(
+                "FACT_SALES_2", "ADMIN", "JUST_DATA_2",
+                Description: "Metadata table description")]);
+
+        var item = Assert.Single(FctbCompletionMapper.MapEngineItems(
+            [new CompletionItem("FACT_SALES_2", CompletionKind.Table, Documentation: "   ")],
+            "", schema, metadata));
+
+        Assert.Equal("Table", item.ToolTipTitle);
+        Assert.Equal("Metadata table description", item.ToolTipText);
     }
 
     [Fact]

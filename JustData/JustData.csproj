@@ -95,6 +95,7 @@
 	<ItemGroup>
 		<ProjectReference Include="..\JustData.Application\JustData.Application.csproj" />
 		<ProjectReference Include="..\JustData.ViewModels\JustData.ViewModels.csproj" />
+		<ProjectReference Include="..\JustyBase.Ai.Fim\JustyBase.Ai.Fim.csproj" />
 		<ProjectReference Include="..\App.Data.Netezza\App.Data.Netezza.csproj" />
 		<ProjectReference Include="..\JustyBaseLegacy.AdditionalForms\JustyBaseLegacy.AdditionalForms.csproj" />
 		<ProjectReference Include="..\AppBase.Common\AppBase.Common.csproj" />

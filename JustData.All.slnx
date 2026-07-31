@@ -21,6 +21,7 @@
     <Platform Solution="*|x64" Project="x64" />
   </Project>
   <Project Path="JustData.ViewModels/JustData.ViewModels.csproj" />
+  <Project Path="JustyBase.Ai.Fim/JustyBase.Ai.Fim.csproj" />
   <Project Path="JustyBase.Legacy.TextBox/source/JustyBase.Legacy.TextBox.csproj" />
   <Project Path="JustyBaseLegacy.AdditionalForms/JustyBaseLegacy.AdditionalForms.csproj" />
   <Project Path="tests/AppBase.Tests/AppBase.Tests.csproj" />

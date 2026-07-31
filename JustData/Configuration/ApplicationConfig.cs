@@ -139,6 +139,21 @@ public sealed class ApplicationConfig : IApplicationConfig
     public bool LintEditorHighlightShown { get; set; } = true;
     public List<string> DisabledHighlightRules { get; set; } = [];
 
+    public bool EnableEmbeddedFimAi { get; set; }
+    public string EmbeddedFimModelId { get; set; } = "qwen2.5-coder-3b";
+    public int EmbeddedFimDebounceMs { get; set; } = 600;
+    public int EmbeddedFimDebounceSeconds { get; set; }
+    public int EmbeddedFimMaxTokens { get; set; } = 50;
+    public string EmbeddedFimPreset { get; set; } = "Medium";
+    public int EmbeddedFimMaxPromptTokens { get; set; } = 1536;
+    public double EmbeddedFimPrefixPercentage { get; set; } = 0.65;
+    public double EmbeddedFimSuffixPercentage { get; set; } = 0.35;
+    public string EmbeddedFimContextWindow { get; set; } = "Medium";
+    public bool EmbeddedFimPreferVulkan { get; set; } = true;
+    public int EmbeddedFimGpuLayers { get; set; } = 99;
+    public List<string> EmbeddedFimAcceptedLicenseModelIds { get; set; } = [];
+    public bool EmbeddedFimAutoPresetApplied { get; set; }
+
     public Dictionary<string, Dictionary<int, DatabaseInfo>> CachedDatabaseDictionary { get; set; }
 
     public void MakeChangesInWrongConfigValues()

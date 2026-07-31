@@ -340,6 +340,42 @@ public sealed class TerminalSettings
     };
 }
 
+public sealed class EmbeddedFimSettings
+{
+    public bool EnableEmbeddedFimAi { get; set; }
+    public string EmbeddedFimModelId { get; set; } = "qwen2.5-coder-3b";
+    public int EmbeddedFimDebounceMs { get; set; } = 600;
+    public int EmbeddedFimDebounceSeconds { get; set; }
+    public int EmbeddedFimMaxTokens { get; set; } = 50;
+    public string EmbeddedFimPreset { get; set; } = "Medium";
+    public int EmbeddedFimMaxPromptTokens { get; set; } = 1536;
+    public double EmbeddedFimPrefixPercentage { get; set; } = 0.65;
+    public double EmbeddedFimSuffixPercentage { get; set; } = 0.35;
+    public string EmbeddedFimContextWindow { get; set; } = "Medium";
+    public bool EmbeddedFimPreferVulkan { get; set; } = true;
+    public int EmbeddedFimGpuLayers { get; set; } = 99;
+    public List<string> EmbeddedFimAcceptedLicenseModelIds { get; set; } = [];
+    public bool EmbeddedFimAutoPresetApplied { get; set; }
+
+    public EmbeddedFimSettings Clone() => new()
+    {
+        EnableEmbeddedFimAi = EnableEmbeddedFimAi,
+        EmbeddedFimModelId = EmbeddedFimModelId,
+        EmbeddedFimDebounceMs = EmbeddedFimDebounceMs,
+        EmbeddedFimDebounceSeconds = EmbeddedFimDebounceSeconds,
+        EmbeddedFimMaxTokens = EmbeddedFimMaxTokens,
+        EmbeddedFimPreset = EmbeddedFimPreset,
+        EmbeddedFimMaxPromptTokens = EmbeddedFimMaxPromptTokens,
+        EmbeddedFimPrefixPercentage = EmbeddedFimPrefixPercentage,
+        EmbeddedFimSuffixPercentage = EmbeddedFimSuffixPercentage,
+        EmbeddedFimContextWindow = EmbeddedFimContextWindow,
+        EmbeddedFimPreferVulkan = EmbeddedFimPreferVulkan,
+        EmbeddedFimGpuLayers = EmbeddedFimGpuLayers,
+        EmbeddedFimAcceptedLicenseModelIds = EmbeddedFimAcceptedLicenseModelIds?.ToList() ?? [],
+        EmbeddedFimAutoPresetApplied = EmbeddedFimAutoPresetApplied
+    };
+}
+
 public sealed class ApplicationSettingsDraft
 {
     public AppearanceSettings Appearance { get; set; } = new();
@@ -349,6 +385,7 @@ public sealed class ApplicationSettingsDraft
     public FilesStartupSettings FilesStartup { get; set; } = new();
     public LintSettings Lint { get; set; } = new();
     public TerminalSettings Terminal { get; set; } = new();
+    public EmbeddedFimSettings EmbeddedFim { get; set; } = new();
     public SnippetSettings Snippets { get; set; } = new();
 
     public ApplicationSettingsDraft Clone() => new()
@@ -360,6 +397,7 @@ public sealed class ApplicationSettingsDraft
         FilesStartup = FilesStartup.Clone(),
         Lint = Lint.Clone(),
         Terminal = Terminal.Clone(),
+        EmbeddedFim = EmbeddedFim.Clone(),
         Snippets = Snippets.Clone()
     };
 }

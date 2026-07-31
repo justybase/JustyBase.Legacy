@@ -263,8 +263,8 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         IReadOnlyList<CompletionItem> engineItems,
         HashSet<string> emittedLabels)
     {
-        if (engineItems.Any(i => i.Kind is CompletionKind.Table or CompletionKind.View or CompletionKind.Column
-                or CompletionKind.Schema or CompletionKind.Cte or CompletionKind.Database))
+        if (engineItems.Any(i => i.Kind is CompletionKind.Table or CompletionKind.View or CompletionKind.ExternalTable
+                or CompletionKind.Column or CompletionKind.Schema or CompletionKind.Cte or CompletionKind.Database))
             yield break;
 
         foreach (var item in YieldAliasAndCteHints(emittedLabels))
