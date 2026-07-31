@@ -50,6 +50,7 @@ namespace JustyBaseLegacy.UI
         private readonly List<ColorSettingControl> _colorEditors = new();
         private readonly List<Panel> _preferenceCardPanels = new();
         private readonly List<GroupBox> _preferenceCardFrames = new();
+        private TabPage _tabEmbeddedFim;
 
         private void BuildModernLayout()
         {
@@ -84,6 +85,20 @@ namespace JustyBaseLegacy.UI
                 "▦",
                 tabResults,
                 "results format formatting date integer decimal rows limit warning timeout filter pin scale tabs"));
+
+            _tabEmbeddedFim = new TabPage("Embedded AI")
+            {
+                Name = "tabEmbeddedFim",
+                UseVisualStyleBackColor = true,
+                Padding = new Padding(8)
+            };
+            tabControls.TabPages.Add(_tabEmbeddedFim);
+            _preferenceSections.Add(new PreferenceSection(
+                "Embedded AI (FIM)",
+                "Local Fill-in-the-Middle SQL ghost text and AI commit messages.",
+                "✦",
+                _tabEmbeddedFim,
+                "fim ai embedded llama model gguf ghost completion commit vulkan gpu download"));
 
             foreach (PreferenceSection section in _preferenceSections)
             {

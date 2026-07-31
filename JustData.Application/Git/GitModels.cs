@@ -84,3 +84,15 @@ public sealed record GitCommitFile(
     string Path,
     string? OriginalPath,
     string StatusCode);
+
+public sealed record GitCommitTooltipInfo(
+    string Body,
+    int FilesChanged,
+    int Insertions,
+    int Deletions);
+
+public sealed record GitUserIdentity(
+    string? Name,
+    string? Email,
+    bool NameIsLocal,
+    bool EmailIsLocal);

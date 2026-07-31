@@ -13,6 +13,7 @@ using AppBase.Data.Core.Models;
 using AppBase.Services;
 using AppBase.Services.Helpers;
 using AppBase.Services.Utilities;
+using JustyBaseLegacy.UI.Fim;
 using JustyBaseLegacy.UI.Sql;
 using JustyBaseLegacy.UI.ImportExport;
 using JustData.Application.ImportExport;
@@ -421,6 +422,9 @@ namespace JustyBaseLegacy.UI
             , IEditorCatalogState editorCatalogState
             , IConnectionProfileCatalog connectionProfileCatalog
             , EditorCatalogProjection editorCatalogProjection
+            , FimEditorHost? fimEditorHost = null
+            , JustyBase.Ai.Fim.Download.IFimModelCatalog? fimModelCatalog = null
+            , JustyBaseLegacy.UI.Fim.IFimModelBootstrapService? fimModelBootstrap = null
             , IUiDispatcher? uiDispatcher = null
             )
         {
@@ -484,6 +488,9 @@ namespace JustyBaseLegacy.UI
             _queryWatchService = queryWatchService ?? throw new ArgumentNullException(nameof(queryWatchService));
             _connectionProfileCatalog = connectionProfileCatalog ?? throw new ArgumentNullException(nameof(connectionProfileCatalog));
             _editorCatalogProjection = editorCatalogProjection ?? throw new ArgumentNullException(nameof(editorCatalogProjection));
+            _fimEditorHost = fimEditorHost;
+            _fimModelCatalog = fimModelCatalog;
+            _fimModelBootstrap = fimModelBootstrap;
             _uiDispatcher = uiDispatcher ?? new JustData.Mvvm.WindowsFormsUiDispatcher(this);
             _fileSearchEngine = fileSearchEngine ?? throw new ArgumentNullException(nameof(fileSearchEngine));
             _loginDataValidator = loginDataValidator ?? throw new ArgumentNullException(nameof(loginDataValidator));
@@ -1069,6 +1076,9 @@ namespace JustyBaseLegacy.UI
         private readonly FilesViewModel _filesViewModel;
         private GitControl? _gitControl;
         private readonly GitViewModel _gitViewModel;
+        private readonly JustyBaseLegacy.UI.Fim.FimEditorHost? _fimEditorHost;
+        private readonly JustyBase.Ai.Fim.Download.IFimModelCatalog? _fimModelCatalog;
+        private readonly JustyBaseLegacy.UI.Fim.IFimModelBootstrapService? _fimModelBootstrap;
 
         private void InitializeFilesControl()
         {
@@ -2000,6 +2010,7 @@ namespace JustyBaseLegacy.UI
             editor.Pasting += FctbNew_Pasting;
             editor.MouseClick += FctbNew_MouseClick;
             editor.LightbulbClick += OnEditorLightbulbClick;
+            _fimEditorHost?.Attach(editor);
 
             if (isNetezza)
             {

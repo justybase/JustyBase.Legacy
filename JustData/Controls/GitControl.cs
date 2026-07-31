@@ -97,7 +97,7 @@ public partial class GitControl : UserControl
 
             _cmbRepos.MinimumSize = new Size(0, buttonH);
             _cmbRepos.MaximumSize = new Size(0, buttonH + DpiScale.Scale(4, dpi));
-            foreach (Button button in new[] { _btnOpenRepo, _btnRefresh, _btnPull, _btnPush, _btnSync, _btnStageAll, _btnCreateBranch, _btnMergeBranch })
+            foreach (Button button in new[] { _btnOpenRepo, _btnRefresh, _btnPull, _btnPush, _btnSync, _btnStageAll, _btnMore, _btnSaveIdentity, _btnStageAllCommit, _btnGenerateCommit })
             {
                 button.MinimumSize = new Size(0, buttonH);
                 button.Padding = new Padding(DpiScale.Scale(6, dpi), DpiScale.Scale(2, dpi), DpiScale.Scale(6, dpi), DpiScale.Scale(2, dpi));
@@ -238,6 +238,14 @@ public partial class GitControl : UserControl
                 int max = _splitCommits.Height - _splitCommits.Panel2MinSize - _splitCommits.SplitterWidth;
                 _splitCommits.SplitterDistance = Math.Clamp(desired, _splitCommits.Panel1MinSize, Math.Max(_splitCommits.Panel1MinSize, max));
             }
+
+            // ~40% staged, ~60% unstaged (changes)
+            if (_splitChangesLists.Height > _splitChangesLists.Panel1MinSize + _splitChangesLists.Panel2MinSize + _splitChangesLists.SplitterWidth)
+            {
+                int desired = Math.Max(_splitChangesLists.Panel1MinSize, _splitChangesLists.Height * 40 / 100);
+                int max = _splitChangesLists.Height - _splitChangesLists.Panel2MinSize - _splitChangesLists.SplitterWidth;
+                _splitChangesLists.SplitterDistance = Math.Clamp(desired, _splitChangesLists.Panel1MinSize, Math.Max(_splitChangesLists.Panel1MinSize, max));
+            }
         }
         catch (InvalidOperationException)
         {
@@ -335,8 +343,20 @@ public partial class GitControl : UserControl
         _btnSync.Click += async (_, _) => await _viewModel.SyncCommand.ExecuteAsync(null);
         _btnStageAll.Click += async (_, _) => await _viewModel.StageAllCommand.ExecuteAsync(null);
         _btnCommit.Click += async (_, _) => await _viewModel.CommitCommand.ExecuteAsync(null);
-        _btnCreateBranch.Click += async (_, _) => await CreateBranchAsync();
-        _btnMergeBranch.Click += async (_, _) => await MergeBranchAsync();
+        _btnStageAllCommit.Click += async (_, _) => await _viewModel.StageAllAndCommitCommand.ExecuteAsync(null);
+        _btnGenerateCommit.Click += async (_, _) => await _viewModel.GenerateCommitMessageCommand.ExecuteAsync(null);
+        _btnMore.Click += (_, _) =>
+        {
+            _menuMore.Show(_btnMore, new Point(0, _btnMore.Height));
+        };
+        _btnSaveIdentity.Click += async (_, _) =>
+        {
+            _viewModel.LocalUserName = _txtUserName.Text;
+            _viewModel.LocalUserEmail = _txtUserEmail.Text;
+            await _viewModel.SaveLocalIdentityCommand.ExecuteAsync(null);
+        };
+        _txtUserName.TextChanged += (_, _) => _viewModel.LocalUserName = _txtUserName.Text;
+        _txtUserEmail.TextChanged += (_, _) => _viewModel.LocalUserEmail = _txtUserEmail.Text;
 
         _txtCommitMessage.TextChanged += (_, _) => _viewModel.CommitMessage = _txtCommitMessage.Text;
         _txtCommitMessage.KeyDown += async (_, e) =>
@@ -366,9 +386,10 @@ public partial class GitControl : UserControl
 
         _lvStaged.RetrieveVirtualItem += (_, e) => RetrieveCachedItem(e, _stagedCache);
         _lvUnstaged.RetrieveVirtualItem += (_, e) => RetrieveCachedItem(e, _unstagedCache);
-        _lvCommits.RetrieveVirtualItem += (_, e) => RetrieveCachedItem(e, _commitsCache);
+        _lvCommits.RetrieveVirtualItem += (_, e) => RetrieveCommitItem(e);
         _lvCommitFiles.RetrieveVirtualItem += (_, e) => RetrieveCachedItem(e, _commitFilesCache);
         _lvTimeline.RetrieveVirtualItem += (_, e) => RetrieveCachedItem(e, _timelineCache);
+        _lvCommits.ShowItemToolTips = true;
 
         _lvStaged.SelectedIndexChanged += (_, _) =>
         {
@@ -492,6 +513,7 @@ public partial class GitControl : UserControl
                 _lblUnstagedHeader.Text = $"CHANGES ({_viewModel.UnstagedCount})";
                 break;
             case nameof(GitViewModel.BranchName):
+            case nameof(GitViewModel.BranchDisplay):
             case nameof(GitViewModel.IsDetached):
             case nameof(GitViewModel.StatusMessage):
             case nameof(GitViewModel.SelectedRepoPath):
@@ -501,6 +523,11 @@ public partial class GitControl : UserControl
             case nameof(GitViewModel.HasRepository):
             case nameof(GitViewModel.ShowEmptyState):
             case nameof(GitViewModel.HasTimeline):
+            case nameof(GitViewModel.IdentitySummary):
+            case nameof(GitViewModel.LocalUserName):
+            case nameof(GitViewModel.LocalUserEmail):
+            case nameof(GitViewModel.IsGeneratingCommitMessage):
+            case nameof(GitViewModel.CanShowGenerateCommitMessage):
                 SyncStaticFields();
                 UpdateEmptyState();
                 UpdateEnabledState();
@@ -510,13 +537,18 @@ public partial class GitControl : UserControl
 
     private void SyncStaticFields()
     {
-        string branch = string.IsNullOrWhiteSpace(_viewModel.BranchName)
+        _lblBranch.Text = string.IsNullOrWhiteSpace(_viewModel.BranchDisplay)
             ? "—"
-            : _viewModel.IsDetached
-                ? $"detached @ {_viewModel.BranchName}"
-                : _viewModel.BranchName;
-        _lblBranch.Text = branch;
+            : _viewModel.BranchDisplay;
         _lblStatus.Text = _viewModel.StatusMessage ?? string.Empty;
+        _lblIdentity.Text = _viewModel.IdentitySummary ?? string.Empty;
+
+        if (_txtUserName.Text != _viewModel.LocalUserName)
+            _txtUserName.Text = _viewModel.LocalUserName;
+        if (_txtUserEmail.Text != _viewModel.LocalUserEmail)
+            _txtUserEmail.Text = _viewModel.LocalUserEmail;
+
+        _btnGenerateCommit.Visible = _viewModel.CanShowGenerateCommitMessage;
 
         string timelineTitle = string.IsNullOrWhiteSpace(_viewModel.TimelineFileName)
             ? "TIMELINE"
@@ -561,8 +593,12 @@ public partial class GitControl : UserControl
         _btnSync.Enabled = enabled;
         _btnStageAll.Enabled = enabled;
         _btnCommit.Enabled = enabled;
-        _btnCreateBranch.Enabled = enabled;
-        _btnMergeBranch.Enabled = enabled;
+        _btnStageAllCommit.Enabled = enabled;
+        _btnGenerateCommit.Enabled = enabled && !_viewModel.IsGeneratingCommitMessage;
+        _btnMore.Enabled = enabled;
+        _btnSaveIdentity.Enabled = enabled;
+        _txtUserName.Enabled = enabled;
+        _txtUserEmail.Enabled = enabled;
         _txtCommitMessage.Enabled = enabled;
         _btnRefresh.Enabled = !_viewModel.IsBusy;
         _btnOpenRepo.Enabled = !_viewModel.IsBusy;
@@ -827,6 +863,23 @@ public partial class GitControl : UserControl
             e.Item = new ListViewItem(string.Empty);
     }
 
+    private void RetrieveCommitItem(RetrieveVirtualItemEventArgs e)
+    {
+        if (e.ItemIndex < 0 || e.ItemIndex >= _commitsCache.Length)
+        {
+            e.Item = new ListViewItem(string.Empty);
+            return;
+        }
+
+        GitCommitItem commit = _commitsCache[e.ItemIndex];
+        e.Item = new ListViewItem(commit.DisplayText)
+        {
+            ToolTipText = commit.TooltipText
+        };
+        if (!commit.TooltipLoaded)
+            _ = _viewModel.EnsureCommitTooltipAsync(commit);
+    }
+
     private static T? GetSelectedItem<T>(ListView list, T[] cache) where T : class
     {
         if (list.SelectedIndices.Count == 0)
@@ -845,6 +898,23 @@ public partial class GitControl : UserControl
         if (string.IsNullOrWhiteSpace(name))
             return;
         await _viewModel.CreateBranchCommand.ExecuteAsync(name);
+    }
+
+    private async Task CheckoutBranchAsync()
+    {
+        var choices = _viewModel.Branches
+            .Where(b => !string.Equals(b, _viewModel.BranchName, StringComparison.Ordinal))
+            .ToList();
+        if (choices.Count == 0)
+        {
+            MessageBox.Show(this, "No other local branches to check out.", "Git", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        string? selected = PromptChoice("Checkout Branch", "Select branch to check out:", choices);
+        if (string.IsNullOrWhiteSpace(selected))
+            return;
+        await _viewModel.CheckoutBranchCommand.ExecuteAsync(selected);
     }
 
     private async Task MergeBranchAsync()

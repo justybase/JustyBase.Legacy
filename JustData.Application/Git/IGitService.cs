@@ -41,6 +41,14 @@ public interface IGitService
 
     Task<IReadOnlyList<GitCommitFile>> GetCommitFilesAsync(string repoPath, string commitHash, CancellationToken cancellationToken = default);
 
+    /// <summary>Body + shortstat for commit hover tooltip.</summary>
+    Task<GitCommitTooltipInfo> GetCommitTooltipAsync(string repoPath, string commitHash, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Upstream tracking branch name (e.g. origin/main), or null if unset.
+    /// </summary>
+    Task<string?> GetUpstreamBranchAsync(string repoPath, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Loads left/right text for a side-by-side diff of a file as changed in <paramref name="commitHash"/>
     /// (parent tree vs that commit).
@@ -59,4 +67,23 @@ public interface IGitService
     Task<GitFileContents> GetFileContentsAsync(string repoPath, GitFileStatus file, CancellationToken cancellationToken = default);
 
     Task<GitCommandResult> AddToGitIgnoreAsync(string repoPath, string relativePath, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Builds a truncated status/diff summary for AI commit-message generation.
+    /// Prefers staged (cached) changes; falls back to unstaged worktree diff.
+    /// </summary>
+    Task<string> GetWorkingTreeChangeSummaryAsync(string repoPath, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reads effective <c>user.name</c> / <c>user.email</c> (local overrides global)
+    /// and whether each value is set in the local repo config.
+    /// </summary>
+    Task<GitUserIdentity> GetUserIdentityAsync(string? repoPath, CancellationToken cancellationToken = default);
+
+    /// <summary>Sets local (repo) <c>user.name</c> and/or <c>user.email</c>.</summary>
+    Task<GitCommandResult> SetLocalUserIdentityAsync(
+        string repoPath,
+        string? name,
+        string? email,
+        CancellationToken cancellationToken = default);
 }

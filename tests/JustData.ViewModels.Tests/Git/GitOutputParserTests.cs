@@ -118,4 +118,27 @@ public sealed class GitOutputParserTests
         Assert.Equal("old.txt", files[3].OriginalPath);
         Assert.Equal("R100", files[3].StatusCode);
     }
+
+    [Fact]
+    public void ParseCommitTooltip_parses_body_and_shortstat()
+    {
+        const string body = "Implement a new key combination (Ctrl + P).";
+        const string shortstat = " 6 files changed, 1424 insertions(+), 12 deletions(-)";
+
+        GitCommitTooltipInfo info = GitOutputParser.ParseCommitTooltip(body, shortstat);
+
+        Assert.Equal(body, info.Body);
+        Assert.Equal(6, info.FilesChanged);
+        Assert.Equal(1424, info.Insertions);
+        Assert.Equal(12, info.Deletions);
+    }
+
+    [Fact]
+    public void FormatRelativeDateLong_formats_hours()
+    {
+        DateTimeOffset now = new(2026, 7, 31, 12, 0, 0, TimeSpan.Zero);
+        DateTimeOffset then = now.AddHours(-13);
+
+        Assert.Equal("13 hours ago", GitOutputParser.FormatRelativeDateLong(then, now));
+    }
 }

@@ -5,6 +5,7 @@ using JustData.Application.Files;
 using JustData.Application.Git;
 using JustData.ViewModels.Files;
 using System.Collections.ObjectModel;
+using System.Globalization;
 
 namespace JustData.ViewModels.Git;
 
@@ -13,11 +14,13 @@ public sealed class GitViewModel : ObservableObject, IDisposable
     private readonly IGitService _gitService;
     private readonly FilesViewModel _filesViewModel;
     private readonly IFilePickerService _filePicker;
+    private readonly IGitCommitMessageAiService _commitMessageAi;
     private readonly IUiDispatcher? _uiDispatcher;
     private readonly CancellationTokenSource _lifetime = new();
     private bool _disposed;
     private bool _isBusy;
     private bool _isGitAvailable = true;
+    private bool _isGeneratingCommitMessage;
     private string? _statusMessage;
     private string? _errorMessage;
     private string _commitMessage = string.Empty;
@@ -27,6 +30,10 @@ public sealed class GitViewModel : ObservableObject, IDisposable
     private string? _activeFilePath;
     private string? _timelineFileName;
     private string? _manualRepoPath;
+    private string _localUserName = string.Empty;
+    private string _localUserEmail = string.Empty;
+    private string? _identitySummary;
+    private string? _upstreamBranch;
     private int _refreshVersion;
     private int _previewVersion;
     private int _commitFilesVersion;
@@ -36,16 +43,19 @@ public sealed class GitViewModel : ObservableObject, IDisposable
         IGitService gitService,
         FilesViewModel filesViewModel,
         IFilePickerService filePicker,
+        IGitCommitMessageAiService? commitMessageAi = null,
         IUiDispatcher? uiDispatcher = null)
     {
         _gitService = gitService ?? throw new ArgumentNullException(nameof(gitService));
         _filesViewModel = filesViewModel ?? throw new ArgumentNullException(nameof(filesViewModel));
         _filePicker = filePicker ?? throw new ArgumentNullException(nameof(filePicker));
+        _commitMessageAi = commitMessageAi ?? new UnavailableGitCommitMessageAiService();
         _uiDispatcher = uiDispatcher;
 
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, () => !IsBusy);
         OpenRepositoryCommand = new AsyncRelayCommand(OpenRepositoryAsync, () => !IsBusy);
         CommitCommand = new AsyncRelayCommand(CommitAsync, CanCommit);
+        StageAllAndCommitCommand = new AsyncRelayCommand(StageAllAndCommitAsync, CanStageAllAndCommit);
         StageAllCommand = new AsyncRelayCommand(StageAllAsync, CanMutate);
         PullCommand = new AsyncRelayCommand(PullAsync, CanMutate);
         PushCommand = new AsyncRelayCommand(PushAsync, CanMutate);
@@ -59,6 +69,9 @@ public sealed class GitViewModel : ObservableObject, IDisposable
         AddToGitIgnoreCommand = new AsyncRelayCommand<GitFileStatusItem?>(AddToGitIgnoreAsync, CanMutateFile);
         CreateBranchCommand = new AsyncRelayCommand<string?>(CreateBranchAsync, _ => CanMutate());
         MergeBranchCommand = new AsyncRelayCommand<string?>(MergeBranchAsync, _ => CanMutate());
+        CheckoutBranchCommand = new AsyncRelayCommand<string?>(CheckoutBranchAsync, _ => CanMutate());
+        SaveLocalIdentityCommand = new AsyncRelayCommand(SaveLocalIdentityAsync, CanMutate);
+        GenerateCommitMessageCommand = new AsyncRelayCommand(GenerateCommitMessageAsync, CanGenerateCommitMessage);
         SelectRepoCommand = new AsyncRelayCommand<string?>(SelectRepoAsync, path => !IsBusy && !string.IsNullOrWhiteSpace(path));
 
         _filesViewModel.RootPaths.CollectionChanged += (_, _) => _ = DiscoverAndRefreshAsync();
@@ -83,7 +96,13 @@ public sealed class GitViewModel : ObservableObject, IDisposable
         private set
         {
             if (SetProperty(ref _stagedChanges, value))
+            {
                 OnPropertyChanged(nameof(StagedCount));
+                OnPropertyChanged(nameof(HasUncommittedChanges));
+                OnPropertyChanged(nameof(BranchDisplay));
+                StageAllAndCommitCommand.NotifyCanExecuteChanged();
+                GenerateCommitMessageCommand.NotifyCanExecuteChanged();
+            }
         }
     }
 
@@ -93,12 +112,19 @@ public sealed class GitViewModel : ObservableObject, IDisposable
         private set
         {
             if (SetProperty(ref _unstagedChanges, value))
+            {
                 OnPropertyChanged(nameof(UnstagedCount));
+                OnPropertyChanged(nameof(HasUncommittedChanges));
+                OnPropertyChanged(nameof(BranchDisplay));
+                StageAllAndCommitCommand.NotifyCanExecuteChanged();
+                GenerateCommitMessageCommand.NotifyCanExecuteChanged();
+            }
         }
     }
 
     public int StagedCount => StagedChanges.Count;
     public int UnstagedCount => UnstagedChanges.Count;
+    public bool HasUncommittedChanges => StagedCount + UnstagedCount > 0;
 
     /// <summary>All working-tree changes (staged and/or unstaged).</summary>
     public IEnumerable<GitFileStatusItem> AllChanges =>
@@ -145,6 +171,18 @@ public sealed class GitViewModel : ObservableObject, IDisposable
         }
     }
 
+    public bool IsGeneratingCommitMessage
+    {
+        get => _isGeneratingCommitMessage;
+        private set
+        {
+            if (SetProperty(ref _isGeneratingCommitMessage, value))
+                GenerateCommitMessageCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    public bool CanShowGenerateCommitMessage => _commitMessageAi.IsAvailable;
+
     public string? StatusMessage
     {
         get => _statusMessage;
@@ -163,20 +201,46 @@ public sealed class GitViewModel : ObservableObject, IDisposable
         set
         {
             if (SetProperty(ref _commitMessage, value ?? string.Empty))
+            {
                 CommitCommand.NotifyCanExecuteChanged();
+                StageAllAndCommitCommand.NotifyCanExecuteChanged();
+            }
         }
     }
 
     public string BranchName
     {
         get => _branchName;
-        private set => SetProperty(ref _branchName, value ?? string.Empty);
+        private set
+        {
+            if (SetProperty(ref _branchName, value ?? string.Empty))
+                OnPropertyChanged(nameof(BranchDisplay));
+        }
     }
 
     public bool IsDetached
     {
         get => _isDetached;
-        private set => SetProperty(ref _isDetached, value);
+        private set
+        {
+            if (SetProperty(ref _isDetached, value))
+                OnPropertyChanged(nameof(BranchDisplay));
+        }
+    }
+
+    /// <summary>Branch label like VS Code status bar, e.g. main* when dirty.</summary>
+    public string BranchDisplay
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(BranchName))
+                return string.Empty;
+
+            string name = IsDetached ? $"detached ({BranchName})" : BranchName;
+            if (!string.IsNullOrWhiteSpace(_upstreamBranch) && !IsDetached)
+                name = $"{name} ↔ {_upstreamBranch}";
+            return HasUncommittedChanges ? $"{name}*" : name;
+        }
     }
 
     public string? ActiveFilePath
@@ -193,9 +257,28 @@ public sealed class GitViewModel : ObservableObject, IDisposable
 
     public bool HasTimeline => Timeline.Count > 0;
 
+    public string LocalUserName
+    {
+        get => _localUserName;
+        set => SetProperty(ref _localUserName, value ?? string.Empty);
+    }
+
+    public string LocalUserEmail
+    {
+        get => _localUserEmail;
+        set => SetProperty(ref _localUserEmail, value ?? string.Empty);
+    }
+
+    public string? IdentitySummary
+    {
+        get => _identitySummary;
+        private set => SetProperty(ref _identitySummary, value);
+    }
+
     public IAsyncRelayCommand RefreshCommand { get; }
     public IAsyncRelayCommand OpenRepositoryCommand { get; }
     public IAsyncRelayCommand CommitCommand { get; }
+    public IAsyncRelayCommand StageAllAndCommitCommand { get; }
     public IAsyncRelayCommand StageAllCommand { get; }
     public IAsyncRelayCommand PullCommand { get; }
     public IAsyncRelayCommand PushCommand { get; }
@@ -209,6 +292,9 @@ public sealed class GitViewModel : ObservableObject, IDisposable
     public IAsyncRelayCommand<GitFileStatusItem?> AddToGitIgnoreCommand { get; }
     public IAsyncRelayCommand<string?> CreateBranchCommand { get; }
     public IAsyncRelayCommand<string?> MergeBranchCommand { get; }
+    public IAsyncRelayCommand<string?> CheckoutBranchCommand { get; }
+    public IAsyncRelayCommand SaveLocalIdentityCommand { get; }
+    public IAsyncRelayCommand GenerateCommitMessageCommand { get; }
     public IAsyncRelayCommand<string?> SelectRepoCommand { get; }
 
     public event Action<string>? OpenFileRequested;
@@ -220,9 +306,75 @@ public sealed class GitViewModel : ObservableObject, IDisposable
     public void SetActiveFile(string? filePath)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        ActiveFilePath = string.IsNullOrWhiteSpace(filePath) ? null : filePath;
-        TimelineFileName = ActiveFilePath is null ? null : Path.GetFileName(ActiveFilePath);
-        _ = RefreshTimelineAsync();
+        _ = SetActiveFileAsync(filePath);
+    }
+
+    private async Task SetActiveFileAsync(string? filePath)
+    {
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            string? normalized = NormalizeActiveFilePath(filePath);
+            if (string.Equals(ActiveFilePath, normalized, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            await OnUiAsync(() =>
+            {
+                ActiveFilePath = normalized;
+                TimelineFileName = ActiveFilePath is null ? null : Path.GetFileName(ActiveFilePath);
+            }).ConfigureAwait(false);
+            await RefreshTimelineAsync().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            await ReportErrorAsync(ex.Message).ConfigureAwait(false);
+        }
+    }
+
+    private static string? NormalizeActiveFilePath(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+            return null;
+        try
+        {
+            return Path.GetFullPath(filePath.Trim());
+        }
+        catch
+        {
+            return filePath.Trim();
+        }
+    }
+
+    public Task EnsureCommitTooltipAsync(GitCommitItem commit)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return LoadCommitTooltipAsync(commit);
+    }
+
+    private async Task LoadCommitTooltipAsync(GitCommitItem commit)
+    {
+        if (commit.TooltipLoaded || string.IsNullOrWhiteSpace(SelectedRepoPath))
+            return;
+
+        try
+        {
+            GitCommitTooltipInfo info = await _gitService
+                .GetCommitTooltipAsync(SelectedRepoPath, commit.Hash, _lifetime.Token)
+                .ConfigureAwait(false);
+
+            await OnUiAsync(() => commit.ApplyTooltip(info)).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            await OnUiAsync(() => commit.ApplyTooltip(new GitCommitTooltipInfo(string.Empty, 0, 0, 0)))
+                .ConfigureAwait(false);
+        }
     }
 
     public void RequestOpenFile(GitFileStatusItem? item)
@@ -265,7 +417,10 @@ public sealed class GitViewModel : ObservableObject, IDisposable
                 _selectedCommitHash = null;
                 StatusMessage = "Git is not installed or not on PATH.";
                 ErrorMessage = null;
+                IdentitySummary = null;
+                _upstreamBranch = null;
                 OnPropertyChanged(nameof(HasTimeline));
+                OnPropertyChanged(nameof(BranchDisplay));
             }).ConfigureAwait(false);
             return;
         }
@@ -366,7 +521,10 @@ public sealed class GitViewModel : ObservableObject, IDisposable
                 CommitFiles.Clear();
                 _selectedCommitHash = null;
                 BranchName = string.Empty;
+                IdentitySummary = null;
+                _upstreamBranch = null;
                 OnPropertyChanged(nameof(HasTimeline));
+                OnPropertyChanged(nameof(BranchDisplay));
             }).ConfigureAwait(false);
             return;
         }
@@ -379,6 +537,8 @@ public sealed class GitViewModel : ObservableObject, IDisposable
             GitRepoStatus status = await _gitService.GetStatusAsync(repo, _lifetime.Token).ConfigureAwait(false);
             IReadOnlyList<GitCommitInfo> commits = await _gitService.GetCommitsAsync(repo, 50, _lifetime.Token).ConfigureAwait(false);
             IReadOnlyList<GitBranchInfo> branches = await _gitService.GetBranchesAsync(repo, _lifetime.Token).ConfigureAwait(false);
+            GitUserIdentity identity = await _gitService.GetUserIdentityAsync(repo, _lifetime.Token).ConfigureAwait(false);
+            string? upstream = await _gitService.GetUpstreamBranchAsync(repo, _lifetime.Token).ConfigureAwait(false);
 
             if (version != _refreshVersion)
                 return;
@@ -388,23 +548,38 @@ public sealed class GitViewModel : ObservableObject, IDisposable
             {
                 BranchName = status.BranchName;
                 IsDetached = status.IsDetached;
+                _upstreamBranch = upstream;
                 ApplyStatusFiles(status.Files);
+                ApplyIdentity(identity);
+                OnPropertyChanged(nameof(BranchDisplay));
 
                 string? previousHash = _selectedCommitHash;
 
                 Commits.Clear();
-                foreach (GitCommitInfo commit in commits)
-                    Commits.Add(GitCommitItem.From(commit));
+                for (int i = 0; i < commits.Count; i++)
+                {
+                    bool isHead = i == 0;
+                    Commits.Add(GitCommitItem.From(
+                        commits[i],
+                        isCurrent: isHead,
+                        branchLabel: isHead ? status.BranchName : null,
+                        upstreamLabel: isHead ? upstream : null));
+                }
 
                 Branches.Clear();
                 foreach (GitBranchInfo branch in branches)
-                    Branches.Add(branch.Name);
+                {
+                    if (!branch.IsCurrent)
+                        Branches.Add(branch.Name);
+                }
 
                 int total = StagedCount + UnstagedCount;
                 StatusMessage = total == 0
                     ? $"On {BranchName} — clean"
                     : $"On {BranchName} — {StagedCount} staged, {UnstagedCount} change(s)";
                 CommitCommand.NotifyCanExecuteChanged();
+                StageAllAndCommitCommand.NotifyCanExecuteChanged();
+                GenerateCommitMessageCommand.NotifyCanExecuteChanged();
 
                 reloadCommit = previousHash is null
                     ? null
@@ -431,6 +606,38 @@ public sealed class GitViewModel : ObservableObject, IDisposable
         {
             await ReportErrorAsync(ex.Message).ConfigureAwait(false);
         }
+    }
+
+    private async Task RefreshIdentityAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedRepoPath))
+            return;
+
+        try
+        {
+            GitUserIdentity identity = await _gitService
+                .GetUserIdentityAsync(SelectedRepoPath, _lifetime.Token)
+                .ConfigureAwait(false);
+            await OnUiAsync(() => ApplyIdentity(identity)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await ReportErrorAsync(ex.Message).ConfigureAwait(false);
+        }
+    }
+
+    private void ApplyIdentity(GitUserIdentity identity)
+    {
+        string name = identity.Name ?? "(not set)";
+        string email = identity.Email ?? "(not set)";
+        string nameScope = identity.NameIsLocal ? "local" : "global";
+        string emailScope = identity.EmailIsLocal ? "local" : "global";
+        IdentitySummary = $"{name} <{email}>  (name: {nameScope}, email: {emailScope})";
+
+        if (string.IsNullOrWhiteSpace(LocalUserName) && !string.IsNullOrWhiteSpace(identity.Name))
+            LocalUserName = identity.Name;
+        if (string.IsNullOrWhiteSpace(LocalUserEmail) && !string.IsNullOrWhiteSpace(identity.Email))
+            LocalUserEmail = identity.Email;
     }
 
     private async Task RefreshTimelineAsync()
@@ -509,6 +716,98 @@ public sealed class GitViewModel : ObservableObject, IDisposable
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    private async Task StageAllAndCommitAsync()
+    {
+        if (!CanStageAllAndCommit())
+            return;
+
+        IsBusy = true;
+        try
+        {
+            if (StagedCount + UnstagedCount > 0)
+            {
+                GitCommandResult stage = await _gitService
+                    .StageAllAsync(SelectedRepoPath!, _lifetime.Token)
+                    .ConfigureAwait(false);
+                if (!stage.Succeeded)
+                {
+                    await ReportErrorAsync(Truncate(stage.CombinedOutput)).ConfigureAwait(false);
+                    return;
+                }
+            }
+
+            GitCommandResult result = await _gitService
+                .CommitAsync(SelectedRepoPath!, CommitMessage.Trim(), _lifetime.Token)
+                .ConfigureAwait(false);
+
+            if (!result.Succeeded)
+            {
+                await ReportErrorAsync(Truncate(result.CombinedOutput)).ConfigureAwait(false);
+                return;
+            }
+
+            await OnUiAsync(() => CommitMessage = string.Empty).ConfigureAwait(false);
+            StatusMessage = "Staged all and committed.";
+            await RefreshAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task GenerateCommitMessageAsync()
+    {
+        if (!CanGenerateCommitMessage())
+            return;
+
+        await OnUiAsync(() =>
+        {
+            IsGeneratingCommitMessage = true;
+            ErrorMessage = null;
+            StatusMessage = "Generating commit message…";
+        }).ConfigureAwait(false);
+
+        try
+        {
+            string context = await _gitService
+                .GetWorkingTreeChangeSummaryAsync(SelectedRepoPath!, _lifetime.Token)
+                .ConfigureAwait(false);
+
+            if (string.IsNullOrWhiteSpace(context))
+            {
+                await ReportErrorAsync("No staged or unstaged changes to summarize.").ConfigureAwait(false);
+                return;
+            }
+
+            string? message = await _commitMessageAi.GenerateAsync(context, _lifetime.Token).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                await ReportErrorAsync(
+                    "Embedded AI returned an empty commit message. Enable Embedded FIM in Preferences and ensure the model is downloaded.")
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            await OnUiAsync(() =>
+            {
+                CommitMessage = message;
+                StatusMessage = "Commit message generated.";
+            }).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            await ReportErrorAsync(ex.Message).ConfigureAwait(false);
+        }
+        finally
+        {
+            await OnUiAsync(() => IsGeneratingCommitMessage = false).ConfigureAwait(false);
         }
     }
 
@@ -787,7 +1086,7 @@ public sealed class GitViewModel : ObservableObject, IDisposable
             if (version != Volatile.Read(ref _commitFilesVersion))
                 return;
 
-            var items = files.Select(GitCommitFileItem.From).ToList();
+            var items = files.Select(f => GitCommitFileItem.From(f, hash)).ToList();
             await OnUiAsync(() =>
             {
                 if (version != Volatile.Read(ref _commitFilesVersion))
@@ -843,6 +1142,9 @@ public sealed class GitViewModel : ObservableObject, IDisposable
                     ? $"On {BranchName} — clean"
                     : $"On {BranchName} — {StagedCount} staged, {UnstagedCount} change(s)";
                 CommitCommand.NotifyCanExecuteChanged();
+                StageAllAndCommitCommand.NotifyCanExecuteChanged();
+                GenerateCommitMessageCommand.NotifyCanExecuteChanged();
+                OnPropertyChanged(nameof(BranchDisplay));
             }).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -1036,10 +1338,84 @@ public sealed class GitViewModel : ObservableObject, IDisposable
         }
     }
 
+    private async Task CheckoutBranchAsync(string? branchName)
+    {
+        if (!CanMutate() || string.IsNullOrWhiteSpace(branchName))
+            return;
+
+        IsBusy = true;
+        try
+        {
+            GitCommandResult result = await _gitService
+                .CheckoutAsync(SelectedRepoPath!, branchName.Trim(), _lifetime.Token)
+                .ConfigureAwait(false);
+            if (!result.Succeeded)
+                await ReportErrorAsync(Truncate(result.CombinedOutput)).ConfigureAwait(false);
+            else
+            {
+                StatusMessage = $"Checked out '{branchName.Trim()}'.";
+                await RefreshAsync().ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task SaveLocalIdentityAsync()
+    {
+        if (!CanMutate())
+            return;
+
+        if (string.IsNullOrWhiteSpace(LocalUserName) && string.IsNullOrWhiteSpace(LocalUserEmail))
+        {
+            await ReportErrorAsync("Enter a name and/or email to set locally.").ConfigureAwait(false);
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            GitCommandResult result = await _gitService
+                .SetLocalUserIdentityAsync(
+                    SelectedRepoPath!,
+                    string.IsNullOrWhiteSpace(LocalUserName) ? null : LocalUserName,
+                    string.IsNullOrWhiteSpace(LocalUserEmail) ? null : LocalUserEmail,
+                    _lifetime.Token)
+                .ConfigureAwait(false);
+
+            if (!result.Succeeded)
+                await ReportErrorAsync(Truncate(result.CombinedOutput)).ConfigureAwait(false);
+            else
+            {
+                StatusMessage = "Local user.name / user.email saved.";
+                await RefreshIdentityAsync().ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     private bool CanCommit() =>
         CanMutate()
         && !string.IsNullOrWhiteSpace(CommitMessage)
         && StagedCount > 0;
+
+    private bool CanStageAllAndCommit() =>
+        CanMutate()
+        && !string.IsNullOrWhiteSpace(CommitMessage)
+        && (StagedCount + UnstagedCount) > 0;
+
+    private bool CanGenerateCommitMessage() =>
+        !IsGeneratingCommitMessage
+        && !IsBusy
+        && _commitMessageAi.IsAvailable
+        && IsGitAvailable
+        && !string.IsNullOrWhiteSpace(SelectedRepoPath)
+        && (StagedCount + UnstagedCount) > 0;
 
     private bool CanMutate() =>
         !IsBusy && IsGitAvailable && !string.IsNullOrWhiteSpace(SelectedRepoPath);
@@ -1064,6 +1440,7 @@ public sealed class GitViewModel : ObservableObject, IDisposable
         RefreshCommand.NotifyCanExecuteChanged();
         OpenRepositoryCommand.NotifyCanExecuteChanged();
         CommitCommand.NotifyCanExecuteChanged();
+        StageAllAndCommitCommand.NotifyCanExecuteChanged();
         StageAllCommand.NotifyCanExecuteChanged();
         PullCommand.NotifyCanExecuteChanged();
         PushCommand.NotifyCanExecuteChanged();
@@ -1077,6 +1454,9 @@ public sealed class GitViewModel : ObservableObject, IDisposable
         AddToGitIgnoreCommand.NotifyCanExecuteChanged();
         CreateBranchCommand.NotifyCanExecuteChanged();
         MergeBranchCommand.NotifyCanExecuteChanged();
+        CheckoutBranchCommand.NotifyCanExecuteChanged();
+        SaveLocalIdentityCommand.NotifyCanExecuteChanged();
+        GenerateCommitMessageCommand.NotifyCanExecuteChanged();
         SelectRepoCommand.NotifyCanExecuteChanged();
     }
 
@@ -1164,25 +1544,151 @@ public sealed class GitFileStatusItem
     public override string ToString() => DisplayText;
 }
 
-public sealed class GitCommitItem
+public sealed class GitCommitItem : ObservableObject
 {
+    private string _body = string.Empty;
+    private int _filesChanged;
+    private int _insertions;
+    private int _deletions;
+    private bool _tooltipLoaded;
+
     public required string Hash { get; init; }
     public required string ShortHash { get; init; }
     public required string Author { get; init; }
     public required DateTimeOffset AuthorDate { get; init; }
     public required string Subject { get; init; }
+    public bool IsCurrent { get; init; }
+    public string? BranchLabel { get; init; }
+    public string? UpstreamLabel { get; init; }
+
     public string RelativeDate => GitOutputParser.FormatRelativeDate(AuthorDate);
+    public string RelativeDateLong => GitOutputParser.FormatRelativeDateLong(AuthorDate);
+
+    public string AbsoluteDateText =>
+        AuthorDate == DateTimeOffset.MinValue
+            ? string.Empty
+            : AuthorDate.ToLocalTime().ToString("MMMM d, yyyy 'at' h:mm tt", CultureInfo.InvariantCulture);
+
+    public string HeaderDateText =>
+        string.IsNullOrEmpty(AbsoluteDateText)
+            ? RelativeDateLong
+            : $"{RelativeDateLong} ({AbsoluteDateText})";
+
+    public string MetaText => $"{Author}  ·  {RelativeDate}  ·  {ShortHash}";
 
     public string DisplayText => $"{Subject}  {Author}  {RelativeDate}";
 
-    public static GitCommitItem From(GitCommitInfo commit) => new()
+    public string Body
+    {
+        get => _body;
+        private set
+        {
+            if (SetProperty(ref _body, value))
+                OnPropertyChanged(nameof(HasBody));
+        }
+    }
+
+    public int FilesChanged
+    {
+        get => _filesChanged;
+        private set
+        {
+            if (SetProperty(ref _filesChanged, value))
+            {
+                OnPropertyChanged(nameof(HasStats));
+                OnPropertyChanged(nameof(TooltipText));
+            }
+        }
+    }
+
+    public int Insertions
+    {
+        get => _insertions;
+        private set
+        {
+            if (SetProperty(ref _insertions, value))
+                OnPropertyChanged(nameof(TooltipText));
+        }
+    }
+
+    public int Deletions
+    {
+        get => _deletions;
+        private set
+        {
+            if (SetProperty(ref _deletions, value))
+                OnPropertyChanged(nameof(TooltipText));
+        }
+    }
+
+    public bool TooltipLoaded
+    {
+        get => _tooltipLoaded;
+        private set => SetProperty(ref _tooltipLoaded, value);
+    }
+
+    public bool HasBody => !string.IsNullOrWhiteSpace(Body);
+    public bool HasStats => FilesChanged > 0 || Insertions > 0 || Deletions > 0;
+    public bool HasUpstream => !string.IsNullOrWhiteSpace(UpstreamLabel);
+
+    public string TooltipText
+    {
+        get
+        {
+            var lines = new List<string>
+            {
+                Subject,
+                HeaderDateText,
+                MetaText
+            };
+            if (HasUpstream)
+                lines.Add($"Upstream: {UpstreamLabel}");
+            if (HasBody)
+                lines.Add(Body);
+            if (HasStats)
+            {
+                string files = FilesChanged == 1 ? "1 file changed" : $"{FilesChanged} files changed";
+                string stats = files;
+                if (Insertions > 0)
+                    stats += $", {Insertions} insertions(+)";
+                if (Deletions > 0)
+                    stats += $", {Deletions} deletions(-)";
+                lines.Add(stats);
+            }
+            else if (!TooltipLoaded)
+            {
+                lines.Add("Loading details…");
+            }
+
+            return string.Join(Environment.NewLine, lines.Where(l => !string.IsNullOrWhiteSpace(l)));
+        }
+    }
+
+    public static GitCommitItem From(
+        GitCommitInfo commit,
+        bool isCurrent = false,
+        string? branchLabel = null,
+        string? upstreamLabel = null) => new()
     {
         Hash = commit.Hash,
         ShortHash = commit.ShortHash,
         Author = commit.Author,
         AuthorDate = commit.AuthorDate,
-        Subject = commit.Subject
+        Subject = commit.Subject,
+        IsCurrent = isCurrent,
+        BranchLabel = isCurrent ? branchLabel : null,
+        UpstreamLabel = isCurrent ? upstreamLabel : null
     };
+
+    public void ApplyTooltip(GitCommitTooltipInfo info)
+    {
+        Body = info.Body?.Trim() ?? string.Empty;
+        FilesChanged = info.FilesChanged;
+        Insertions = info.Insertions;
+        Deletions = info.Deletions;
+        TooltipLoaded = true;
+        OnPropertyChanged(nameof(TooltipText));
+    }
 
     public override string ToString() => DisplayText;
 }
@@ -1192,16 +1698,18 @@ public sealed class GitCommitFileItem
     public required string Path { get; init; }
     public string? OriginalPath { get; init; }
     public string StatusCode { get; init; } = string.Empty;
+    public string? CommitHash { get; init; }
 
     public string DisplayText => string.IsNullOrEmpty(OriginalPath)
         ? $"{StatusCode}  {Path}"
         : $"{StatusCode}  {OriginalPath} → {Path}";
 
-    public static GitCommitFileItem From(GitCommitFile file) => new()
+    public static GitCommitFileItem From(GitCommitFile file, string? commitHash = null) => new()
     {
         Path = file.Path,
         OriginalPath = file.OriginalPath,
-        StatusCode = file.StatusCode
+        StatusCode = file.StatusCode,
+        CommitHash = commitHash
     };
 
     public override string ToString() => DisplayText;

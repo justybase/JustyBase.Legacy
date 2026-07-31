@@ -28,7 +28,9 @@ internal sealed class PreferencesDockContent : DockContent
         Action saveRecentFiles,
         IUiHelperService uiHelperService,
         IColorTheme colorTheme,
-        INetezzaAutocompleteState netezzaAutocompleteState)
+        INetezzaAutocompleteState netezzaAutocompleteState,
+        JustyBase.Ai.Fim.Download.IFimModelCatalog? fimCatalog = null,
+        JustyBaseLegacy.UI.Fim.IFimModelBootstrapService? fimBootstrap = null)
     {
         Text = "JustyBase Settings";
         TabText = "JustyBase Settings";
@@ -47,7 +49,9 @@ internal sealed class PreferencesDockContent : DockContent
             saveRecentFiles,
             uiHelperService,
             colorTheme,
-            netezzaAutocompleteState);
+            netezzaAutocompleteState,
+            fimCatalog: fimCatalog,
+            fimBootstrap: fimBootstrap);
         _preferencesForm.PrepareForDocumentHost();
         _preferencesForm.FormClosed += PreferencesForm_FormClosed;
         Controls.Add(_preferencesForm);

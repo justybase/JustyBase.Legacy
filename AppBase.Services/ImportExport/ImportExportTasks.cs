@@ -10,6 +10,7 @@ using AppBase.Common.Interfaces;
 using AppBase.Common.JsonContext;
 using AppBase.Common.Models;
 using AppBase.Data;
+using JustyBase.ImportExport.Import;
 using JustyBase.NetezzaDriver;
 using JustyBase.NetezzaDdl;
 using SpreadSheetTasks;
@@ -18,7 +19,6 @@ using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
 using System.Globalization;
-using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -240,18 +240,7 @@ public sealed partial class ImportExportTasks : IImportExportTasks
 
     #region Named Pipe Server Helpers
 
-    private void CreateAndRunPipeServer(string serverName, Action<NamedPipeServerStream, StreamWriter> serverAction)
-    {
-        Task.Run(() =>
-        {
-            using var server = new NamedPipeServerStream(serverName);
-            server.WaitForConnection();
-            using var writer = new StreamWriter(server, Encoding.UTF8, 65_536);
-            serverAction(server, writer);
-        });
-    }
-
-    private string GenerateServerName() => $"pipe_sql_{Random.Shared.Next(0, 9999)}";
+    private string GenerateServerName() => NetezzaPipeImportExecutor.CreatePipeName("pipe_sql");
 
     #endregion
 
@@ -568,184 +557,86 @@ public sealed partial class ImportExportTasks : IImportExportTasks
         _fx?.SetProgressBarValue(arg1 > 100 ? 100 : arg1);
     }
 
+    /// <summary>Host adapter over <see cref="NetezzaPipeImportExecutor.ServeRawLinesAsync"/>.</summary>
     public void LinesPipeServer(string[] lines, string serverName, IImportProgressForm form)
     {
-        Task.Run(() =>
-        {
-            var server = new NamedPipeServerStream(serverName);
-            server.WaitForConnection();
-            StreamWriter writer = new StreamWriter(server);
-            int i = 0;
+        int pos = Math.Max(10, lines.Length / 100);
+        form?.SetProgressBarValue(0);
 
-            int pos = lines.Length / 100;
-            pos = pos > 10 ? pos : 10;
-
-            form?.SetProgressBarValue(0);
-
-            foreach (string line in lines)
-            {
-                if (line != "")
+        _ = NetezzaPipeImportExecutor.ServeRawLinesAsync(
+                EnumerateNonEmptyLines(lines),
+                serverName,
+                progress: i =>
                 {
-                    writer.WriteLine(line);
-                }
-                if (++i % pos == 0)
-                {
-                    form?.SetProgressBarValue((int)(100 * i) / (lines.Length));
-                }
-            }
-
-            form?.AddRow($"database processing...", (int)ProgressBarStyle.Marquee);
-
-            writer.Flush();
-            server.Close();
-        });
+                    if (lines.Length > 0)
+                        form?.SetProgressBarValue(Math.Min(100, (int)(100 * i / lines.Length)));
+                },
+                progressEvery: pos)
+            .ContinueWith(
+                _ => form?.AddRow("database processing...", (int)ProgressBarStyle.Marquee),
+                TaskScheduler.Default);
     }
 
+    /// <summary>
+    /// Host adapter over <see cref="NetezzaPipeImportExecutor.ServeRawLinesAsync"/>.
+    /// <paramref name="newline"/> is ignored — shared executor always emits LF (EXTERNAL RecordDelim '\n').
+    /// </summary>
     public void FileStreamPipeServer(string path, string serverName, IImportProgressForm form, int RowCounts, string newline = "\r\n")
     {
-        Task.Run(() =>
-        {
-            var server = new NamedPipeServerStream(serverName);
-            server.WaitForConnection();
-            StreamWriter writer = new StreamWriter(server);
+        _ = newline; // retained for IImportExportTasks signature compatibility
+        int pos = Math.Max(10, RowCounts > 0 && RowCounts != 123123124 ? RowCounts / 100 : 10_000);
+        form?.SetProgressBarValue(0);
 
-            string line;
-            int i = 0;
-
-            int pos = RowCounts / 100;
-            pos = pos > 10 ? pos : 10;
-
-            form?.SetProgressBarValue(0);
-
-            using var rdrExt = new StreamReader(path);
-            try
-            {
-                long rdrExtLen = -1;
-
-                while ((line = rdrExt.ReadLine()) != null)
+        _ = NetezzaPipeImportExecutor.ServeRawLinesAsync(
+                ReadTrimmedFileLines(path),
+                serverName,
+                progress: i =>
                 {
-                    if (line == "")
-                    {
-                        continue;
-                    }
-                    writer.Write(line.Trim());
-                    writer.Write(newline);
-
-                    ++i;
-                    if (RowCounts != 123123124)
-                    {
-                        if (i % pos == 0)
-                        {
-                            if (form != null)
-                            {
-                                int n = (int)(100 * i) / RowCounts;
-                                if (n > 100)
-                                {
-                                    n = 100;
-                                }
-                                form?.SetProgressBarValue(n);
-                            }
-                        }
-                    }
-                    else
-                    {
-                        if (i % 10_000 == 0)
-                        {
-                            if (rdrExtLen == -1)
-                            {
-                                rdrExtLen = rdrExt.BaseStream.Length;
-                            }
-                            int num = (int)(100 * rdrExt.BaseStream.Position / rdrExtLen);
-                            form?.SetProgressBarValue(num > 100 ? 100 : num);
-                        }
-                    }
-                }
-                writer.Flush();
-
-                form?.AddRow($"database processing...", (int)ProgressBarStyle.Marquee);
-            }
-            finally
-            {
-                rdrExt.Dispose();
-                server.Close();
-            }
-        });
+                    if (RowCounts != 123123124 && RowCounts > 0)
+                        form?.SetProgressBarValue(Math.Min(100, (int)(100 * i / RowCounts)));
+                    else if (i % 10_000 == 0)
+                        form?.SetProgressBarValue(Math.Min(100, (int)i % 100));
+                },
+                progressEvery: pos)
+            .ContinueWith(
+                _ => form?.AddRow("database processing...", (int)ProgressBarStyle.Marquee),
+                TaskScheduler.Default);
     }
 
+    /// <summary>Host adapter over <see cref="NetezzaPipeImportExecutor.ServeDataReaderAsync"/>.</summary>
     public void DBReaderStreamPipeServer(DbDataReader rdr, string serverName, Action<int> act, int progressSize = 10_000)
     {
         char sepInExternal = _applicationSettingsContext.Config.SepInExternal[0];
-        Task.Run(() =>
+        _ = NetezzaPipeImportExecutor.ServeDataReaderAsync(
+            rdr,
+            serverName,
+            delimiter: sepInExternal,
+            rowProgress: rows => act?.Invoke((int)Math.Min(rows, int.MaxValue)),
+            progressEvery: progressSize <= 0 ? 10_000 : progressSize);
+    }
+
+    private static async IAsyncEnumerable<string> EnumerateNonEmptyLines(string[] lines)
+    {
+        foreach (string line in lines)
         {
-            var server = new NamedPipeServerStream(serverName);
-            server.WaitForConnection();
-            StreamWriter writer = new StreamWriter(server, Encoding.UTF8, 65_536);
+            if (line.Length == 0)
+                continue;
+            yield return line;
+        }
 
-            object[] row = new object[rdr.FieldCount];
-            string[] dataTypes = new string[rdr.FieldCount];
+        await Task.CompletedTask.ConfigureAwait(false);
+    }
 
-            for (int j = 0; j < rdr.FieldCount; j++)
-            {
-                row[j] = rdr.GetName(j);
-                dataTypes[j] = rdr.GetFieldType(j).Name;
-            }
-
-            writer.Write(String.Join(sepInExternal, row));
-            writer.Write('\n');
-            writer.Flush();
-
-            int l = 0;
-            while (rdr.Read())
-            {
-                rdr.GetValues(row);
-
-                for (int i = 0; i < row.Length; i++)
-                {
-                    if (row[i] is DBNull)
-                    {
-                        row[i] = "";
-                    }
-                    else
-                    {
-                        switch (dataTypes[i])
-                        {
-                            case "Decimal":
-                                row[i] = ((Decimal)row[i]).ToString(_nfi);
-                                break;
-                            case "Double":
-                                row[i] = ((Double)row[i]).ToString(_nfi);
-                                break;
-                            case "DateTime":
-                                row[i] = ((DateTime)row[i]).ToString("yyyy-MM-dd HH:mm:ss");
-                                break;
-                            case "Boolean":
-                                if (row[i] != DBNull.Value && (bool)row[i] == true)
-                                {
-                                    row[i] = 1;
-                                }
-                                else if (row[i] != DBNull.Value && (bool)row[i] == false)
-                                {
-                                    row[i] = 0;
-                                }
-                                break;
-                            default:
-                                break;
-                        }
-                    }
-                }
-                writer.Write(String.Join(sepInExternal, row) + "\n");
-                writer.Flush();
-
-                if (++l % progressSize == 0)
-                {
-                    act?.Invoke(l);
-                }
-            }
-            writer.Flush();
-
-            server.Close();
-            rdr.Close();
-        });
+    private static async IAsyncEnumerable<string> ReadTrimmedFileLines(string path)
+    {
+        using var reader = new StreamReader(path);
+        string? line;
+        while ((line = await reader.ReadLineAsync().ConfigureAwait(false)) is not null)
+        {
+            if (line.Length == 0)
+                continue;
+            yield return line.Trim();
+        }
     }
 
     public string[] GetHeaders(DbDataReader rdr, string selCon = null)

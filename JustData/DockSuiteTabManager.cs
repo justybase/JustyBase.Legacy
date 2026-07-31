@@ -724,7 +724,9 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
         Action saveRecentFiles,
         IUiHelperService uiHelperService,
         IColorTheme colorTheme,
-        INetezzaAutocompleteState netezzaAutocompleteState)
+        INetezzaAutocompleteState netezzaAutocompleteState,
+        JustyBase.Ai.Fim.Download.IFimModelCatalog? fimCatalog = null,
+        JustyBaseLegacy.UI.Fim.IFimModelBootstrapService? fimBootstrap = null)
     {
         if (_preferencesContent is not null && !_preferencesContent.IsDisposed)
         {
@@ -742,7 +744,9 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
             saveRecentFiles,
             uiHelperService,
             colorTheme,
-            netezzaAutocompleteState);
+            netezzaAutocompleteState,
+            fimCatalog,
+            fimBootstrap);
         _preferencesContent.Show(_dockPanel, DockState.Document);
         _preferencesContent.Activate();
     }

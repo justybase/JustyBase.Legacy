@@ -1,5 +1,7 @@
 using AppBase.Common.Enums;
 using JustData.Application.Schema;
+using JustyBase.Core.Schema;
+using CoreCatalog = JustyBase.Core.Schema.SchemaContextMenuCatalog;
 
 namespace JustyBaseLegacy.UI.Schema;
 
@@ -24,6 +26,10 @@ internal sealed record SchemaContextMenuEntry(
     public static SchemaContextMenuEntry Separator { get; } = new("-");
 }
 
+/// <summary>
+/// Legacy UI tree over shared <see cref="JustyBase.Core.Schema.SchemaContextMenuCatalog"/> SQL ids.
+/// Host-only actions (Create…, Refresh, charts, column ops) stay local.
+/// </summary>
 internal static class SchemaContextMenuCatalog
 {
     public static IReadOnlyList<SchemaContextMenuEntry> GetEntries(SchemaNode node)
@@ -47,6 +53,33 @@ internal static class SchemaContextMenuCatalog
             _ when node.Kind == SchemaNodeKind.Column => ColumnEntries,
             _ => GetGeneralEntries(node)
         };
+    }
+
+    public static string? GetSharedActionId(SchemaContextAction action) => action switch
+    {
+        SchemaContextAction.SelectNew or SchemaContextAction.SelectClipboard => CoreCatalog.Ids.SelectTop100,
+        SchemaContextAction.SelectDuplicates => CoreCatalog.Ids.Duplicates,
+        SchemaContextAction.SelectDeletedRows => CoreCatalog.Ids.Deleted,
+        SchemaContextAction.GrantClipboard => CoreCatalog.Ids.Grant,
+        SchemaContextAction.CommentClipboard => CoreCatalog.Ids.Comment,
+        SchemaContextAction.GenerateStatistics => CoreCatalog.Ids.Statistics,
+        SchemaContextAction.Groom => CoreCatalog.Ids.Groom,
+        SchemaContextAction.ShowDistribution => CoreCatalog.Ids.Distribution,
+        SchemaContextAction.EmptyTable => CoreCatalog.Ids.Empty,
+        SchemaContextAction.Recreate => CoreCatalog.Ids.Recreate,
+        SchemaContextAction.ImportData => CoreCatalog.Ids.Import,
+        SchemaContextAction.ExportData => CoreCatalog.Ids.Export,
+        SchemaContextAction.Drop => CoreCatalog.Ids.Drop,
+        SchemaContextAction.DdlNew or SchemaContextAction.DdlClipboard => CoreCatalog.Ids.Ddl,
+        _ => null
+    };
+
+    public static string? TryFormatSharedSql(SchemaContextAction action, string qualifiedObject)
+    {
+        string? id = GetSharedActionId(action);
+        if (id is null || !CoreCatalog.TryGet(id, out SchemaContextMenuAction shared) || shared.IsHostOnly)
+            return null;
+        return CoreCatalog.Format(shared, qualifiedObject);
     }
 
     private static IReadOnlyList<SchemaContextMenuEntry> GetGeneralEntries(SchemaNode node) => node.Kind switch

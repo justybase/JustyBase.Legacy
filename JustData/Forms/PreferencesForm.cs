@@ -37,6 +37,9 @@ namespace JustyBaseLegacy.UI
         private readonly PreferencesViewModel _settingsViewModel;
         private SnippetSettings _pendingSnippets = new();
         private bool _specialColoringHandlerAttached;
+        private readonly JustyBase.Ai.Fim.Download.IFimModelCatalog? _fimCatalog;
+        private readonly JustyBaseLegacy.UI.Fim.IFimModelBootstrapService? _fimBootstrap;
+
         public PreferencesForm(Action repaintApplication, Action saveManySqlToDisk,
             IApplicationSettingsContext applicationSettingsContext,
             ISnippetInitializationContext snippetInitializationContext,
@@ -45,7 +48,9 @@ namespace JustyBaseLegacy.UI
             IUiHelperService uiHelperService,
             IColorTheme colorTheme,
             INetezzaAutocompleteState netezzaAutocompleteState,
-            PreferencesViewModel? settingsViewModel = null)
+            PreferencesViewModel? settingsViewModel = null,
+            JustyBase.Ai.Fim.Download.IFimModelCatalog? fimCatalog = null,
+            JustyBaseLegacy.UI.Fim.IFimModelBootstrapService? fimBootstrap = null)
         {
             _applicationSettingsContext = applicationSettingsContext ?? throw new ArgumentNullException(nameof(applicationSettingsContext));
             _netezzaAutocompleteState = netezzaAutocompleteState ?? throw new ArgumentNullException(nameof(netezzaAutocompleteState));
@@ -56,12 +61,15 @@ namespace JustyBaseLegacy.UI
             _saveManySqlToDisk = saveManySqlToDisk ?? throw new ArgumentNullException(nameof(saveManySqlToDisk));
             _uiHelperService = uiHelperService;
             _config = _applicationSettingsContext.Config;
+            _fimCatalog = fimCatalog;
+            _fimBootstrap = fimBootstrap;
             _settingsViewModel = settingsViewModel ?? new PreferencesViewModel(
                 new WinFormsApplicationSettingsStore(_applicationSettingsContext, _netezzaAutocompleteState),
                 new WinFormsSettingsThemePreviewAdapter(_applicationSettingsContext, _repaintApplication));
             InitializeComponent();
             _colorize = colorTheme;
             BuildModernLayout();
+            EnsureEmbeddedFimPanel();
             string lg = System.Globalization.CultureInfo.CurrentCulture.TwoLetterISOLanguageName;
 
             startupPathsDgv.Visible = true;
@@ -95,6 +103,23 @@ namespace JustyBaseLegacy.UI
                 tbColoring1.ForeColor = Color.FromArgb(0, 0, 255);
                 tbColoring2.ForeColor = Color.FromArgb(250, 0, 250);
             }
+        }
+
+        private void EnsureEmbeddedFimPanel()
+        {
+            if (_tabEmbeddedFim is null || _fimCatalog is null || _fimBootstrap is null)
+                return;
+            if (_tabEmbeddedFim.Controls.Count > 0)
+                return;
+
+            var panel = new JustyBaseLegacy.UI.Controls.EmbeddedFimPreferencesPanel(
+                _applicationSettingsContext,
+                _fimCatalog,
+                _fimBootstrap)
+            {
+                Dock = DockStyle.Fill
+            };
+            _tabEmbeddedFim.Controls.Add(panel);
         }
 
         internal void PrepareForDocumentHost()

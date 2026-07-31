@@ -198,17 +198,24 @@ public partial class BaseWindow
         switch (action)
         {
             case SchemaContextAction.SelectDuplicates:
-                SetClipboardText(BuildDuplicatesSql(node.Model, qualifiedName));
+                SetClipboardText(
+                    SchemaContextMenuCatalog.TryFormatSharedSql(action, qualifiedName)
+                    ?? BuildDuplicatesSql(node.Model, qualifiedName));
                 break;
             case SchemaContextAction.SelectDeletedRows:
+                // Prefer rich NetezzaDdlTemplates (show_deleted_records); Core has a simpler fallback.
                 AddMainTab(null, qualifiedName,
                     NetezzaDdlTemplates.GetDeletedRecordsSql(qualifiedName, [], static name => name));
                 break;
             case SchemaContextAction.GrantClipboard:
-                SetClipboardText(NetezzaDdlTemplates.GetGrantSelectSql($"{databaseName}..{table.TABLE_NAME}"));
+                SetClipboardText(
+                    SchemaContextMenuCatalog.TryFormatSharedSql(action, $"{databaseName}..{table.TABLE_NAME}")
+                    ?? NetezzaDdlTemplates.GetGrantSelectSql($"{databaseName}..{table.TABLE_NAME}"));
                 break;
             case SchemaContextAction.CommentClipboard:
-                SetClipboardText(NetezzaDdlTemplates.GetAddTableCommentTemplateSql(qualifiedName));
+                SetClipboardText(
+                    SchemaContextMenuCatalog.TryFormatSharedSql(action, qualifiedName)
+                    ?? NetezzaDdlTemplates.GetAddTableCommentTemplateSql(qualifiedName));
                 break;
             case SchemaContextAction.AddKey:
                 SetClipboardText($"ALTER TABLE {qualifiedName} ADD CONSTRAINT PK_{table.TABLE_NAME} PRIMARY KEY (COL1,COL2);");
@@ -218,11 +225,13 @@ public partial class BaseWindow
                 break;
             case SchemaContextAction.GenerateStatistics:
                 AddMainTab(null, $"stats for {table.TABLE_NAME}",
-                    NetezzaDdlTemplates.GetGenerateStatsSql($"{databaseName}..{table.TABLE_NAME}"));
+                    SchemaContextMenuCatalog.TryFormatSharedSql(action, $"{databaseName}..{table.TABLE_NAME}")
+                    ?? NetezzaDdlTemplates.GetGenerateStatsSql($"{databaseName}..{table.TABLE_NAME}"));
                 break;
             case SchemaContextAction.EmptyTable:
                 AddMainTab(null, $"empty for {table.TABLE_NAME}",
-                    $"TRUNCATE TABLE {databaseName}..{table.TABLE_NAME};\r\n--https://www.ibm.com/docs/en/netezza?topic=tables-truncate-table");
+                    SchemaContextMenuCatalog.TryFormatSharedSql(action, $"{databaseName}..{table.TABLE_NAME}")
+                    ?? $"TRUNCATE TABLE {databaseName}..{table.TABLE_NAME};\r\n--https://www.ibm.com/docs/en/netezza?topic=tables-truncate-table");
                 break;
             case SchemaContextAction.Recreate:
                 AddMainTab(null, $"{table.TABLE_NAME} - recreate",

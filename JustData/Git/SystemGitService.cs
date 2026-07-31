@@ -208,6 +208,41 @@ public sealed class SystemGitService : IGitService
             : [];
     }
 
+    public async Task<GitCommitTooltipInfo> GetCommitTooltipAsync(
+        string repoPath,
+        string commitHash,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(commitHash))
+            return new GitCommitTooltipInfo(string.Empty, 0, 0, 0);
+
+        string hash = commitHash.Trim();
+        GitCommandResult bodyResult = await RunAsync(
+            repoPath,
+            ["show", "-s", "--format=%b", hash],
+            cancellationToken).ConfigureAwait(false);
+        GitCommandResult statResult = await RunAsync(
+            repoPath,
+            ["show", "--shortstat", "--format=", hash],
+            cancellationToken).ConfigureAwait(false);
+
+        return GitOutputParser.ParseCommitTooltip(
+            bodyResult.Succeeded ? bodyResult.StandardOutput : string.Empty,
+            statResult.Succeeded ? statResult.StandardOutput : string.Empty);
+    }
+
+    public async Task<string?> GetUpstreamBranchAsync(string repoPath, CancellationToken cancellationToken = default)
+    {
+        GitCommandResult result = await RunAsync(
+            repoPath,
+            ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+            cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded)
+            return null;
+        string name = result.StandardOutput.Trim();
+        return string.IsNullOrWhiteSpace(name) ? null : name;
+    }
+
     public async Task<GitFileContents> GetCommitFileContentsAsync(
         string repoPath,
         string commitHash,
@@ -364,6 +399,140 @@ public sealed class SystemGitService : IGitService
         {
             return GitCommandResult.Failure(-1, string.Empty, ex.Message);
         }
+    }
+
+    public async Task<GitUserIdentity> GetUserIdentityAsync(string? repoPath, CancellationToken cancellationToken = default)
+    {
+        string? name = await GetConfigValueAsync(repoPath, "user.name", cancellationToken).ConfigureAwait(false);
+        string? email = await GetConfigValueAsync(repoPath, "user.email", cancellationToken).ConfigureAwait(false);
+        bool nameIsLocal = false;
+        bool emailIsLocal = false;
+
+        if (!string.IsNullOrWhiteSpace(repoPath))
+        {
+            nameIsLocal = !string.IsNullOrEmpty(
+                await GetConfigValueAsync(repoPath, "user.name", cancellationToken, localOnly: true).ConfigureAwait(false));
+            emailIsLocal = !string.IsNullOrEmpty(
+                await GetConfigValueAsync(repoPath, "user.email", cancellationToken, localOnly: true).ConfigureAwait(false));
+        }
+
+        return new GitUserIdentity(name, email, nameIsLocal, emailIsLocal);
+    }
+
+    public async Task<GitCommandResult> SetLocalUserIdentityAsync(
+        string repoPath,
+        string? name,
+        string? email,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath))
+            return GitCommandResult.Failure(1, string.Empty, "Repository path is required.");
+
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            GitCommandResult nameResult = await RunAsync(
+                repoPath,
+                ["config", "--local", "user.name", name.Trim()],
+                cancellationToken).ConfigureAwait(false);
+            if (!nameResult.Succeeded)
+                return nameResult;
+        }
+
+        if (!string.IsNullOrWhiteSpace(email))
+        {
+            GitCommandResult emailResult = await RunAsync(
+                repoPath,
+                ["config", "--local", "user.email", email.Trim()],
+                cancellationToken).ConfigureAwait(false);
+            if (!emailResult.Succeeded)
+                return emailResult;
+        }
+
+        if (string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(email))
+            return GitCommandResult.Failure(1, string.Empty, "Name or email is required.");
+
+        return GitCommandResult.Success();
+    }
+
+    public async Task<string> GetWorkingTreeChangeSummaryAsync(string repoPath, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath))
+            return string.Empty;
+
+        const int maxChars = 6_000;
+        GitCommandResult cachedStat = await RunAsync(repoPath, ["diff", "--cached", "--stat"], cancellationToken).ConfigureAwait(false);
+        GitCommandResult cachedDiff = await RunAsync(repoPath, ["diff", "--cached"], cancellationToken).ConfigureAwait(false);
+        bool hasStaged = cachedDiff.Succeeded && !string.IsNullOrWhiteSpace(cachedDiff.StandardOutput);
+
+        string stat;
+        string diff;
+        string label;
+        if (hasStaged)
+        {
+            label = "Staged changes";
+            stat = cachedStat.Succeeded ? cachedStat.StandardOutput : string.Empty;
+            diff = cachedDiff.StandardOutput;
+        }
+        else
+        {
+            label = "Unstaged changes";
+            GitCommandResult workStat = await RunAsync(repoPath, ["diff", "--stat"], cancellationToken).ConfigureAwait(false);
+            GitCommandResult workDiff = await RunAsync(repoPath, ["diff"], cancellationToken).ConfigureAwait(false);
+            stat = workStat.Succeeded ? workStat.StandardOutput : string.Empty;
+            diff = workDiff.Succeeded ? workDiff.StandardOutput : string.Empty;
+        }
+
+        GitCommandResult status = await RunAsync(repoPath, ["status", "--porcelain=v1", "-u"], cancellationToken).ConfigureAwait(false);
+        string statusText = status.Succeeded ? status.StandardOutput.Trim() : string.Empty;
+
+        var sb = new StringBuilder();
+        sb.AppendLine(label);
+        if (!string.IsNullOrWhiteSpace(statusText))
+        {
+            sb.AppendLine("Status:");
+            sb.AppendLine(TruncateForAi(statusText, 1_500));
+        }
+
+        if (!string.IsNullOrWhiteSpace(stat))
+        {
+            sb.AppendLine("Stat:");
+            sb.AppendLine(TruncateForAi(stat.Trim(), 1_000));
+        }
+
+        if (!string.IsNullOrWhiteSpace(diff))
+        {
+            sb.AppendLine("Diff:");
+            sb.AppendLine(TruncateForAi(diff.Trim(), maxChars));
+        }
+
+        return sb.ToString().Trim();
+    }
+
+    private static string TruncateForAi(string text, int maxChars)
+    {
+        if (string.IsNullOrEmpty(text) || text.Length <= maxChars)
+            return text;
+        return text[..maxChars] + Environment.NewLine + "…(truncated)";
+    }
+
+    private async Task<string?> GetConfigValueAsync(
+        string? repoPath,
+        string key,
+        CancellationToken cancellationToken,
+        bool localOnly = false)
+    {
+        var args = new List<string> { "config" };
+        if (localOnly)
+            args.Add("--local");
+        args.Add("--get");
+        args.Add(key);
+
+        GitCommandResult result = await RunAsync(repoPath, args, cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded)
+            return null;
+
+        string value = result.StandardOutput.Trim();
+        return string.IsNullOrEmpty(value) ? null : value;
     }
 
     private async Task<string> ShowGitObjectAsync(string repoPath, string objectSpec, CancellationToken cancellationToken)

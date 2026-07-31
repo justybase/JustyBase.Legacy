@@ -201,6 +201,77 @@ public static class GitOutputParser
         return $"{(int)(delta.TotalDays / 365)} yr";
     }
 
+    /// <summary>Human-readable relative time for tooltips, e.g. "13 hours ago".</summary>
+    public static string FormatRelativeDateLong(DateTimeOffset date, DateTimeOffset? now = null)
+    {
+        if (date == DateTimeOffset.MinValue)
+            return string.Empty;
+
+        DateTimeOffset reference = now ?? DateTimeOffset.Now;
+        TimeSpan delta = reference - date;
+        if (delta < TimeSpan.Zero)
+            delta = TimeSpan.Zero;
+
+        if (delta.TotalSeconds < 45)
+            return "just now";
+        if (delta.TotalMinutes < 1)
+            return "1 minute ago";
+        if (delta.TotalMinutes < 60)
+        {
+            int m = (int)delta.TotalMinutes;
+            return m == 1 ? "1 minute ago" : $"{m} minutes ago";
+        }
+
+        if (delta.TotalHours < 24)
+        {
+            int h = (int)delta.TotalHours;
+            return h == 1 ? "1 hour ago" : $"{h} hours ago";
+        }
+
+        if (delta.TotalDays < 30)
+        {
+            int d = (int)delta.TotalDays;
+            return d == 1 ? "1 day ago" : $"{d} days ago";
+        }
+
+        if (delta.TotalDays < 365)
+        {
+            int mo = Math.Max(1, (int)(delta.TotalDays / 30));
+            return mo == 1 ? "1 month ago" : $"{mo} months ago";
+        }
+
+        int y = Math.Max(1, (int)(delta.TotalDays / 365));
+        return y == 1 ? "1 year ago" : $"{y} years ago";
+    }
+
+    public static GitCommitTooltipInfo ParseCommitTooltip(string bodyOutput, string shortstatOutput)
+    {
+        string body = (bodyOutput ?? string.Empty).Trim();
+        int files = 0, insertions = 0, deletions = 0;
+
+        if (!string.IsNullOrWhiteSpace(shortstatOutput))
+        {
+            foreach (string raw in shortstatOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (!raw.Contains("changed", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                files = MatchInt(raw, @"(\d+)\s+files?\s+changed");
+                insertions = MatchInt(raw, @"(\d+)\s+insertions?\(\+\)");
+                deletions = MatchInt(raw, @"(\d+)\s+deletions?\(-\)");
+                break;
+            }
+        }
+
+        return new GitCommitTooltipInfo(body, files, insertions, deletions);
+    }
+
+    private static int MatchInt(string text, string pattern)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(text, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return match.Success && int.TryParse(match.Groups[1].Value, out int value) ? value : 0;
+    }
+
     private static GitChangeKind MapKind(char x, char y)
     {
         char code = y != ' ' ? y : x;
