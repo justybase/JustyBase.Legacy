@@ -193,7 +193,7 @@ partial class GitControl
         _lblBranch.UseMnemonic = false;
 
         _pnlToolbar.Dock = System.Windows.Forms.DockStyle.Fill;
-        _pnlToolbar.WrapContents = true;
+        _pnlToolbar.WrapContents = false;
         _pnlToolbar.AutoSize = true;
         _pnlToolbar.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
         _pnlToolbar.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight;
@@ -221,12 +221,13 @@ partial class GitControl
         _lblStatus.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
         _lblStatus.UseMnemonic = false;
 
-        _pnlIdentity.ColumnCount = 4;
-        _pnlIdentity.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 35F));
-        _pnlIdentity.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 35F));
+        _pnlIdentity.ColumnCount = 3;
+        _pnlIdentity.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
+        _pnlIdentity.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
         _pnlIdentity.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
-        _pnlIdentity.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 30F));
-        _pnlIdentity.RowCount = 1;
+        _pnlIdentity.RowCount = 2;
+        _pnlIdentity.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
+        _pnlIdentity.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         _pnlIdentity.Dock = System.Windows.Forms.DockStyle.Fill;
         _pnlIdentity.Margin = new System.Windows.Forms.Padding(0, 2, 0, 2);
         _txtUserName.PlaceholderText = "user.name";
@@ -242,7 +243,8 @@ partial class GitControl
         _pnlIdentity.Controls.Add(_txtUserName, 0, 0);
         _pnlIdentity.Controls.Add(_txtUserEmail, 1, 0);
         _pnlIdentity.Controls.Add(_btnSaveIdentity, 2, 0);
-        _pnlIdentity.Controls.Add(_lblIdentity, 3, 0);
+        _pnlIdentity.Controls.Add(_lblIdentity, 0, 1);
+        _pnlIdentity.SetColumnSpan(_lblIdentity, 3);
 
         _pnlHeader.ColumnCount = 1;
         _pnlHeader.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
@@ -288,7 +290,7 @@ partial class GitControl
         _btnGenerateCommit.Visible = false;
         _pnlCommitActions.Dock = System.Windows.Forms.DockStyle.Top;
         _pnlCommitActions.AutoSize = true;
-        _pnlCommitActions.WrapContents = true;
+        _pnlCommitActions.WrapContents = false;
         _pnlCommitActions.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight;
         _pnlCommitActions.Controls.Add(_btnCommit);
         _pnlCommitActions.Controls.Add(_btnStageAllCommit);
@@ -443,7 +445,7 @@ partial class GitControl
             BorderStyle = System.Windows.Forms.BorderStyle.None,
             UseCompatibleStateImageBehavior = false
         };
-        list.Columns.Add("Item", -2);
+        list.Columns.Add(string.Empty, -2);
         return list;
     }
 

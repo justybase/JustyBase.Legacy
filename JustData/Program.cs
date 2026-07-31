@@ -122,6 +122,12 @@ public static class Program
         }
         finally
         {
+            // Unregister exception handlers so disposal faults do not
+            // surface as user-visible dialogs (the WinForms ThreadException
+            // handler intercepts cross-thread OLE/STA errors from FCTB).
+            Application.ThreadException -= OnThreadException;
+            AppDomain.CurrentDomain.UnhandledException -= OnUnhandledException;
+
             // Use async disposal to handle IAsyncDisposable-only services
             // (e.g. LlamaSharpCompletionProvider) without throwing.
             if (provider is not null)

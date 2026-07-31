@@ -94,6 +94,9 @@ public partial class GitControl : UserControl
 
             if (_pnlHeader.RowStyles.Count >= 1)
                 _pnlHeader.RowStyles[0] = new RowStyle(SizeType.Absolute, buttonH + DpiScale.Scale(2, dpi));
+            // Fix identity row (row3) wrapping: pin to single-line height so AutoEllipsis truncates.
+            if (_pnlHeader.RowStyles.Count > 3)
+                _pnlHeader.RowStyles[3] = new RowStyle(SizeType.Absolute, lineH * 2 + gap);
 
             _cmbRepos.MinimumSize = new Size(0, buttonH);
             _cmbRepos.MaximumSize = new Size(0, buttonH + DpiScale.Scale(4, dpi));

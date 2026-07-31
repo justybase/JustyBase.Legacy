@@ -48,7 +48,7 @@ public sealed class FimEditorHost : IDisposable
             _ = Task.Run(async () =>
             {
                 try { await _bridge.TryPreloadAsync().ConfigureAwait(false); }
-                catch { /* best-effort background preload */ }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[FIM] Background preload failed: {ex.Message}"); }
             });
         }
     }
