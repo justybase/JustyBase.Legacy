@@ -37,6 +37,7 @@ using JustyBaseLegacy.UI.Extensions;
 using JustyBaseLegacy.UI.Models;
 using JustyBaseLegacy.UI.Schema;
 using JustyBaseLegacy.UI.Forms;
+using JustyBaseLegacy.UI.ObjectExplorer;
 using SpreadSheetTasks;
 using System;
 using System.Buffers;
@@ -61,7 +62,7 @@ namespace JustyBaseLegacy.UI
 {
     public partial class BaseWindow
     {
-        public DataGridView DgvObjectExplorer
+        public TreeView DgvObjectExplorer
         {
             get
             {
@@ -76,7 +77,7 @@ namespace JustyBaseLegacy.UI
                         InitializeObjectExplorerControl();
                     }
                 }
-                return _mvvmObjectExplorerControl?.DataGridView;
+                return _mvvmObjectExplorerControl?.OutlineTreeView;
             }
         }
 
@@ -88,13 +89,44 @@ namespace JustyBaseLegacy.UI
             if (_tabManager is UI.DockSuiteTabManager dsm)
             {
                 _mvvmObjectExplorerControl = new Controls.MvvmObjectExplorerControl(_objectExplorerViewModel);
+                _mvvmObjectExplorerControl.ReferenceActivated += NavigateToOutlineReference;
                 dsm.RegisterPersistentTool("Outline", _mvvmObjectExplorerControl, WeifenLuo.WinFormsUI.Docking.DockState.DockLeft);
+                if (dsm.GetToolWindow("Outline") is { } outlineTool)
+                {
+                    outlineTool.Activated += OnOutlineToolActivated;
+                    outlineTool.VisibleChanged += OnOutlineToolVisibleChanged;
+                }
                 tabPageLegend.Tag = "initialized";
             }
         }
 
+        private bool IsOutlineVisible()
+        {
+            if (_tabManager is UI.DockSuiteTabManager dsm)
+                return dsm.IsToolWindowVisible("Outline");
+
+            return _leftTabs.SelectedTab?.Text == "Outline";
+        }
+
+        private void OnOutlineToolActivated(object? sender, EventArgs e) => RefreshVisibleOutline();
+
+        private void OnOutlineToolVisibleChanged(object? sender, EventArgs e)
+        {
+            if (IsOutlineVisible())
+                RefreshVisibleOutline();
+        }
+
+        private void RefreshVisibleOutline()
+        {
+            if (CurrentTB is not null)
+                RebuildObjectExplorer(_cleanSqlText);
+        }
+
         private void RebuildObjectExplorer(string text)
         {
+            if (!_applicationSettingsContext.Config.DoLegend || !IsOutlineVisible())
+                return;
+
             if (_mvvmObjectExplorerControl is null)
                 InitializeObjectExplorerControl();
             _ = RebuildMvvmObjectExplorerAsync(text);
@@ -135,11 +167,7 @@ namespace JustyBaseLegacy.UI
                     continue;
 
                 SelectOutlineRowByName(item.Name);
-                CurrentTB.GoEnd();
-                CurrentTB.SelectionStart = item.Position;
-                CurrentTB.SelectionLength = item.Name.TrimStart().Length;
-                CurrentTB.DoSelectionVisible();
-                CurrentTB.Focus();
+                NavigateToOutlineReference(item);
                 return true;
             }
 
@@ -148,20 +176,28 @@ namespace JustyBaseLegacy.UI
 
         private void SelectOutlineRowByName(string name)
         {
-            DataGridView? grid = DgvObjectExplorer;
-            if (grid is null)
+            if (!IsOutlineVisible())
                 return;
 
-            var references = _objectExplorerViewModel.References;
-            for (int i = 0; i < references.Count && i < grid.Rows.Count; i++)
-            {
-                if (references[i].Name.Trim().Equals(name, StringComparison.OrdinalIgnoreCase))
-                {
-                    grid.ClearSelection();
-                    grid.Rows[i].Selected = true;
-                    return;
-                }
-            }
+            if (_mvvmObjectExplorerControl is null)
+                return;
+            _mvvmObjectExplorerControl.SelectNodeByName(name);
+        }
+
+        private void NavigateToOutlineReference(SchemaReference reference)
+        {
+            if (CurrentTB is null)
+                return;
+
+            string name = reference.Name.Trim();
+            if (name.Length == 0 || reference.Position < 0 || reference.Position >= CurrentTB.TextLength)
+                return;
+
+            CurrentTB.GoEnd();
+            CurrentTB.SelectionStart = reference.Position;
+            CurrentTB.SelectionLength = Math.Min(name.Length, CurrentTB.TextLength - reference.Position);
+            CurrentTB.DoSelectionVisible();
+            CurrentTB.Focus();
         }
 
         private bool OutlineContainsWord(string word) =>
@@ -507,10 +543,12 @@ namespace JustyBaseLegacy.UI
                             _cleanSqlText);
                     }
 
-                    if (!isLargeDoc
-                        && _applicationSettingsContext.Config.DoLegend
-                        && _leftTabs.SelectedTab?.Text == "Outline"
-                        && !SqlPerformancePolicy.ShouldSkipOutline(lineCount, charCount))
+                    if (OutlineRefreshPolicy.ShouldRefresh(
+                            _applicationSettingsContext.Config.DoLegend,
+                            IsOutlineVisible(),
+                            isLargeDoc,
+                            lineCount,
+                            charCount))
                     {
                         RebuildObjectExplorer(_cleanSqlText);
                     }
@@ -909,11 +947,6 @@ namespace JustyBaseLegacy.UI
 
             var range = new FastColoredTextBoxNS.Range(CurrentTB, CurrentTB.Selection.Start, CurrentTB.Selection.Start);
             string clickedWord = range.GetFragment("[^(\\s|,|;)]").Text;
-
-            if (_leftTabs.SelectedTab.Text != "Outline")
-            {
-                RebuildObjectExplorer(_cleanSqlText);
-            }
 
             if (TryNavigateToOutlineDefinition(clickedWord))
                 return;

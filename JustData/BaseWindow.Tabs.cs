@@ -267,7 +267,7 @@ namespace JustyBaseLegacy.UI
                 var localFastColoredTextBox = CurrentTB;
                 localFastColoredTextBox.Focus();
                 GetTextCommentRanges(localFastColoredTextBox);
-                if (_leftTabs.SelectedTab.Text == "Outline")
+                if (IsOutlineVisible())
                 {
                     RebuildObjectExplorer(_cleanSqlText);
                 }
@@ -409,7 +409,7 @@ namespace JustyBaseLegacy.UI
                 InitializeFilesControl();
             }
 
-            if (_leftTabs.SelectedTab.Text == "Outline")
+            if (IsOutlineVisible())
             {
                 RebuildObjectExplorer(_cleanSqlText);
             }

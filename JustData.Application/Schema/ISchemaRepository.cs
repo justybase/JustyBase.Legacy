@@ -36,6 +36,11 @@ public interface ISchemaRepository
         CancellationToken cancellationToken = default);
 }
 
+public interface IOutlineRepository
+{
+    Task<SqlOutline> GetOutlineAsync(string sql, string? connectionName = null, CancellationToken cancellationToken = default);
+}
+
 public interface ISchemaDdlService
 {
     Task<string> GetDdlAsync(

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0.1] - 2026-08-01
+
+### Added
+- Hierarchical AST-backed SQL Outline with CTE, table, JOIN, subquery, view, procedure, and procedural block nodes.
+- Source navigation, icons, parser fallback, and cached Outline refreshes.
+
+### Fixed
+- CTE Outline navigation now selects the definition name instead of a later query reference.
+
 ## [1.0.0.3] - 2026-07-30
 
 ### Added
