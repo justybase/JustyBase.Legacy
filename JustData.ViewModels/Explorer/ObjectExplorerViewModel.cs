@@ -67,7 +67,7 @@ public sealed class ObjectExplorerViewModel : ObservableObject, IDisposable
                 : new SqlOutline([]);
             await UpdateReferencesAsync(references, outline, linked.Token).ConfigureAwait(false);
             await _uiDispatcher.InvokeOnUiAsync(
-                    () => Status = $"{CountNodes(outline.Nodes)} symbol(s)",
+                    () => Status = $"{References.Count} reference(s)",
                 linked.Token);
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested)
@@ -121,8 +121,6 @@ public sealed class ObjectExplorerViewModel : ObservableObject, IDisposable
 
         return _uiDispatcher.InvokeAsync(Update, cancellationToken);
     }
-
-    private static int CountNodes(IEnumerable<OutlineNode> nodes) => nodes.Sum(node => 1 + CountNodes(node.Children));
 
     public void Dispose()
     {
