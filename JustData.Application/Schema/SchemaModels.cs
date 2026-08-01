@@ -60,6 +60,42 @@ public sealed record SchemaReference(
     string? Database = null,
     string? Schema = null);
 
+public enum OutlineNodeKind
+{
+    Statement,
+    Select,
+    Cte,
+    TempTable,
+    Table,
+    View,
+    Join,
+    Subquery,
+    Procedure,
+    Block,
+    Warning
+}
+
+/// <summary>Source-backed hierarchical symbol used by the SQL Outline.</summary>
+public sealed record OutlineNode(
+    string Name,
+    OutlineNodeKind Kind,
+    int Position,
+    int Length = 0,
+    string? Alias = null,
+    string? Database = null,
+    string? Schema = null,
+    bool IsIncomplete = false,
+    IReadOnlyList<OutlineNode>? Children = null)
+{
+    public IReadOnlyList<OutlineNode> Children { get; init; } = Children ?? [];
+    public string Id => $"{Kind}:{Position}:{Name}";
+}
+
+public sealed record SqlOutline(IReadOnlyList<OutlineNode> Nodes, bool IsIncomplete = false)
+{
+    public static SqlOutline Empty { get; } = new([]);
+}
+
 public enum SchemaDdlKind
 {
     Create,

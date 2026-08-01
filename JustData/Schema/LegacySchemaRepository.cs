@@ -17,7 +17,7 @@ namespace JustyBaseLegacy.UI.Schema;
 /// Netezza, DB2, Oracle, PostgreSQL, SQL Server, SQLite and other existing providers
 /// through the same provider-neutral repository contract.
 /// </summary>
-public sealed class LegacySchemaRepository : ISchemaRepository
+public sealed class LegacySchemaRepository : ISchemaRepository, IOutlineRepository
 {
     private readonly IGeneralDbService _generalDbService;
     private readonly AppBase.Common.Interfaces.IDatabaseRuntimeContext _databaseRuntimeContext;
@@ -226,6 +226,12 @@ public sealed class LegacySchemaRepository : ISchemaRepository
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(LegacySqlReferenceParser.Parse(sql));
+    }
+
+    public Task<SqlOutline> GetOutlineAsync(string sql, string? connectionName = null, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(SqlOutlineParser.Parse(sql));
     }
 
     public async Task RefreshAsync(

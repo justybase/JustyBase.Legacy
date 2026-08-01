@@ -30,6 +30,7 @@ public sealed class ObjectExplorerViewModel : ObservableObject, IDisposable
     }
 
     public ObservableCollection<SchemaReference> References { get; } = [];
+    public ObservableCollection<OutlineNode> OutlineNodes { get; } = [];
     public string SqlText { get => _sqlText; set => SetProperty(ref _sqlText, value ?? string.Empty); }
     public SchemaReference? SelectedReference { get => _selectedReference; set => SetProperty(ref _selectedReference, value); }
     public string Status { get => _status; private set => SetProperty(ref _status, value); }
@@ -61,9 +62,12 @@ public sealed class ObjectExplorerViewModel : ObservableObject, IDisposable
         try
         {
             var references = await _schemaRepository.GetReferencesAsync(SqlText, connectionName, linked.Token).ConfigureAwait(false);
-            await UpdateReferencesAsync(references, linked.Token).ConfigureAwait(false);
+            SqlOutline outline = _schemaRepository is IOutlineRepository outlineRepository
+                ? await outlineRepository.GetOutlineAsync(SqlText, connectionName, linked.Token).ConfigureAwait(false)
+                : new SqlOutline([]);
+            await UpdateReferencesAsync(references, outline, linked.Token).ConfigureAwait(false);
             await _uiDispatcher.InvokeOnUiAsync(
-                () => Status = $"{References.Count} reference(s)",
+                    () => Status = $"{CountNodes(outline.Nodes)} symbol(s)",
                 linked.Token);
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested)
@@ -99,12 +103,14 @@ public sealed class ObjectExplorerViewModel : ObservableObject, IDisposable
 
     public void Cancel() => _operationCancellation?.Cancel();
 
-    private Task UpdateReferencesAsync(IReadOnlyList<SchemaReference> references, CancellationToken cancellationToken)
+    private Task UpdateReferencesAsync(IReadOnlyList<SchemaReference> references, SqlOutline outline, CancellationToken cancellationToken)
     {
         void Update()
         {
             References.Clear();
             foreach (var reference in references) References.Add(reference);
+            OutlineNodes.Clear();
+            foreach (OutlineNode node in outline.Nodes) OutlineNodes.Add(node);
         }
 
         if (_uiDispatcher is null || _uiDispatcher.CheckAccess())
@@ -115,6 +121,8 @@ public sealed class ObjectExplorerViewModel : ObservableObject, IDisposable
 
         return _uiDispatcher.InvokeAsync(Update, cancellationToken);
     }
+
+    private static int CountNodes(IEnumerable<OutlineNode> nodes) => nodes.Sum(node => 1 + CountNodes(node.Children));
 
     public void Dispose()
     {

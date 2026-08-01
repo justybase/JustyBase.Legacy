@@ -1,185 +1,158 @@
-using DatabaseDataGridView.WinForms;
 using JustData.Application.Schema;
 using JustData.ViewModels.Explorer;
-using System.Collections.Specialized;
-using System.ComponentModel;
-using System.Drawing;
-using System.Reflection;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
 namespace JustyBaseLegacy.UI.Controls;
 
-/// <summary>DataGridView/focus adapter for the provider-neutral object explorer VM.</summary>
+/// <summary>Tree-based, source-backed SQL Outline. The old flat reference API remains for callers.</summary>
 public sealed class MvvmObjectExplorerControl : UserControl
 {
     private readonly ObjectExplorerViewModel _viewModel;
-    private readonly ThemedDataGridView _grid;
-    private static readonly int BaseRowHeight = 26;
-    private static readonly int HeaderHeight = 28;
+    private readonly TreeView _tree;
+    private readonly ImageList _icons;
+    private readonly Dictionary<OutlineNodeKind, int> _iconByKind = [];
 
-    // Shared fonts — created once per app domain, never disposed (safe for app-lifetime singletons).
-    private static readonly Font _gridFont = new Font("Segoe UI", 9F, FontStyle.Regular);
-    private static readonly Font _headerFont = new Font("Segoe UI", 9F, FontStyle.Bold);
-
-    // Static colors derived from system theme for basic dark-mode awareness
-    private static readonly Color _headerBack = SystemColors.ControlLight;
-    private static readonly Color _headerFore = SystemColors.ControlText;
-    private static readonly Color _cellBack = SystemColors.Window;
-    private static readonly Color _cellFore = SystemColors.WindowText;
-    private static readonly Color _altRowBack = SystemColors.Control;
-    private static readonly Color _gridLine = SystemColors.ActiveBorder;
-    private static readonly Color _kindFore = SystemColors.GrayText;
-    private static readonly Color _selectionBack = SystemColors.Highlight;
-    private static readonly Color _selectionFore = SystemColors.HighlightText;
+    public event Action<SchemaReference>? ReferenceActivated;
 
     public MvvmObjectExplorerControl(ObjectExplorerViewModel viewModel)
     {
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         Name = "mvvmObjectExplorerControl";
         Dock = DockStyle.Fill;
-
-        _grid = new ThemedDataGridView();
-
-        // Enable double-buffering via reflection (the property is protected on DataGridView).
-        typeof(Control).InvokeMember("DoubleBuffered",
-            BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.SetProperty,
-            null, _grid, new object[] { true });
-
-        ((ISupportInitialize)_grid).BeginInit();
-        _grid.Name = "dgvObjectExplorer";
-        _grid.Dock = DockStyle.Fill;
-        _grid.ReadOnly = true;
-        _grid.AllowUserToAddRows = false;
-        _grid.AllowUserToDeleteRows = false;
-        _grid.AutoGenerateColumns = false;
-        _grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-        _grid.MultiSelect = false;
-        _grid.RowHeadersVisible = false;
-        _grid.VirtualMode = true;
-        _grid.BorderStyle = BorderStyle.None;
-        _grid.CellBorderStyle = DataGridViewCellBorderStyle.None;
-        _grid.RowTemplate.Height = BaseRowHeight;
-        _grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-        _grid.ColumnHeadersHeight = HeaderHeight;
-        _grid.BackgroundColor = _cellBack;
-        _grid.Font = _gridFont;
-        _grid.EnableHeadersVisualStyles = false;
-
-        // Header styling
-        _grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+        _icons = CreateIcons();
+        _tree = new TreeView
         {
-            BackColor = _headerBack,
-            ForeColor = _headerFore,
-            Font = _headerFont,
-            Alignment = DataGridViewContentAlignment.MiddleLeft,
-            Padding = new Padding(4, 0, 4, 0),
-            SelectionBackColor = _headerBack,
-            SelectionForeColor = _headerFore
+            Name = "outlineTreeView", Dock = DockStyle.Fill, BorderStyle = BorderStyle.None,
+            HideSelection = false, ShowLines = false, ShowNodeToolTips = true,
+            FullRowSelect = true, ImageList = _icons, Indent = 16,
+            Font = new Font("Segoe UI", 9F), BackColor = SystemColors.Window, ForeColor = SystemColors.WindowText
         };
-
-        // Default cell style
-        _grid.DefaultCellStyle = new DataGridViewCellStyle
+        _tree.NodeMouseClick += (_, e) => ActivateNode(e.Node);
+        _tree.NodeMouseDoubleClick += (_, e) => ActivateNode(e.Node);
+        _tree.KeyDown += (_, e) =>
         {
-            Font = _gridFont,
-            ForeColor = _cellFore,
-            BackColor = _cellBack,
-            SelectionBackColor = _selectionBack,
-            SelectionForeColor = _selectionFore,
-            Padding = new Padding(4, 1, 4, 1),
-            Alignment = DataGridViewContentAlignment.MiddleLeft
+            if (e.KeyCode == Keys.Enter && _tree.SelectedNode is not null)
+            {
+                ActivateNode(_tree.SelectedNode); e.Handled = true; e.SuppressKeyPress = true;
+            }
         };
-        _grid.AlternatingRowsDefaultCellStyle = new DataGridViewCellStyle
-        {
-            BackColor = _altRowBack
-        };
-        ((ISupportInitialize)_grid).EndInit();
-
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "clObjectName", HeaderText = "Object", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "clObjectKind", HeaderText = "Kind", Width = 90, DefaultCellStyle = { ForeColor = _kindFore } });
-        _grid.CellValueNeeded += OnCellValueNeeded;
-        _grid.CellClick += (_, args) =>
-        {
-            if (args.RowIndex >= 0 && args.RowIndex < _viewModel.References.Count)
-                _viewModel.SelectedReference = _viewModel.References[args.RowIndex];
-        };
-        _grid.RowCount = _viewModel.References.Count;
-        _viewModel.References.CollectionChanged += OnReferencesChanged;
-        Controls.Add(_grid);
+        Controls.Add(_tree);
+        _viewModel.OutlineNodes.CollectionChanged += OnOutlineNodesChanged;
     }
 
-    private bool _gridRefreshPending;
-
-    private void OnReferencesChanged(object? sender, NotifyCollectionChangedEventArgs e)
-    {
-        // Batch multiple Clear()+Add()+Add()+... into a single grid update.
-        // Without this, every CollectionChanged event triggers a full layout
-        // recalculation, causing visible lag during tab switching.
-        if (_gridRefreshPending || IsDisposed || Disposing)
-            return;
-
-        _gridRefreshPending = true;
-        if (!IsHandleCreated)
-        {
-            RefreshGrid();
-            return;
-        }
-
-        try
-        {
-            BeginInvoke(new Action(RefreshGrid));
-        }
-        catch (InvalidOperationException)
-        {
-            _gridRefreshPending = false;
-        }
-    }
-
-    private void RefreshGrid()
-    {
-        _gridRefreshPending = false;
-        if (IsDisposed || Disposing)
-            return;
-
-        _grid.RowCount = _viewModel.References.Count;
-        _grid.Invalidate();
-    }
-
-    private void OnCellValueNeeded(object? sender, DataGridViewCellValueEventArgs e)
-    {
-        if (e.RowIndex < 0 || e.RowIndex >= _viewModel.References.Count)
-            return;
-
-        var reference = _viewModel.References[e.RowIndex];
-        e.Value = e.ColumnIndex switch
-        {
-            0 => reference.Name,
-            1 => reference.Kind.ToString(),
-            _ => null
-        };
-    }
-
-    public DataGridView DataGridView => _grid;
+    public TreeView OutlineTreeView => _tree;
     public ObjectExplorerViewModel ViewModel => _viewModel;
 
-    protected override void Dispose(bool disposing)
+    // Compatibility seam for existing tests and keyboard navigation. References are still flat.
+    public bool ActivateReference(int rowIndex)
     {
-        if (disposing)
-        {
-            _viewModel.References.CollectionChanged -= OnReferencesChanged;
-        }
+        if (rowIndex < 0 || rowIndex >= _viewModel.References.Count) return false;
+        SchemaReference reference = _viewModel.References[rowIndex];
+        _viewModel.SelectedReference = reference;
+        ReferenceActivated?.Invoke(reference);
+        return true;
+    }
 
-        base.Dispose(disposing);
+    public bool SelectNodeByName(string name)
+    {
+        TreeNode? found = FindNode(_tree.Nodes, name);
+        if (found is null) return false;
+        _tree.SelectedNode = found; found.EnsureVisible(); return true;
+    }
+
+    private bool _rebuildPending;
+    private void OnOutlineNodesChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (_rebuildPending || IsDisposed || Disposing) return;
+        _rebuildPending = true;
+        if (!IsHandleCreated) { RebuildTree(); return; }
+        try { BeginInvoke(new Action(RebuildTree)); }
+        catch (InvalidOperationException) { _rebuildPending = false; }
+    }
+
+    private void RebuildTree()
+    {
+        _rebuildPending = false;
+        if (IsDisposed || Disposing) return;
+        var expanded = _tree.Nodes.Cast<TreeNode>().SelectMany(Flatten).Where(n => n.IsExpanded)
+            .Select(n => ((OutlineNode)n.Tag!).Id).ToHashSet(StringComparer.Ordinal);
+        _tree.BeginUpdate();
+        try
+        {
+            _tree.Nodes.Clear();
+            foreach (OutlineNode node in _viewModel.OutlineNodes) _tree.Nodes.Add(CreateNode(node, expanded));
+        }
+        finally { _tree.EndUpdate(); }
+    }
+
+    private TreeNode CreateNode(OutlineNode model, ISet<string> expanded)
+    {
+        string suffix = string.IsNullOrWhiteSpace(model.Alias) ? "" : $"  ({model.Alias})";
+        var node = new TreeNode(model.Name + suffix)
+        {
+            Tag = model, ImageIndex = Icon(model.Kind), SelectedImageIndex = Icon(model.Kind), ToolTipText =
+                $"{model.Kind} · offset {model.Position}" + (model.IsIncomplete ? " · incomplete parse" : "")
+        };
+        foreach (OutlineNode child in model.Children) node.Nodes.Add(CreateNode(child, expanded));
+        if (expanded.Contains(model.Id)) node.Expand();
+        return node;
+    }
+
+    private void ActivateNode(TreeNode node)
+    {
+        if (node.Tag is not OutlineNode outline) return;
+        SchemaReference reference = new(outline.Name, MapKind(outline.Kind), outline.Position, outline.Database, outline.Schema);
+        _viewModel.SelectedReference = reference;
+        ReferenceActivated?.Invoke(reference);
+    }
+
+    private static SchemaNodeKind MapKind(OutlineNodeKind kind) => kind switch
+    {
+        OutlineNodeKind.Table or OutlineNodeKind.TempTable => SchemaNodeKind.Table,
+        OutlineNodeKind.View => SchemaNodeKind.View,
+        OutlineNodeKind.Procedure => SchemaNodeKind.Procedure,
+        OutlineNodeKind.Cte => SchemaNodeKind.Alias,
+        _ => SchemaNodeKind.Unknown
+    };
+
+    private int Icon(OutlineNodeKind kind) => _iconByKind.TryGetValue(kind, out int index) ? index : 0;
+    private static IEnumerable<TreeNode> Flatten(TreeNode node) => new[] { node }.Concat(node.Nodes.Cast<TreeNode>().SelectMany(Flatten));
+    private static TreeNode? FindNode(TreeNodeCollection nodes, string name)
+    {
+        foreach (TreeNode node in nodes)
+        {
+            if (node.Text.StartsWith(name, StringComparison.OrdinalIgnoreCase)) return node;
+            TreeNode? child = FindNode(node.Nodes, name); if (child is not null) return child;
+        }
+        return null;
+    }
+
+    private ImageList CreateIcons()
+    {
+        var list = new ImageList { ImageSize = new Size(16, 16), ColorDepth = ColorDepth.Depth32Bit };
+        foreach (OutlineNodeKind kind in Enum.GetValues<OutlineNodeKind>())
+        {
+            using var bitmap = new Bitmap(16, 16);
+            using Graphics graphics = Graphics.FromImage(bitmap);
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using var brush = new SolidBrush(kind == OutlineNodeKind.Warning ? Color.DarkOrange : Color.SteelBlue);
+            graphics.FillEllipse(brush, 2, 2, 12, 12);
+            _iconByKind[kind] = list.Images.Count; list.Images.Add((Bitmap)bitmap.Clone());
+        }
+        return list;
     }
 
     public async Task RebuildAsync(string text, string? connectionName = null, CancellationToken cancellationToken = default)
     {
         _viewModel.SqlText = text ?? string.Empty;
         await _viewModel.RefreshAsync(connectionName, cancellationToken);
-        // RowCount is updated via CollectionChanged handler
     }
 
-    public void ApplyDpiMetrics()
+    public void ApplyDpiMetrics() { }
+    protected override void Dispose(bool disposing)
     {
-        // DataGridView owns DPI scaling through the WinForms adapter/theme pipeline.
+        if (disposing) { _viewModel.OutlineNodes.CollectionChanged -= OnOutlineNodesChanged; _icons.Dispose(); _tree.Dispose(); }
+        base.Dispose(disposing);
     }
 }
