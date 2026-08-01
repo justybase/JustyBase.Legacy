@@ -135,6 +135,29 @@ internal sealed class TitleBarCaptionButtonsControl : Control
 
     protected override void WndProc(ref Message m)
     {
+        // The maximize button deliberately reports HTMAXBUTTON so Windows 11
+        // can show the snap layout flyout. Once a child window reports a
+        // non-client hit, Windows sends the mouse messages to that child,
+        // rather than to the form. Handle the click here as well as in the
+        // form's WndProc; otherwise the button can hover but never toggle.
+        if (m.Msg == WindowConstants.WM_NCLBUTTONDOWN
+            && (HIT_CONSTANTS)m.WParam.ToInt32() == HIT_CONSTANTS.HTMAXBUTTON)
+        {
+            SetMaximizePressed(true);
+            WindowNativeMethods.ReleaseCapture();
+            m.Result = IntPtr.Zero;
+            return;
+        }
+
+        if (m.Msg == WindowConstants.WM_NCLBUTTONUP
+            && (HIT_CONSTANTS)m.WParam.ToInt32() == HIT_CONSTANTS.HTMAXBUTTON)
+        {
+            SetMaximizePressed(false);
+            PerformClick(HIT_CONSTANTS.HTMAXBUTTON);
+            m.Result = IntPtr.Zero;
+            return;
+        }
+
         if (m.Msg == WindowConstants.WM_NCHITTEST && SnapLayoutHelper.IsWindows11OrGreater)
         {
             Point screen = SnapLayoutHelper.GetScreenPointFromLParam(m.LParam);

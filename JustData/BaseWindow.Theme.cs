@@ -523,12 +523,23 @@ namespace JustyBaseLegacy.UI
                 menuStrip1.Bottom + DpiScale.Scale(4, dpi));
 
             int statusGap = DpiScale.Scale(1, dpi);
+            // Keep the bottom resize band out of the status panel. A docked
+            // child control receives the mouse hit-test first, which makes
+            // the form's HTBOTTOM border unreachable across the full width.
+            int resizeBand = Math.Max(FrameHeight, DpiScale.Scale(8, dpi));
+            panel1.Dock = DockStyle.None;
+            panel1.Bounds = new Rectangle(
+                0,
+                Math.Max(0, ClientSize.Height - panel1.Height - resizeBand),
+                ClientSize.Width,
+                panel1.Height);
+
             const int toggleBarHeight = 0;
             Control shellHost = splitContainer1;
             shellHost.Location = new Point(margin, titleBarHeight);
             shellHost.Size = new Size(
                 Math.Max(0, ClientSize.Width - margin * 2),
-                Math.Max(0, ClientSize.Height - titleBarHeight - panel1.Height - toggleBarHeight - statusGap));
+                Math.Max(0, ClientSize.Height - titleBarHeight - panel1.Height - toggleBarHeight - statusGap - resizeBand));
             menuStrip1.BringToFront();
             _titleBarCaptionButtons?.BringToFront();
             UpdateMinimumSize();
@@ -716,6 +727,18 @@ namespace JustyBaseLegacy.UI
 
                         _titleBarCaptionButtons?.ClearMaximizeHover();
 
+                        // Resolve our resize borders before asking DWM. The
+                        // frame is extended into the client area, so DWM can
+                        // otherwise classify the bottom resize band as
+                        // client content and prevent vertical resizing.
+                        HIT_CONSTANTS appHit = _windowManagementService.HitTest(
+                            this, FrameWidth, FrameHeight, _iFrameOffset, ref _tMargins);
+                        if (appHit != HIT_CONSTANTS.HTCLIENT)
+                        {
+                            m.Result = (IntPtr)appHit;
+                            break;
+                        }
+
                         IntPtr res = IntPtr.Zero;
                         if (WindowNativeMethods.DwmDefWindowProc(m.HWnd, (uint)m.Msg, m.WParam, m.LParam, ref res))
                         {
@@ -723,7 +746,7 @@ namespace JustyBaseLegacy.UI
                         }
                         else
                         {
-                            m.Result = (IntPtr)_windowManagementService.HitTest(this, FrameWidth, FrameHeight, _iFrameOffset, ref _tMargins);
+                            m.Result = (IntPtr)appHit;
                         }
 
                         break;
