@@ -103,30 +103,30 @@ public sealed class SqlAuthoringViewModel : ObservableObject, IDisposable
         ThrowIfDisposed();
         sqlText ??= string.Empty;
         int lineCount = SqlPerformancePolicy.ResolveLineCountForLintGate(sqlText, knownLineCount);
+        CancellationTokenSource cancellation = RenewLintCancellation();
+        long version = Interlocked.Increment(ref _lintVersion);
         if (SqlPerformancePolicy.ShouldSkipLint(SqlLintInvocation.Live, lineCount, sqlText.Length))
         {
             if (Diagnostics.Count == 0)
+            {
+                await FinishLintAsync(version, cancellation);
                 return;
-
-            CancellationTokenSource skipCancellation = RenewLintCancellation();
-            long skipVersion = Interlocked.Increment(ref _lintVersion);
+            }
             try
             {
-                await PublishEmptyDiagnosticsAsync(skipVersion, skipCancellation.Token);
+                await PublishEmptyDiagnosticsAsync(version, cancellation.Token);
             }
-            catch (OperationCanceledException) when (skipCancellation.IsCancellationRequested)
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
             {
             }
             finally
             {
-                await FinishLintAsync(skipVersion, skipCancellation);
+                await FinishLintAsync(version, cancellation);
             }
 
             return;
         }
 
-        CancellationTokenSource cancellation = RenewLintCancellation();
-        long version = Interlocked.Increment(ref _lintVersion);
         try
         {
             TimeSpan delay = debounce ?? TimeSpan.FromMilliseconds(

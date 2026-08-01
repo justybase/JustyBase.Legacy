@@ -9,6 +9,25 @@ namespace JustData.Preferences.Tests;
 public sealed class LegacyPreferencesCharacterizationTests
 {
     [Fact]
+    public void CopyEmbeddedFimSettings_preserves_panel_changes_in_transaction_buffer()
+    {
+        var live = new ApplicationConfig();
+        live.MakeChangesInWrongConfigValues();
+        live.EnableEmbeddedFimAi = true;
+        live.EmbeddedFimModelId = "qwen2.5-coder-7b";
+        live.EmbeddedFimPreset = "Large";
+        live.EmbeddedFimAcceptedLicenseModelIds = ["qwen2.5-coder-7b"];
+
+        var buffer = new ApplicationConfig();
+        LegacyApplicationSettingsMapper.CopyEmbeddedFimSettings(live, buffer);
+
+        Assert.True(buffer.EnableEmbeddedFimAi);
+        Assert.Equal("qwen2.5-coder-7b", buffer.EmbeddedFimModelId);
+        Assert.Equal("Large", buffer.EmbeddedFimPreset);
+        Assert.Equal(["qwen2.5-coder-7b"], buffer.EmbeddedFimAcceptedLicenseModelIds);
+    }
+
+    [Fact]
     public void Legacy_config_json_preserves_rgba_lists_timeout_units_and_startup_paths()
     {
         var config = new ApplicationConfig

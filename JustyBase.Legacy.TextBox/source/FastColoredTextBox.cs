@@ -5347,12 +5347,16 @@ namespace FastColoredTextBoxNS
                 }
                 
                 //create markers
+                int foldingMarkerSize = Math.Max(8, Math.Min(16, (int)Math.Round(CharHeight * 0.55f)));
+                int foldingMarkerX = LeftIndentLine - foldingMarkerSize / 2;
+                int foldingMarkerY = y + (CharHeight - foldingMarkerSize) / 2;
+
                 if (lineInfo.VisibleState == VisibleState.StartOfHiddenBlock)
-                    visibleMarkers.Add(new ExpandFoldingMarker(iLine, new Rectangle(LeftIndentLine - 4, y + CharHeight/2 - 3, 8, 8)));
+                    visibleMarkers.Add(new ExpandFoldingMarker(iLine, new Rectangle(foldingMarkerX, foldingMarkerY, foldingMarkerSize, foldingMarkerSize)));
 
                 if (!string.IsNullOrEmpty(line.FoldingStartMarker) && lineInfo.VisibleState == VisibleState.Visible &&
                     string.IsNullOrEmpty(line.FoldingEndMarker))
-                        visibleMarkers.Add(new CollapseFoldingMarker(iLine, new Rectangle(LeftIndentLine - 4, y + CharHeight/2 - 3, 8, 8)));
+                        visibleMarkers.Add(new CollapseFoldingMarker(iLine, new Rectangle(foldingMarkerX, foldingMarkerY, foldingMarkerSize, foldingMarkerSize)));
 
                 if (lineInfo.VisibleState == VisibleState.Visible && !string.IsNullOrEmpty(line.FoldingEndMarker) &&
                     string.IsNullOrEmpty(line.FoldingStartMarker))

@@ -80,23 +80,13 @@ jobs:
     - name: Install Inno Setup
       run: choco install innosetup -y
 
-    - name: Publish Windows application (Native AOT)
-      run: |
-        dotnet publish ${{ env.APP_PROJECT }} `
-          -r win-x64 `
-          -c Release `
-          -p:Platform=${{ env.DOTNET_PLATFORM }} `
-          -o ./${{ env.SETUP_FILES_PATH }} `
-          -p:Version=${{ steps.get_version.outputs.version }} `
-          -p:UseAOT=true `
-          --self-contained true
-
-    - name: Remove PDB files from publish output
+    - name: Publish application and create installer
       shell: pwsh
       run: |
-        $publishPath = Join-Path $pwd "${{ env.SETUP_FILES_PATH }}"
-        Get-ChildItem -Path $publishPath -Filter "*.pdb" -Recurse -File -ErrorAction SilentlyContinue |
-          Remove-Item -Force
+        ./scripts/build-installer.ps1 `
+          -Version "${{ steps.get_version.outputs.version }}" `
+          -Configuration Release `
+          -NoRestore
 
     - name: Verify published application
       run: |
@@ -119,16 +109,6 @@ jobs:
           throw "Application startup smoke test failed with exit code $($process.ExitCode)."
         }
         Write-Host "Application startup smoke test passed."
-
-    - name: Create Installers
-      run: |
-        $setupFilesPath = Join-Path $pwd ${{ env.SETUP_FILES_PATH }}
-        $innoScript = Join-Path $pwd ${{ env.INNO_SCRIPT }}
-
-        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
-          "$innoScript" `
-          "/DMyAppVersion=${{ steps.get_version.outputs.version }}" `
-          "/DSourcePath=$setupFilesPath"
 
     - name: Create ZIP packages
       run: |

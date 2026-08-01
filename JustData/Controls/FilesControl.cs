@@ -52,6 +52,7 @@ namespace JustyBaseLegacy.UI.Controls
         private CheckBox _checkUseRegex;
         private Button _buttonSearchOptions;
         private Button _buttonClearSearch;
+        private Button _buttonAddFolder;
         private ContextMenuStrip _searchOptionsMenu;
         private ToolStripMenuItem _menuWholeWord;
         private ToolStripMenuItem _menuMatchCase;
@@ -222,6 +223,7 @@ namespace JustyBaseLegacy.UI.Controls
             _checkUseRegex = new CheckBox { Text = "Regex", AutoSize = true, TabIndex = 5 };
             _buttonSearchOptions = new Button { Text = "⋯", TabIndex = 6, AccessibleName = "Search options" };
             _buttonClearSearch = new Button { Text = "×", TabIndex = 7, AccessibleName = "Clear search" };
+            _buttonAddFolder = new Button { Text = "📂", TabIndex = 8, AccessibleName = "Add folder", AutoSize = true };
             _searchStatus = new Label { AutoSize = false, TextAlign = ContentAlignment.MiddleLeft, Text = "Ready" };
 
             _menuWholeWord = new ToolStripMenuItem("Whole word") { CheckOnClick = true };
@@ -247,13 +249,16 @@ namespace JustyBaseLegacy.UI.Controls
             panelSearchContainer.Height = 30;
             _buttonClearSearch.Dock = DockStyle.Right;
             _buttonSearchOptions.Dock = DockStyle.Right;
+            _buttonAddFolder.Dock = DockStyle.Right;
             _buttonClearSearch.Width = 30;
             _buttonSearchOptions.Width = 30;
+            _buttonAddFolder.Width = 30;
             textBoxFileSearch.Dock = DockStyle.Fill;
             labelSearchIcon.Dock = DockStyle.Left;
             labelSearchIcon.Text = string.Empty;
             panelSearchContainer.Controls.Add(_buttonClearSearch);
             panelSearchContainer.Controls.Add(_buttonSearchOptions);
+            panelSearchContainer.Controls.Add(_buttonAddFolder);
 
             _textBoxExtensions.Dock = DockStyle.None;
             _textBoxExtensions.Anchor = AnchorStyles.None;
@@ -280,6 +285,10 @@ namespace JustyBaseLegacy.UI.Controls
             {
                 textBoxFileSearch.Clear();
                 textBoxFileSearch.Focus();
+            };
+            _buttonAddFolder.Click += async (_, _) =>
+            {
+                await FilesAddFolder_ClickAsync();
             };
             _textBoxExtensions.TextChanged += (_, _) => ScheduleFilenameSearch();
             _checkWholeWord.CheckedChanged += (_, _) => UpdateSearchStatus();
@@ -559,6 +568,11 @@ namespace JustyBaseLegacy.UI.Controls
         }
 
         private async void FilesAddFolder_Click(object sender, EventArgs e)
+        {
+            await FilesAddFolder_ClickAsync();
+        }
+
+        private async Task FilesAddFolder_ClickAsync()
         {
             try
             {
@@ -1703,6 +1717,7 @@ namespace JustyBaseLegacy.UI.Controls
             _toolTip.SetToolTip(this.panelSearchContainer, "Type a name to filter files. Press Enter to search file contents.");
             _toolTip.SetToolTip(this._textBoxExtensions, "Comma- or semicolon-separated extensions, for example: *.sql, *.cs");
             _toolTip.SetToolTip(this._buttonSearchOptions, "Search options");
+            _toolTip.SetToolTip(this._buttonAddFolder, "Add folder to workspace");
         }
 
         private bool _isPlaceholderActive = true;
@@ -1766,7 +1781,7 @@ namespace JustyBaseLegacy.UI.Controls
                 option.ForeColor = _colorTheme.MainFore;
                 option.BackColor = _colorTheme.MainBack;
             }
-            foreach (Button button in new[] { _buttonSearchOptions, _buttonClearSearch })
+            foreach (Button button in new[] { _buttonSearchOptions, _buttonClearSearch, _buttonAddFolder })
             {
                 button.FlatStyle = FlatStyle.Flat;
                 button.FlatAppearance.BorderSize = 0;

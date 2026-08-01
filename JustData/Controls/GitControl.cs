@@ -39,6 +39,7 @@ public partial class GitControl : UserControl
     public GitControl()
     {
         InitializeComponent();
+        EnableDoubleBuffering();
         _viewModel = null!;
         _baseWindow = null!;
         _openFileHandler = _ => { };
@@ -60,6 +61,7 @@ public partial class GitControl : UserControl
         _diffPreviewHandler = contents => _baseWindow.ShowOrUpdateGitDiff(contents);
 
         InitializeComponent();
+        EnableDoubleBuffering();
         WireEvents();
         ApplyTheme();
         BindViewModel();
@@ -94,17 +96,26 @@ public partial class GitControl : UserControl
 
             if (_pnlHeader.RowStyles.Count >= 1)
                 _pnlHeader.RowStyles[0] = new RowStyle(SizeType.Absolute, buttonH + DpiScale.Scale(2, dpi));
-            // Fix identity row (row3) wrapping: pin to single-line height so AutoEllipsis truncates.
-            if (_pnlHeader.RowStyles.Count > 3)
-                _pnlHeader.RowStyles[3] = new RowStyle(SizeType.Absolute, lineH * 2 + gap);
+            // Identity label is hidden; skip row height override.
 
             _cmbRepos.MinimumSize = new Size(0, buttonH);
             _cmbRepos.MaximumSize = new Size(0, buttonH + DpiScale.Scale(4, dpi));
-            foreach (Button button in new[] { _btnOpenRepo, _btnRefresh, _btnPull, _btnPush, _btnSync, _btnStageAll, _btnMore, _btnSaveIdentity, _btnStageAllCommit, _btnGenerateCommit })
+            foreach (Button button in new[] { _btnOpenRepo, _btnRefresh, _btnPull, _btnPush, _btnSync, _btnMore })
             {
                 button.MinimumSize = new Size(0, buttonH);
                 button.Padding = new Padding(DpiScale.Scale(6, dpi), DpiScale.Scale(2, dpi), DpiScale.Scale(6, dpi), DpiScale.Scale(2, dpi));
                 button.Margin = new Padding(0, 0, gap, gap);
+            }
+
+            // Commit action buttons: uniform height, compact width
+            int commitBtnRowH = Math.Max(DpiScale.Scale(24, dpi), (int)Math.Ceiling(fontHeight) + DpiScale.Scale(4, dpi));
+            foreach (Button button in new[] { _btnGenerateCommit, _btnCommit })
+            {
+                button.Height = commitBtnRowH;
+                button.MinimumSize = new Size(0, commitBtnRowH);
+                button.MaximumSize = new Size(0, commitBtnRowH);
+                button.Padding = new Padding(DpiScale.Scale(6, dpi), 0, DpiScale.Scale(6, dpi), 0);
+                button.Margin = new Padding(0, 0, gap, 0);
             }
 
             _btnOpenRepo.Margin = new Padding(0, 0, gap, 0);
@@ -163,6 +174,12 @@ public partial class GitControl : UserControl
         base.OnFontChanged(e);
         DisposeBranchFont();
         DisposeSectionHeaderFont();
+        _actionBtnFont?.Dispose();
+        _actionBtnFont = null;
+        _statusBadgeFont?.Dispose();
+        _statusBadgeFont = null;
+        _fileIconFont?.Dispose();
+        _fileIconFont = null;
         if (IsHandleCreated)
             ApplyDpiMetrics();
     }
@@ -344,22 +361,15 @@ public partial class GitControl : UserControl
         _btnPull.Click += async (_, _) => await _viewModel.PullCommand.ExecuteAsync(null);
         _btnPush.Click += async (_, _) => await _viewModel.PushCommand.ExecuteAsync(null);
         _btnSync.Click += async (_, _) => await _viewModel.SyncCommand.ExecuteAsync(null);
-        _btnStageAll.Click += async (_, _) => await _viewModel.StageAllCommand.ExecuteAsync(null);
+        _btnStageAllChanges.Click += async (_, _) => await _viewModel.StageAllCommand.ExecuteAsync(null);
+        _btnUnstageAllChanges.Click += async (_, _) => await _viewModel.UnstageAllCommand.ExecuteAsync(null);
         _btnCommit.Click += async (_, _) => await _viewModel.CommitCommand.ExecuteAsync(null);
-        _btnStageAllCommit.Click += async (_, _) => await _viewModel.StageAllAndCommitCommand.ExecuteAsync(null);
         _btnGenerateCommit.Click += async (_, _) => await _viewModel.GenerateCommitMessageCommand.ExecuteAsync(null);
         _btnMore.Click += (_, _) =>
         {
             _menuMore.Show(_btnMore, new Point(0, _btnMore.Height));
         };
-        _btnSaveIdentity.Click += async (_, _) =>
-        {
-            _viewModel.LocalUserName = _txtUserName.Text;
-            _viewModel.LocalUserEmail = _txtUserEmail.Text;
-            await _viewModel.SaveLocalIdentityCommand.ExecuteAsync(null);
-        };
-        _txtUserName.TextChanged += (_, _) => _viewModel.LocalUserName = _txtUserName.Text;
-        _txtUserEmail.TextChanged += (_, _) => _viewModel.LocalUserEmail = _txtUserEmail.Text;
+
 
         _txtCommitMessage.TextChanged += (_, _) => _viewModel.CommitMessage = _txtCommitMessage.Text;
         _txtCommitMessage.KeyDown += async (_, e) =>
@@ -381,11 +391,54 @@ public partial class GitControl : UserControl
         _previewDebounceTimer = new System.Windows.Forms.Timer { Interval = 150 };
         _previewDebounceTimer.Tick += PreviewDebounceTimer_Tick;
 
-        foreach (ListView list in new[] { _lvStaged, _lvUnstaged, _lvCommits, _lvCommitFiles, _lvTimeline })
+        foreach (ListView list in new[] { _lvCommits, _lvTimeline })
         {
             SizeListViewColumn(list);
             list.SizeChanged += (_, _) => SizeListViewColumn(list);
         }
+
+        // Enable double-buffering on ListViews to eliminate flicker.
+        SetDoubleBuffered(_lvStaged);
+        SetDoubleBuffered(_lvUnstaged);
+        SetDoubleBuffered(_lvCommitFiles);
+
+        // Owner-draw lists (staged/unstaged get VSCode-style; commit-files get colored status)
+        _lvStaged.OwnerDraw = true;
+        _lvStaged.DrawColumnHeader += (_, _) => { };
+        _lvStaged.DrawSubItem += (_, e) => DrawChangeItemWithAction(e!, isStaged: true);
+        _lvStaged.MouseUp += ChangesList_MouseUp_Actions;
+        _lvStaged.MouseMove += (_, e) => TrackHover(_lvStaged, e, isStaged: true);
+        _lvStaged.MouseLeave += (_, _) => { _hoveredStagedIndex = -1; _lvStaged.Invalidate(); };
+        _lvStaged.SizeChanged += (_, _) => SizeListViewColumn(_lvStaged);
+        _lvUnstaged.OwnerDraw = true;
+        _lvUnstaged.DrawColumnHeader += (_, _) => { };
+        _lvUnstaged.DrawSubItem += (_, e) => DrawChangeItemWithAction(e!, isStaged: false);
+        _lvUnstaged.MouseUp += ChangesList_MouseUp_Actions;
+        _lvUnstaged.MouseMove += (_, e) => TrackHover(_lvUnstaged, e, isStaged: false);
+        _lvUnstaged.MouseLeave += (_, _) => { _hoveredUnstagedIndex = -1; _lvUnstaged.Invalidate(); };
+        _lvUnstaged.SizeChanged += (_, _) => SizeListViewColumn(_lvUnstaged);
+        _lvCommitFiles.OwnerDraw = true;
+        _lvCommitFiles.DrawColumnHeader += (_, _) => { };
+        _lvCommitFiles.DrawSubItem += (_, e) => DrawCommitFileItem(e!);
+        _lvCommitFiles.MouseMove += (_, e) =>
+        {
+            ListViewItem? hit = _lvCommitFiles.GetItemAt(e.X, e.Y);
+            int newIndex = hit?.Index ?? -1;
+            int prevIndex = _hoveredCommitFilesIndex;
+            if (newIndex == prevIndex) return;
+            _hoveredCommitFilesIndex = newIndex;
+            int lo = Math.Min(prevIndex, newIndex);
+            int hi = Math.Max(prevIndex, newIndex);
+            if (lo >= 0 && hi < _lvCommitFiles.VirtualListSize)
+                _lvCommitFiles.RedrawItems(lo, hi, false);
+            else if (newIndex >= 0 && newIndex < _lvCommitFiles.VirtualListSize)
+                _lvCommitFiles.RedrawItems(newIndex, newIndex, false);
+        };
+        _lvCommitFiles.MouseLeave += (_, _) => { _hoveredCommitFilesIndex = -1; _lvCommitFiles.Invalidate(); };
+        _lvCommitFiles.SizeChanged += (_, _) => SizeListViewColumn(_lvCommitFiles);
+        SizeListViewColumn(_lvStaged);
+        SizeListViewColumn(_lvUnstaged);
+        SizeListViewColumn(_lvCommitFiles);
 
         _lvStaged.RetrieveVirtualItem += (_, e) => RetrieveCachedItem(e, _stagedCache);
         _lvUnstaged.RetrieveVirtualItem += (_, e) => RetrieveCachedItem(e, _unstagedCache);
@@ -544,12 +597,6 @@ public partial class GitControl : UserControl
             ? "—"
             : _viewModel.BranchDisplay;
         _lblStatus.Text = _viewModel.StatusMessage ?? string.Empty;
-        _lblIdentity.Text = _viewModel.IdentitySummary ?? string.Empty;
-
-        if (_txtUserName.Text != _viewModel.LocalUserName)
-            _txtUserName.Text = _viewModel.LocalUserName;
-        if (_txtUserEmail.Text != _viewModel.LocalUserEmail)
-            _txtUserEmail.Text = _viewModel.LocalUserEmail;
 
         _btnGenerateCommit.Visible = _viewModel.CanShowGenerateCommitMessage;
 
@@ -594,14 +641,12 @@ public partial class GitControl : UserControl
         _btnPull.Enabled = enabled;
         _btnPush.Enabled = enabled;
         _btnSync.Enabled = enabled;
-        _btnStageAll.Enabled = enabled;
+        _btnStageAllChanges.Enabled = enabled;
+        _btnUnstageAllChanges.Enabled = enabled;
         _btnCommit.Enabled = enabled;
-        _btnStageAllCommit.Enabled = enabled;
         _btnGenerateCommit.Enabled = enabled && !_viewModel.IsGeneratingCommitMessage;
         _btnMore.Enabled = enabled;
-        _btnSaveIdentity.Enabled = enabled;
-        _txtUserName.Enabled = enabled;
-        _txtUserEmail.Enabled = enabled;
+
         _txtCommitMessage.Enabled = enabled;
         _btnRefresh.Enabled = !_viewModel.IsBusy;
         _btnOpenRepo.Enabled = !_viewModel.IsBusy;
@@ -683,7 +728,9 @@ public partial class GitControl : UserControl
 
         _commitFilesCache = _viewModel.CommitFiles.ToArray();
         ApplyVirtualListSize(_lvCommitFiles, _commitFilesCache.Length);
-        _lblCommitFilesHeader.Text = $"FILES IN COMMIT ({_commitFilesCache.Length})";
+        _lblCommitFilesHeader.Text = _commitFilesCache.Length > 0
+            ? $"FILES IN COMMIT ({_commitFilesCache.Length})"
+            : "FILES IN COMMIT";
 
         if (_commitFilesCache.Length > 0)
             ApplySplitterProportions();
@@ -860,6 +907,7 @@ public partial class GitControl : UserControl
 
     private static void RetrieveCachedItem<T>(RetrieveVirtualItemEventArgs e, T[] cache)
     {
+        // Owner-drawn lists still need a valid ListViewItem for selection/highlighting.
         if (e.ItemIndex >= 0 && e.ItemIndex < cache.Length)
             e.Item = new ListViewItem(cache[e.ItemIndex]?.ToString() ?? string.Empty);
         else
@@ -935,6 +983,45 @@ public partial class GitControl : UserControl
         if (string.IsNullOrWhiteSpace(selected))
             return;
         await _viewModel.MergeBranchCommand.ExecuteAsync(selected);
+    }
+
+    private void ShowIdentityDialog()
+    {
+        int dpi = DeviceDpi;
+        using var form = new Form
+        {
+            Text = "Set Git Identity",
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterParent,
+            ClientSize = DpiScale.Scale(new Size(400, 150), dpi),
+            MinimizeBox = false,
+            MaximizeBox = false,
+            ShowInTaskbar = false,
+            AutoScaleMode = AutoScaleMode.Dpi,
+            Font = Font
+        };
+        int pad = DpiScale.Scale(12, dpi);
+        int fieldH = Math.Max(DpiScale.Scale(28, dpi), (int)Math.Ceiling(Font.GetHeight()) + DpiScale.Scale(8, dpi));
+        int btnW = DpiScale.Scale(75, dpi);
+        int btnH = Math.Max(DpiScale.Scale(28, dpi), fieldH);
+        int labelW = DpiScale.Scale(80, dpi);
+
+        var lblName = new Label { Text = "Name:", AutoSize = false, Width = labelW, Height = fieldH, Location = new Point(pad, pad), TextAlign = ContentAlignment.MiddleLeft };
+        var txtName = new TextBox { Location = new Point(pad + labelW + DpiScale.Scale(4, dpi), pad), Width = form.ClientSize.Width - pad * 3 - labelW, Height = fieldH, Text = _viewModel.LocalUserName ?? string.Empty };
+        var lblEmail = new Label { Text = "Email:", AutoSize = false, Width = labelW, Height = fieldH, Location = new Point(pad, pad + fieldH + DpiScale.Scale(8, dpi)), TextAlign = ContentAlignment.MiddleLeft };
+        var txtEmail = new TextBox { Location = new Point(pad + labelW + DpiScale.Scale(4, dpi), pad + fieldH + DpiScale.Scale(8, dpi)), Width = form.ClientSize.Width - pad * 3 - labelW, Height = fieldH, Text = _viewModel.LocalUserEmail ?? string.Empty };
+        var ok = new Button { Text = "Save", DialogResult = DialogResult.OK, Size = new Size(btnW, btnH), Location = new Point(form.ClientSize.Width - pad - btnW * 2 - DpiScale.Scale(8, dpi), form.ClientSize.Height - pad - btnH) };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Size = new Size(btnW, btnH), Location = new Point(form.ClientSize.Width - pad - btnW, form.ClientSize.Height - pad - btnH) };
+        form.Controls.AddRange([lblName, txtName, lblEmail, txtEmail, ok, cancel]);
+        form.AcceptButton = ok;
+        form.CancelButton = cancel;
+
+        if (form.ShowDialog(this) == DialogResult.OK)
+        {
+            _viewModel.LocalUserName = txtName.Text;
+            _viewModel.LocalUserEmail = txtEmail.Text;
+            _ = _viewModel.SaveLocalIdentityCommand.ExecuteAsync(null);
+        }
     }
 
     private string? PromptText(string title, string label)
@@ -1128,6 +1215,334 @@ public partial class GitControl : UserControl
         }
     }
 
+    // ── VSCode-style owner-draw for staged/unstaged items ──────────
+
+    private const int FileIconSize = 18;
+    private const int SmallActionBtnSize = 22;
+    private const int StatusBadgeWidth = 32;
+    private Font? _actionBtnFont;
+    private Font? _statusBadgeFont;
+    private Font? _fileIconFont;
+
+    // Hovered item tracking for action buttons
+    private int _hoveredStagedIndex = -1;
+    private int _hoveredUnstagedIndex = -1;
+    private int _hoveredCommitFilesIndex = -1;
+
+    private void DrawChangeItemWithAction(DrawListViewSubItemEventArgs e, bool isStaged)
+    {
+        if (e.ItemIndex < 0) return;
+
+        var cache = isStaged ? _stagedCache : _unstagedCache;
+        if (e.ItemIndex >= cache.Length) return;
+        GitFileStatusItem item = cache[e.ItemIndex];
+
+        bool selected = (e.ItemState & ListViewItemStates.Selected) != 0;
+        bool hovered = isStaged ? e.ItemIndex == _hoveredStagedIndex : e.ItemIndex == _hoveredUnstagedIndex;
+        bool showActions = hovered || selected;
+        Color back = selected ? SystemColors.Highlight : hovered ? ControlPaint.Light(BackColor, 0.92f) : BackColor;
+        Color fore = selected ? SystemColors.HighlightText : ForeColor;
+
+        int dpi = DeviceDpi;
+        int pad = DpiScale.Scale(4, dpi);
+        int iconSize = Math.Max(FileIconSize, (int)(Font.GetHeight() + 2));
+        int rowH = e.Bounds.Height;
+
+        // 1. Background
+        using (var bgBrush = new SolidBrush(back))
+            e.Graphics.FillRectangle(bgBrush, e.Bounds);
+
+        // 2. File type icon (left)
+        int iconX = e.Bounds.Left + pad;
+        int iconY = e.Bounds.Top + (rowH - iconSize) / 2;
+        DrawFileTypeIcon(e.Graphics, item.Path, iconX, iconY, iconSize);
+
+        // 3. Status letter (far right)
+        string statusCode = item.StatusCode?.Trim() ?? "?";
+        Color statusColor = GetStatusColor(statusCode);
+        int statusX = e.Bounds.Right - StatusBadgeWidth - pad;
+
+        EnsureStatusBadgeFont();
+        using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+        using (var statusBrush = new SolidBrush(statusColor))
+        {
+            e.Graphics.DrawString(statusCode, _statusBadgeFont!, statusBrush, new RectangleF(statusX, e.Bounds.Top, StatusBadgeWidth, rowH), sf);
+        }
+
+        // 4. Action buttons (when hovered/selected)
+        int actionAreaRight = statusX - pad;
+        if (showActions)
+        {
+            int btnSize = Math.Max(SmallActionBtnSize, (int)(Font.GetHeight() + 6));
+            int btnY = e.Bounds.Top + (rowH - btnSize) / 2;
+
+            // Stage/Unstage button (rightmost action)
+            int stageBtnX = actionAreaRight - btnSize;
+            string stageSymbol = isStaged ? "\u2190" : "+";
+            Color stageColor = isStaged ? Color.FromArgb(180, 100, 100) : Color.FromArgb(50, 160, 50);
+            DrawSmallActionButton(e.Graphics, stageSymbol, stageBtnX, btnY, btnSize, stageColor, selected);
+            actionAreaRight = stageBtnX - DpiScale.Scale(3, dpi);
+
+            // Discard button
+            int discardBtnX = actionAreaRight - btnSize;
+            DrawSmallActionButton(e.Graphics, "\u2715", discardBtnX, btnY, btnSize, Color.FromArgb(200, 70, 70), selected);
+            actionAreaRight = discardBtnX - DpiScale.Scale(3, dpi);
+        }
+
+        // 5. Filename (between icon and actions)
+        int textX = iconX + iconSize + DpiScale.Scale(6, dpi);
+        int textWidth = actionAreaRight - textX;
+        if (textWidth > 0)
+        {
+            string displayPath = string.IsNullOrEmpty(item.OriginalPath) ? item.Path : item.OriginalPath;
+            TextRenderer.DrawText(e.Graphics, displayPath, Font, new Rectangle(textX, e.Bounds.Top, textWidth, rowH), fore, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
+    }
+
+    private void DrawFileTypeIcon(Graphics g, string path, int x, int y, int size)
+    {
+        string ext = Path.GetExtension(path).ToLowerInvariant();
+        (Color bg, string symbol) = ext switch
+        {
+            ".sql"  => (Color.FromArgb(50, 120, 200), "S"),
+            ".json" => (Color.FromArgb(200, 160, 40), "{}"),
+            ".xml"  => (Color.FromArgb(100, 180, 100), "<>"),
+            ".cs"   => (Color.FromArgb(120, 80, 180), "C#"),
+            ".config" => (Color.FromArgb(160, 160, 160), "CFG"),
+            ".gitignore" => (Color.FromArgb(200, 80, 80), "GI"),
+            _       => (Color.FromArgb(100, 140, 180), ext.Length > 0 ? ext[1..].ToUpperInvariant() : "?")
+        };
+
+        // Rounded rectangle background
+        var prevSmoothing = g.SmoothingMode;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using (var bgBrush = new SolidBrush(bg))
+        {
+            var rect = new Rectangle(x, y, size, size);
+            int radius = Math.Max(3, size / 5);
+            using var rrect = GetRoundedRect(rect, radius);
+            g.FillPath(bgBrush, rrect);
+        }
+        g.SmoothingMode = prevSmoothing;
+
+        // Symbol text
+        EnsureFileIconFont();
+        using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+        using (var foreBrush = new SolidBrush(Color.White))
+        {
+            g.DrawString(symbol, _fileIconFont!, foreBrush, new RectangleF(x, y, size, size), sf);
+        }
+    }
+
+    private static System.Drawing.Drawing2D.GraphicsPath GetRoundedRect(Rectangle rect, int radius)
+    {
+        var path = new System.Drawing.Drawing2D.GraphicsPath();
+        int d = radius * 2;
+        path.AddArc(rect.X, rect.Y, d, d, 180, 90);
+        path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
+        path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
+        path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+
+    private void DrawSmallActionButton(Graphics g, string symbol, int x, int y, int size, Color color, bool onDarkBackground)
+    {
+        var prevSmoothing = g.SmoothingMode;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+        // More opaque circular background for better visibility
+        int bgAlpha = onDarkBackground ? 120 : 60;
+        Color bgColor = Color.FromArgb(bgAlpha, onDarkBackground ? Color.White : color);
+        using (var bgBrush = new SolidBrush(bgColor))
+        {
+            g.FillEllipse(bgBrush, x, y, size, size);
+        }
+
+        // Symbol with high contrast
+        Color symColor = onDarkBackground ? color : Color.FromArgb(220, color);
+        EnsureActionFonts();
+        using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+        using (var foreBrush = new SolidBrush(symColor))
+        {
+            g.DrawString(symbol, _actionBtnFont!, foreBrush, new RectangleF(x, y, size, size), sf);
+        }
+
+        g.SmoothingMode = prevSmoothing;
+    }
+
+    private void ChangesList_MouseUp_Actions(object? sender, MouseEventArgs e)
+    {
+        if (sender is not ListView list || e.Button != MouseButtons.Left) return;
+
+        ListViewItem? hit = list.GetItemAt(e.X, e.Y);
+        if (hit is null) return;
+
+        bool isStaged = list == _lvStaged;
+        // Action buttons are clickable when hovered or selected
+        bool isSelected = list.SelectedIndices.Contains(hit.Index);
+        bool isHovered = isStaged ? hit.Index == _hoveredStagedIndex : hit.Index == _hoveredUnstagedIndex;
+        if (!isHovered && !isSelected) return;
+
+        var cache = isStaged ? _stagedCache : _unstagedCache;
+        if (hit.Index < 0 || hit.Index >= cache.Length) return;
+        GitFileStatusItem item = cache[hit.Index];
+
+        int dpi = DeviceDpi;
+        int pad = DpiScale.Scale(4, dpi);
+        int btnSize = Math.Max(SmallActionBtnSize, (int)(Font.GetHeight() + 6));
+        int statusX = list.ClientSize.Width - StatusBadgeWidth - pad;
+        int actionAreaRight = statusX - pad;
+
+        // Check stage/unstage button (rightmost)
+        int stageBtnX = actionAreaRight - btnSize;
+        var stageBtnRect = new Rectangle(stageBtnX, hit.Bounds.Top + (hit.Bounds.Height - btnSize) / 2, btnSize, btnSize);
+        if (stageBtnRect.Contains(e.Location))
+        {
+            if (isStaged)
+                _ = _viewModel.UnstageSelectedCommand.ExecuteAsync(item);
+            else
+                _ = _viewModel.StageSelectedCommand.ExecuteAsync(item);
+            return;
+        }
+
+        // Check discard button (with confirmation)
+        int discardBtnX = stageBtnX - pad - btnSize;
+        var discardBtnRect = new Rectangle(discardBtnX, hit.Bounds.Top + (hit.Bounds.Height - btnSize) / 2, btnSize, btnSize);
+        if (discardBtnRect.Contains(e.Location))
+        {
+            string discardText = item.Kind == GitChangeKind.Untracked ? "Delete" : "Discard Changes";
+            var confirm = MessageBox.Show(
+                list, $"{discardText} '{item.Path}'?",
+                "Git", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (confirm == DialogResult.Yes)
+                _ = _viewModel.DiscardSelectedCommand.ExecuteAsync(item);
+            return;
+        }
+    }
+
+    // ── Owner-draw: colored status letters for commit files ───────────
+
+    private void DrawCommitFileItem(DrawListViewSubItemEventArgs e)
+    {
+        if (e.ItemIndex < 0 || e.ItemIndex >= _commitFilesCache.Length) return;
+        GitCommitFileItem item = _commitFilesCache[e.ItemIndex];
+
+        bool selected = (e.ItemState & ListViewItemStates.Selected) != 0;
+        bool hovered = e.ItemIndex == _hoveredCommitFilesIndex;
+        Color back = selected ? SystemColors.Highlight : hovered ? ControlPaint.Light(BackColor, 0.92f) : BackColor;
+        Color fore = selected ? SystemColors.HighlightText : ForeColor;
+
+        int dpi = DeviceDpi;
+        int pad = DpiScale.Scale(4, dpi);
+        int iconSize = Math.Max(FileIconSize, (int)(Font.GetHeight() + 2));
+        int rowH = e.Bounds.Height;
+
+        // 1. Background
+        using (var bgBrush = new SolidBrush(back))
+            e.Graphics.FillRectangle(bgBrush, e.Bounds);
+
+        // 2. File type icon (left)
+        int iconX = e.Bounds.Left + pad;
+        int iconY = e.Bounds.Top + (rowH - iconSize) / 2;
+        DrawFileTypeIcon(e.Graphics, item.Path, iconX, iconY, iconSize);
+
+        // 3. Status letter (far right)
+        string statusCode = item.StatusCode?.Trim() ?? "?";
+        Color statusColor = GetStatusColor(statusCode);
+        int statusX = e.Bounds.Right - StatusBadgeWidth - pad;
+
+        EnsureStatusBadgeFont();
+        using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+        using (var statusBrush = new SolidBrush(statusColor))
+        {
+            e.Graphics.DrawString(statusCode, _statusBadgeFont!, statusBrush, new RectangleF(statusX, e.Bounds.Top, StatusBadgeWidth, rowH), sf);
+        }
+
+        // 4. Filename (between icon and status)
+        int textX = iconX + iconSize + DpiScale.Scale(6, dpi);
+        int textWidth = statusX - textX - pad;
+        if (textWidth > 0)
+        {
+            string displayPath = string.IsNullOrEmpty(item.OriginalPath) ? item.Path : item.OriginalPath;
+            TextRenderer.DrawText(e.Graphics, displayPath, Font, new Rectangle(textX, e.Bounds.Top, textWidth, rowH), fore, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
+    }
+
+    private static Color GetStatusColor(string statusCode)
+    {
+        if (string.IsNullOrEmpty(statusCode)) return SystemColors.GrayText;
+        char c = statusCode[0];
+        return c switch
+        {
+            'A' => Color.FromArgb(70, 180, 70),   // green
+            'M' => Color.FromArgb(200, 160, 40),   // orange/gold
+            'D' => Color.FromArgb(210, 60, 60),    // red
+            'R' => Color.FromArgb(70, 130, 210),   // blue
+            'C' => Color.FromArgb(160, 100, 200),  // purple
+            'U' => Color.FromArgb(180, 120, 50),   // brown
+            '?' => Color.FromArgb(160, 160, 160),  // gray (untracked)
+            _   => SystemColors.GrayText
+        };
+    }
+
+    private void TrackHover(ListView list, MouseEventArgs e, bool isStaged)
+    {
+        ListViewItem? hit = list.GetItemAt(e.X, e.Y);
+        int newIndex = hit?.Index ?? -1;
+        int prevIndex = isStaged ? _hoveredStagedIndex : _hoveredUnstagedIndex;
+        if (newIndex == prevIndex) return;
+        if (isStaged) _hoveredStagedIndex = newIndex; else _hoveredUnstagedIndex = newIndex;
+        // Only redraw the two affected items, not the whole list — prevents flicker.
+        int lo = Math.Min(prevIndex, newIndex);
+        int hi = Math.Max(prevIndex, newIndex);
+        if (lo >= 0 && hi < list.VirtualListSize)
+            list.RedrawItems(lo, hi, false);
+        else if (newIndex >= 0 && newIndex < list.VirtualListSize)
+            list.RedrawItems(newIndex, newIndex, false);
+    }
+
+    private void EnsureActionFonts()
+    {
+        float sz = Font.Size * 0.85f;
+        if (_actionBtnFont is not null && Math.Abs(_actionBtnFont.Size - sz) < 0.1f)
+            return;
+        _actionBtnFont?.Dispose();
+        _actionBtnFont = new Font(Font.FontFamily, sz, FontStyle.Bold);
+    }
+
+    private void EnsureFileIconFont()
+    {
+        float sz = Font.Size * 0.55f;
+        if (_fileIconFont is not null && Math.Abs(_fileIconFont.Size - sz) < 0.1f)
+            return;
+        _fileIconFont?.Dispose();
+        _fileIconFont = new Font(Font.FontFamily, sz, FontStyle.Bold);
+    }
+
+    private void EnsureStatusBadgeFont()
+    {
+        float sz = Font.Size * 0.8f;
+        if (_statusBadgeFont is not null && Math.Abs(_statusBadgeFont.Size - sz) < 0.1f)
+            return;
+        _statusBadgeFont?.Dispose();
+        _statusBadgeFont = new Font(Font.FontFamily, sz, FontStyle.Bold);
+    }
+
+    private static void SetDoubleBuffered(Control control)
+    {
+        typeof(Control).InvokeMember("DoubleBuffered",
+            System.Reflection.BindingFlags.SetProperty | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            null, control, [true]);
+    }
+
+    private void EnableDoubleBuffering()
+    {
+        SetDoubleBuffered(this);
+        foreach (Control control in GetAllControls(this))
+            SetDoubleBuffered(control);
+    }
+
     private static IEnumerable<Control> GetAllControls(Control root)
     {
         foreach (Control child in root.Controls)
@@ -1163,6 +1578,12 @@ public partial class GitControl : UserControl
                 _viewModel.ErrorOccurred -= _errorHandler;
             }
             DisposeBranchFont();
+            _actionBtnFont?.Dispose();
+            _actionBtnFont = null;
+            _statusBadgeFont?.Dispose();
+            _statusBadgeFont = null;
+            _fileIconFont?.Dispose();
+            _fileIconFont = null;
             components?.Dispose();
         }
         base.Dispose(disposing);

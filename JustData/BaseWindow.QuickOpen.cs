@@ -8,7 +8,7 @@ namespace JustyBaseLegacy.UI;
 
 public partial class BaseWindow
 {
-    private void ShowQuickOpen()
+    private async void ShowQuickOpen()
     {
         try
         {
@@ -21,11 +21,11 @@ public partial class BaseWindow
                     document.Text))
                 .ToArray();
 
-            var candidates = searchService.CollectCandidates(
+            var candidates = await searchService.CollectCandidatesAsync(
                 _filesViewModel.RootPaths.ToArray(),
                 _filesViewModel.SearchFiles,
                 _gitViewModel.HasRepository ? _gitViewModel.SelectedRepoPath : null,
-                openDocs);
+                openDocs).ConfigureAwait(true);
 
             using var form = new QuickOpenForm(
                 _colorTheme,

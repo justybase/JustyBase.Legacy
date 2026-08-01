@@ -1,8 +1,10 @@
 using AppBase.Common.Interfaces;
+using AppBase.Common.Configuration;
 using JustyBase.Ai.Fim.Abstractions;
 using JustyBase.Ai.Fim.Download;
 using JustyBase.Ai.Fim.Prompting;
 using JustyBaseLegacy.UI.Fim;
+using JustyBaseLegacy.UI.Configuration;
 
 namespace JustyBaseLegacy.UI.Controls;
 
@@ -183,6 +185,18 @@ public sealed class EmbeddedFimPreferencesPanel : UserControl
         }
     }
 
+    /// <summary>
+    /// Copies the current panel state into the Preferences transaction buffer.
+    /// The panel keeps using the live config for model download/runtime setup,
+    /// while Preferences persists the copied values together with its draft.
+    /// </summary>
+    public void ApplyCurrentSettingsTo(IApplicationConfig target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        SaveFromUi();
+        LegacyApplicationSettingsMapper.CopyEmbeddedFimSettings(_settings.Config, target);
+    }
+
     private void ApplyPreset(string? preset)
     {
         if (string.IsNullOrWhiteSpace(preset) || string.Equals(preset, "Custom", StringComparison.OrdinalIgnoreCase))
@@ -206,6 +220,25 @@ public sealed class EmbeddedFimPreferencesPanel : UserControl
     private async Task DownloadAsync()
     {
         SaveFromUi();
+        var model = _catalog.Resolve(_settings.Config.EmbeddedFimModelId);
+        if (model.RequiresLicenseAcceptance
+            && !_settings.Config.EmbeddedFimAcceptedLicenseModelIds.Contains(model.Id, StringComparer.OrdinalIgnoreCase))
+        {
+            var result = MessageBox.Show(
+                this,
+                $"{model.LicenseSummary}\n\nAccept {model.LicenseName} to download {model.DisplayName}?",
+                "License acceptance required",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+            if (result != DialogResult.Yes)
+            {
+                _lblStatus.Text = "Download cancelled: license was not accepted.";
+                return;
+            }
+
+            _settings.Config.EmbeddedFimAcceptedLicenseModelIds.Add(model.Id);
+        }
+
         _btnDownload.Enabled = false;
         _lblStatus.Text = "Downloading / preparing model…";
         try

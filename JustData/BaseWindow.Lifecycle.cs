@@ -40,16 +40,30 @@ namespace JustyBaseLegacy.UI
         private async Task<bool> DoSaveTabStateAsync(bool ask = true)
         {
             await SaveManySqlToDiskAsync().ConfigureAwait(true);
+            return await PromptSaveUnsavedTabsAsync(ask).ConfigureAwait(true);
+        }
 
+        /// <summary>
+        /// Asks (once) whether to save tabs that have unsaved changes, and saves
+        /// them on confirmation. Returns <c>true</c> when the close should be
+        /// aborted (user pressed Cancel, or a save failed).
+        /// </summary>
+        private async Task<bool> PromptSaveUnsavedTabsAsync(bool ask = true)
+        {
             var tabPages = new List<TabPage>();
             foreach (TabPage tabPage in EditorTabPages)
             {
-                if (tabPage.Tag != null && !(tabPage.Tag as TabPageMainTag).IsSaved)
+                if (tabPage.Tag is null
+                    && (_tabManager.GetEditor(tabPage) is not { TextLength: > 0 }))
+                    continue;
+
+                if (tabPage.Tag is not TabPageMainTag { IsSaved: true })
                 {
                     tabPages.Add(tabPage);
                 }
             }
 
+            // No unsaved changes -> close silently, no prompt.
             if (tabPages.Count == 0)
             {
                 return false;
@@ -99,45 +113,15 @@ namespace JustyBaseLegacy.UI
             _notifyIcon1.Visible = false;
             try
             {
-                if (_applicationSettingsContext.Config.SimpleStartupRestore)
+                // Ask once, and only when there are genuinely unsaved changes.
+                // Tabs close on exit by definition, so a separate
+                // "Close all tabs?" confirmation adds no value.
+                // DoSaveTabStateAsync also persists the startup bundle so the
+                // previous session can be restored on next launch.
+                if (await DoSaveTabStateAsync())
                 {
-                    if (await DoSaveTabStateAsync())
-                    {
-                        _notifyIcon1.Visible = true;
-                        return;
-                    }
-                }
-                else
-                {
-                    if (_applicationSettingsContext.Config.CloseWaringLevel >= 1
-                        && DialogResult.Yes == _loggerLoud.MessageBox_Show(
-                            this,
-                            "Save all tabs?",
-                            "Save?",
-                            MessageBoxButtons.YesNoCancel,
-                            MessageBoxIcon.Question))
-                    {
-                        foreach (TabPage item in EditorTabPages)
-                        {
-                            if (!await SaveAsync(item))
-                            {
-                                _notifyIcon1.Visible = true;
-                                return;
-                            }
-                        }
-                    }
-
-                    if (_applicationSettingsContext.Config.CloseWaringLevel >= 2
-                        && DialogResult.Yes != _loggerLoud.MessageBox_Show(
-                            this,
-                            "Close all tabs?",
-                            "Confirm close",
-                            MessageBoxButtons.YesNoCancel,
-                            MessageBoxIcon.Warning))
-                    {
-                        _notifyIcon1.Visible = true;
-                        return;
-                    }
+                    _notifyIcon1.Visible = true;
+                    return;
                 }
 
                 await CloseOpenedDbConnectionsAsync();

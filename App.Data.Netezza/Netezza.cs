@@ -506,7 +506,7 @@ public sealed class Netezza : GeneralDb, INetezza
                 return res;
             }
 
-            List<string> basesXXX = netezzaRefresh switch
+            List<string> databasesToRefresh = netezzaRefresh switch
             {
                 NetezzaRefreshMode.partialOnlyTables => dbsToRefresh ?? new List<string>(),
                 NetezzaRefreshMode.partial => new List<string> { defaultDatabase },
@@ -517,7 +517,7 @@ public sealed class Netezza : GeneralDb, INetezza
 
             await Task.Run(() =>
             {
-                Parallel.ForEach(basesXXX, new ParallelOptions { MaxDegreeOfParallelism = _databaseRuntimeContext.Config.MaxSchemaParallelism }, (database) =>
+                Parallel.ForEach(databasesToRefresh, new ParallelOptions { MaxDegreeOfParallelism = _databaseRuntimeContext.Config.MaxSchemaParallelism }, (database) =>
                 {
                     MakeOneDb(connectionName, database);
                 });
@@ -532,9 +532,9 @@ public sealed class Netezza : GeneralDb, INetezza
             AttachedDbsToSchema.Clear();
 
             //final integrate and cleanup (main connection)
-            for (int i = 0; i < basesXXX.Count; i++)
+            for (int i = 0; i < databasesToRefresh.Count; i++)
             {
-                string databaseName = basesXXX[i];
+                string databaseName = databasesToRefresh[i];
                 RegisterAttachedDb(databaseName);
             }
         }

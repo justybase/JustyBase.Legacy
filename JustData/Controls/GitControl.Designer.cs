@@ -15,17 +15,12 @@ partial class GitControl
     private System.Windows.Forms.Button _btnPull = null!;
     private System.Windows.Forms.Button _btnPush = null!;
     private System.Windows.Forms.Button _btnSync = null!;
-    private System.Windows.Forms.Button _btnStageAll = null!;
+    // _btnStageAll removed: replaced by arrow button on CHANGES header.
     private System.Windows.Forms.Button _btnCreateBranch = null!;
     private System.Windows.Forms.Button _btnMergeBranch = null!;
     private System.Windows.Forms.Button _btnMore = null!;
     private System.Windows.Forms.ContextMenuStrip _menuMore = null!;
     private System.Windows.Forms.Label _lblStatus = null!;
-    private System.Windows.Forms.Label _lblIdentity = null!;
-    private System.Windows.Forms.TextBox _txtUserName = null!;
-    private System.Windows.Forms.TextBox _txtUserEmail = null!;
-    private System.Windows.Forms.Button _btnSaveIdentity = null!;
-    private System.Windows.Forms.TableLayoutPanel _pnlIdentity = null!;
     private System.Windows.Forms.Panel _pnlEmpty = null!;
     private System.Windows.Forms.Label _lblEmpty = null!;
     private System.Windows.Forms.SplitContainer _splitMain = null!;
@@ -33,15 +28,16 @@ partial class GitControl
     private System.Windows.Forms.Panel _pnlChanges = null!;
     private System.Windows.Forms.Panel _pnlChangesHeader = null!;
     private System.Windows.Forms.Label _lblChangesHeader = null!;
+    private System.Windows.Forms.Button _btnStageAllChanges = null!;
     private System.Windows.Forms.TextBox _txtCommitMessage = null!;
     private System.Windows.Forms.Button _btnCommit = null!;
-    private System.Windows.Forms.Button _btnStageAllCommit = null!;
     private System.Windows.Forms.Button _btnGenerateCommit = null!;
     private System.Windows.Forms.FlowLayoutPanel _pnlCommitActions = null!;
     private System.Windows.Forms.SplitContainer _splitChangesLists = null!;
     private System.Windows.Forms.Panel _pnlStaged = null!;
     private System.Windows.Forms.Panel _pnlStagedHeader = null!;
     private System.Windows.Forms.Label _lblStagedHeader = null!;
+    private System.Windows.Forms.Button _btnUnstageAllChanges = null!;
     private System.Windows.Forms.ListView _lvStaged = null!;
     private System.Windows.Forms.Panel _pnlUnstaged = null!;
     private System.Windows.Forms.Panel _pnlUnstagedHeader = null!;
@@ -74,17 +70,11 @@ partial class GitControl
         _btnPull = new System.Windows.Forms.Button();
         _btnPush = new System.Windows.Forms.Button();
         _btnSync = new System.Windows.Forms.Button();
-        _btnStageAll = new System.Windows.Forms.Button();
+
         _btnCreateBranch = new System.Windows.Forms.Button();
         _btnMergeBranch = new System.Windows.Forms.Button();
         _btnMore = new System.Windows.Forms.Button();
-        _menuMore = new System.Windows.Forms.ContextMenuStrip(components);
-        _lblStatus = new System.Windows.Forms.Label();
-        _lblIdentity = new System.Windows.Forms.Label();
-        _txtUserName = new System.Windows.Forms.TextBox();
-        _txtUserEmail = new System.Windows.Forms.TextBox();
-        _btnSaveIdentity = new System.Windows.Forms.Button();
-        _pnlIdentity = new System.Windows.Forms.TableLayoutPanel();
+        _menuMore = new System.Windows.Forms.ContextMenuStrip(components);        _lblStatus = new System.Windows.Forms.Label();
         _pnlEmpty = new System.Windows.Forms.Panel();
         _lblEmpty = new System.Windows.Forms.Label();
         _splitMain = new System.Windows.Forms.SplitContainer();
@@ -92,15 +82,16 @@ partial class GitControl
         _pnlChanges = new System.Windows.Forms.Panel();
         _pnlChangesHeader = new System.Windows.Forms.Panel();
         _lblChangesHeader = new System.Windows.Forms.Label();
+        _btnStageAllChanges = new System.Windows.Forms.Button();
         _txtCommitMessage = new System.Windows.Forms.TextBox();
         _btnCommit = new System.Windows.Forms.Button();
-        _btnStageAllCommit = new System.Windows.Forms.Button();
         _btnGenerateCommit = new System.Windows.Forms.Button();
         _pnlCommitActions = new System.Windows.Forms.FlowLayoutPanel();
         _splitChangesLists = new System.Windows.Forms.SplitContainer();
         _pnlStaged = new System.Windows.Forms.Panel();
         _pnlStagedHeader = new System.Windows.Forms.Panel();
         _lblStagedHeader = new System.Windows.Forms.Label();
+        _btnUnstageAllChanges = new System.Windows.Forms.Button();
         _lvStaged = CreateVirtualListView();
         _pnlUnstaged = new System.Windows.Forms.Panel();
         _pnlUnstagedHeader = new System.Windows.Forms.Panel();
@@ -201,13 +192,12 @@ partial class GitControl
         _pnlToolbar.Controls.Add(_btnPull);
         _pnlToolbar.Controls.Add(_btnPush);
         _pnlToolbar.Controls.Add(_btnSync);
-        _pnlToolbar.Controls.Add(_btnStageAll);
         _pnlToolbar.Controls.Add(_btnMore);
 
         ConfigureToolButton(_btnPull, "Pull");
         ConfigureToolButton(_btnPush, "Push");
         ConfigureToolButton(_btnSync, "Sync");
-        ConfigureToolButton(_btnStageAll, "Stage All");
+
         ConfigureToolButton(_btnMore, "More ▾");
         ConfigureToolButton(_btnCreateBranch, "Branch");
         ConfigureToolButton(_btnMergeBranch, "Merge");
@@ -215,41 +205,20 @@ partial class GitControl
         _menuMore.Items.Add("Create Branch…", null, async (_, _) => await CreateBranchAsync());
         _menuMore.Items.Add("Checkout Branch…", null, async (_, _) => await CheckoutBranchAsync());
         _menuMore.Items.Add("Merge Branch…", null, async (_, _) => await MergeBranchAsync());
+        _menuMore.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        _menuMore.Items.Add("Set Identity…", null, (_, _) => ShowIdentityDialog());
 
         _lblStatus.AutoSize = true;
         _lblStatus.Dock = System.Windows.Forms.DockStyle.Fill;
         _lblStatus.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
         _lblStatus.UseMnemonic = false;
 
-        _pnlIdentity.ColumnCount = 3;
-        _pnlIdentity.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
-        _pnlIdentity.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
-        _pnlIdentity.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
-        _pnlIdentity.RowCount = 2;
-        _pnlIdentity.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-        _pnlIdentity.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-        _pnlIdentity.Dock = System.Windows.Forms.DockStyle.Fill;
-        _pnlIdentity.Margin = new System.Windows.Forms.Padding(0, 2, 0, 2);
-        _txtUserName.PlaceholderText = "user.name";
-        _txtUserName.Dock = System.Windows.Forms.DockStyle.Fill;
-        _txtUserEmail.PlaceholderText = "user.email";
-        _txtUserEmail.Dock = System.Windows.Forms.DockStyle.Fill;
-        ConfigureToolButton(_btnSaveIdentity, "Save ID");
-        _lblIdentity.AutoSize = false;
-        _lblIdentity.Dock = System.Windows.Forms.DockStyle.Fill;
-        _lblIdentity.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-        _lblIdentity.UseMnemonic = false;
-        _lblIdentity.AutoEllipsis = true;
-        _pnlIdentity.Controls.Add(_txtUserName, 0, 0);
-        _pnlIdentity.Controls.Add(_txtUserEmail, 1, 0);
-        _pnlIdentity.Controls.Add(_btnSaveIdentity, 2, 0);
-        _pnlIdentity.Controls.Add(_lblIdentity, 0, 1);
-        _pnlIdentity.SetColumnSpan(_lblIdentity, 3);
+        // Identity label: hidden from UI, kept for data-binding.
+
 
         _pnlHeader.ColumnCount = 1;
         _pnlHeader.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
-        _pnlHeader.RowCount = 5;
-        _pnlHeader.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
+        _pnlHeader.RowCount = 4;
         _pnlHeader.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         _pnlHeader.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         _pnlHeader.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
@@ -261,8 +230,7 @@ partial class GitControl
         _pnlHeader.Controls.Add(_pnlRepoRow, 0, 0);
         _pnlHeader.Controls.Add(_lblBranch, 0, 1);
         _pnlHeader.Controls.Add(_pnlToolbar, 0, 2);
-        _pnlHeader.Controls.Add(_pnlIdentity, 0, 3);
-        _pnlHeader.Controls.Add(_lblStatus, 0, 4);
+        _pnlHeader.Controls.Add(_lblStatus, 0, 3);
 
         _pnlEmpty.Controls.Add(_lblEmpty);
         _pnlEmpty.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -270,55 +238,65 @@ partial class GitControl
         _lblEmpty.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
         _lblEmpty.Padding = new System.Windows.Forms.Padding(16);
 
-        // Changes section
-        _pnlChangesHeader.Controls.Add(_lblChangesHeader);
-        _pnlChangesHeader.Dock = System.Windows.Forms.DockStyle.Top;
+        // ── Commit message section ────────────────────────────────────
         _lblChangesHeader.Dock = System.Windows.Forms.DockStyle.Fill;
-        _lblChangesHeader.Text = "SOURCE CONTROL";
+        _lblChangesHeader.Text = "COMMIT MESSAGE";
         _lblChangesHeader.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
         _lblChangesHeader.Padding = new System.Windows.Forms.Padding(6, 0, 0, 0);
+        _pnlChangesHeader.Controls.Add(_lblChangesHeader);
+        _pnlChangesHeader.Dock = System.Windows.Forms.DockStyle.Top;
 
-        _btnCommit.Text = "✓ Commit";
+        _btnCommit.Text = "Commit";
         _btnCommit.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
         _btnCommit.AutoSize = true;
-        _btnStageAllCommit.Text = "Stage All & Commit";
-        _btnStageAllCommit.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-        _btnStageAllCommit.AutoSize = true;
+        _btnCommit.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
         _btnGenerateCommit.Text = "✨";
         _btnGenerateCommit.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
         _btnGenerateCommit.AutoSize = true;
+        _btnGenerateCommit.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
         _btnGenerateCommit.Visible = false;
         _pnlCommitActions.Dock = System.Windows.Forms.DockStyle.Top;
         _pnlCommitActions.AutoSize = true;
         _pnlCommitActions.WrapContents = false;
         _pnlCommitActions.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight;
-        _pnlCommitActions.Controls.Add(_btnCommit);
-        _pnlCommitActions.Controls.Add(_btnStageAllCommit);
         _pnlCommitActions.Controls.Add(_btnGenerateCommit);
+        _pnlCommitActions.Controls.Add(_btnCommit);
 
         _txtCommitMessage.Dock = System.Windows.Forms.DockStyle.Top;
         _txtCommitMessage.Multiline = true;
         _txtCommitMessage.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
         _txtCommitMessage.PlaceholderText = "Message (Ctrl+Enter to commit)";
 
-        _pnlStagedHeader.Controls.Add(_lblStagedHeader);
-        _pnlStagedHeader.Dock = System.Windows.Forms.DockStyle.Top;
+        // STAGED header: label left + "←" arrow button right to unstage all.
         _lblStagedHeader.Dock = System.Windows.Forms.DockStyle.Fill;
         _lblStagedHeader.Text = "STAGED";
         _lblStagedHeader.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
         _lblStagedHeader.Padding = new System.Windows.Forms.Padding(6, 0, 0, 0);
+        ConfigureArrowButton(_btnUnstageAllChanges, "←");
+        _btnUnstageAllChanges.Dock = System.Windows.Forms.DockStyle.Right;
+        _pnlStagedHeader.Controls.Add(_lblStagedHeader);
+        _pnlStagedHeader.Controls.Add(_btnUnstageAllChanges);
+        _pnlStagedHeader.Dock = System.Windows.Forms.DockStyle.Top;
+
         _lvStaged.Dock = System.Windows.Forms.DockStyle.Fill;
+        _lvStaged.OwnerDraw = true;
         _pnlStaged.Controls.Add(_lvStaged);
         _pnlStaged.Controls.Add(_pnlStagedHeader);
         _pnlStaged.Dock = System.Windows.Forms.DockStyle.Fill;
 
-        _pnlUnstagedHeader.Controls.Add(_lblUnstagedHeader);
-        _pnlUnstagedHeader.Dock = System.Windows.Forms.DockStyle.Top;
+        // UNSTAGED header: label left + "→" arrow button right to stage all.
         _lblUnstagedHeader.Dock = System.Windows.Forms.DockStyle.Fill;
         _lblUnstagedHeader.Text = "CHANGES";
         _lblUnstagedHeader.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
         _lblUnstagedHeader.Padding = new System.Windows.Forms.Padding(6, 0, 0, 0);
+        ConfigureArrowButton(_btnStageAllChanges, "→");
+        _btnStageAllChanges.Dock = System.Windows.Forms.DockStyle.Right;
+        _pnlUnstagedHeader.Controls.Add(_lblUnstagedHeader);
+        _pnlUnstagedHeader.Controls.Add(_btnStageAllChanges);
+        _pnlUnstagedHeader.Dock = System.Windows.Forms.DockStyle.Top;
+
         _lvUnstaged.Dock = System.Windows.Forms.DockStyle.Fill;
+        _lvUnstaged.OwnerDraw = true;
         _pnlUnstaged.Controls.Add(_lvUnstaged);
         _pnlUnstaged.Controls.Add(_pnlUnstagedHeader);
         _pnlUnstaged.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -334,26 +312,30 @@ partial class GitControl
         _pnlChanges.Controls.Add(_pnlChangesHeader);
         _pnlChanges.Dock = System.Windows.Forms.DockStyle.Fill;
 
-        // Commits + files
-        _pnlCommitsHeader.Controls.Add(_lblCommitsHeader);
-        _pnlCommitsHeader.Dock = System.Windows.Forms.DockStyle.Top;
+        // ── Commits section ────────────────────────────────────────────
         _lblCommitsHeader.Dock = System.Windows.Forms.DockStyle.Fill;
         _lblCommitsHeader.Text = "COMMITS";
         _lblCommitsHeader.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
         _lblCommitsHeader.Padding = new System.Windows.Forms.Padding(6, 0, 0, 0);
+        _pnlCommitsHeader.Controls.Add(_lblCommitsHeader);
+        _pnlCommitsHeader.Dock = System.Windows.Forms.DockStyle.Top;
 
-        _pnlCommitFilesHeader.Controls.Add(_lblCommitFilesHeader);
-        _pnlCommitFilesHeader.Dock = System.Windows.Forms.DockStyle.Top;
+        _lvCommits.Dock = System.Windows.Forms.DockStyle.Fill;
+
+        // FILES IN COMMIT header
         _lblCommitFilesHeader.Dock = System.Windows.Forms.DockStyle.Fill;
         _lblCommitFilesHeader.Text = "FILES IN COMMIT";
         _lblCommitFilesHeader.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
         _lblCommitFilesHeader.Padding = new System.Windows.Forms.Padding(6, 0, 0, 0);
+        _pnlCommitFilesHeader.Controls.Add(_lblCommitFilesHeader);
+        _pnlCommitFilesHeader.Dock = System.Windows.Forms.DockStyle.Top;
+
         _lvCommitFiles.Dock = System.Windows.Forms.DockStyle.Fill;
+        _lvCommitFiles.OwnerDraw = true;
         _pnlCommitFiles.Controls.Add(_lvCommitFiles);
         _pnlCommitFiles.Controls.Add(_pnlCommitFilesHeader);
         _pnlCommitFiles.Dock = System.Windows.Forms.DockStyle.Fill;
 
-        _lvCommits.Dock = System.Windows.Forms.DockStyle.Fill;
         _splitCommits.Dock = System.Windows.Forms.DockStyle.Fill;
         _splitCommits.Orientation = System.Windows.Forms.Orientation.Horizontal;
         _splitCommits.Panel1.Controls.Add(_lvCommits);
@@ -364,12 +346,12 @@ partial class GitControl
         _pnlCommits.Dock = System.Windows.Forms.DockStyle.Fill;
 
         // Timeline
-        _pnlTimelineHeader.Controls.Add(_lblTimelineHeader);
-        _pnlTimelineHeader.Dock = System.Windows.Forms.DockStyle.Top;
         _lblTimelineHeader.Dock = System.Windows.Forms.DockStyle.Fill;
         _lblTimelineHeader.Text = "TIMELINE";
         _lblTimelineHeader.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
         _lblTimelineHeader.Padding = new System.Windows.Forms.Padding(6, 0, 0, 0);
+        _pnlTimelineHeader.Controls.Add(_lblTimelineHeader);
+        _pnlTimelineHeader.Dock = System.Windows.Forms.DockStyle.Top;
         _lvTimeline.Dock = System.Windows.Forms.DockStyle.Fill;
         _pnlTimeline.Controls.Add(_lvTimeline);
         _pnlTimeline.Controls.Add(_pnlTimelineHeader);
@@ -431,7 +413,9 @@ partial class GitControl
         _pnlTimelineHeader.ResumeLayout(false);
         ResumeLayout(false);
         PerformLayout();
-    }        private static System.Windows.Forms.ListView CreateVirtualListView()
+    }
+
+    private static System.Windows.Forms.ListView CreateVirtualListView()
     {
         var list = new System.Windows.Forms.ListView
         {
@@ -458,6 +442,19 @@ partial class GitControl
         button.UseVisualStyleBackColor = false;
         button.Margin = new System.Windows.Forms.Padding(0, 0, 4, 4);
         button.Padding = new System.Windows.Forms.Padding(8, 3, 8, 3);
+        button.MinimumSize = new System.Drawing.Size(0, 0);
+    }
+
+    private static void ConfigureArrowButton(System.Windows.Forms.Button button, string text)
+    {
+        button.Text = text;
+        button.AutoSize = true;
+        button.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
+        button.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+        button.UseVisualStyleBackColor = false;
+        button.Dock = System.Windows.Forms.DockStyle.Right;
+        button.Margin = new System.Windows.Forms.Padding(0);
+        button.Padding = new System.Windows.Forms.Padding(6, 0, 6, 0);
         button.MinimumSize = new System.Drawing.Size(0, 0);
     }
 }

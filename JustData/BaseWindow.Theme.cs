@@ -734,6 +734,8 @@ namespace JustyBaseLegacy.UI
                         if (hit == HIT_CONSTANTS.HTMAXBUTTON)
                         {
                             _titleBarCaptionButtons?.SetMaximizePressed(true);
+                            // Release mouse capture so WM_NCLBUTTONUP can arrive.
+                            WindowNativeMethods.ReleaseCapture();
                             m.Result = IntPtr.Zero;
                             break;
                         }

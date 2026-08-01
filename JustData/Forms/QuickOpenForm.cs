@@ -115,6 +115,9 @@ internal sealed class QuickOpenForm : Form
             BorderStyle = BorderStyle.None,
             DrawMode = DrawMode.OwnerDrawVariable,
             IntegralHeight = false,
+            // Quick Open has one active result. Keep this explicit because the
+            // native ListBox selection state is also used while scrolling.
+            SelectionMode = SelectionMode.One,
             Font = _resultsFont,
             BackColor = BackColor,
             ForeColor = ForeColor,
@@ -412,8 +415,21 @@ internal sealed class QuickOpenForm : Form
     private void SyncListSelectionFromSelectable()
     {
         int entryIndex = EntryIndexFromSelectable(_selectedSelectableIndex);
-        if (entryIndex >= 0 && entryIndex < _results.Items.Count)
-            _results.SelectedIndex = entryIndex;
+        if (entryIndex < 0 || entryIndex >= _results.Items.Count)
+        {
+            _results.ClearSelected();
+            return;
+        }
+
+        // ClearSelected makes the single-selection invariant explicit even if
+        // the native control received a mouse/keyboard range-selection event.
+        _results.ClearSelected();
+        _results.SelectedIndex = entryIndex;
+
+        // This is an owner-drawn ListBox. The native control can invalidate
+        // only the newly selected row, leaving the previously painted blue
+        // rows visible after scrolling or keyboard navigation.
+        _results.Invalidate();
     }
 
     private QuickOpenHit? GetSelectedHit()

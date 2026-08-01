@@ -119,6 +119,18 @@ internal sealed class QuickOpenSearchService
             .ToArray();
     }
 
+    public Task<IReadOnlyList<QuickOpenCandidate>> CollectCandidatesAsync(
+        IReadOnlyList<string> filesRootPaths,
+        IReadOnlyList<string> knownFiles,
+        string? gitRepoPath,
+        IEnumerable<(EditorDocumentId Id, string Title, string? FilePath, string Text)> openDocuments,
+        CancellationToken cancellationToken = default)
+        => Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return CollectCandidates(filesRootPaths, knownFiles, gitRepoPath, openDocuments);
+        }, cancellationToken);
+
     public IReadOnlyList<QuickOpenHit> SearchByName(IReadOnlyList<QuickOpenCandidate> candidates, string query)
     {
         string q = query?.Trim() ?? string.Empty;

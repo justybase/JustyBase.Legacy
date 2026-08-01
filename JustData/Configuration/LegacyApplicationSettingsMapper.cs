@@ -50,6 +50,31 @@ public static class LegacyApplicationSettingsMapper
         ApplyEmbeddedFimToLegacy(draft.EmbeddedFim, config);
     }
 
+    /// <summary>
+    /// Copies the live FIM settings maintained by the embedded FIM panel into
+    /// the Preferences form's transactional legacy buffer.
+    /// </summary>
+    public static void CopyEmbeddedFimSettings(IApplicationConfig source, IApplicationConfig destination)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(destination);
+
+        destination.EnableEmbeddedFimAi = source.EnableEmbeddedFimAi;
+        destination.EmbeddedFimModelId = source.EmbeddedFimModelId;
+        destination.EmbeddedFimDebounceMs = source.EmbeddedFimDebounceMs;
+        destination.EmbeddedFimDebounceSeconds = source.EmbeddedFimDebounceSeconds;
+        destination.EmbeddedFimMaxTokens = source.EmbeddedFimMaxTokens;
+        destination.EmbeddedFimPreset = source.EmbeddedFimPreset;
+        destination.EmbeddedFimMaxPromptTokens = source.EmbeddedFimMaxPromptTokens;
+        destination.EmbeddedFimPrefixPercentage = source.EmbeddedFimPrefixPercentage;
+        destination.EmbeddedFimSuffixPercentage = source.EmbeddedFimSuffixPercentage;
+        destination.EmbeddedFimContextWindow = source.EmbeddedFimContextWindow;
+        destination.EmbeddedFimPreferVulkan = source.EmbeddedFimPreferVulkan;
+        destination.EmbeddedFimGpuLayers = source.EmbeddedFimGpuLayers;
+        destination.EmbeddedFimAcceptedLicenseModelIds = source.EmbeddedFimAcceptedLicenseModelIds?.ToList() ?? [];
+        destination.EmbeddedFimAutoPresetApplied = source.EmbeddedFimAutoPresetApplied;
+    }
+
     public static SnippetSettings CloneSnippets(SnippetSettings snippets) => snippets.Clone();
 
     private static void MapAppearanceToDraft(IApplicationConfig source, AppearanceSettings target)

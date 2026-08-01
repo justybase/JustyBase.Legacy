@@ -11,6 +11,9 @@ public sealed class WinFormsSettingsThemePreviewAdapter : ISettingsThemePreview
     private readonly Action _repaint;
     private ApplicationSettingsDraft? _original;
 
+    /// <summary>Allows the Preferences form to postpone the expensive repaint until it closes.</summary>
+    public bool DeferCommitRepaint { get; set; }
+
     public WinFormsSettingsThemePreviewAdapter(IApplicationSettingsContext applicationSettingsContext, Action repaint)
     {
         _applicationSettingsContext = applicationSettingsContext ?? throw new ArgumentNullException(nameof(applicationSettingsContext));
@@ -28,7 +31,10 @@ public sealed class WinFormsSettingsThemePreviewAdapter : ISettingsThemePreview
     public void Commit(ApplicationSettingsSnapshot snapshot)
     {
         _original = null;
-        Repaint();
+        if (!DeferCommitRepaint)
+        {
+            Repaint();
+        }
     }
 
     public void Revert()

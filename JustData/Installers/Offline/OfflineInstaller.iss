@@ -52,6 +52,7 @@ ChangesAssociations=yes
 ; Remove the following line to run in administrative install mode (install for all users.)
 PrivilegesRequired=lowest
 OutputBaseFilename=JustyBaseLegacy-{#MyAppVersion}
+OutputDir=Output
 SetupIconFile=..\iconNew.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/fast
@@ -72,7 +73,9 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
                     
 [Files]
-Source: "{#SourcePath}\*"; DestDir: "{app}";  Excludes: "*.7z" ; Flags: ignoreversion recursesubdirs createallsubdirs
+; The staging directory is prepared by build-installer.ps1. Keep this guard as
+; a second line of defence if the script is invoked manually.
+Source: "{#SourcePath}\*"; DestDir: "{app}"; Excludes: "*.pdb,*.xml,*.7z"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Registry]
 Root: HKA; Subkey: "Software\Classes\{#MyAppAssocExt}\OpenWithProgids"; ValueType: string; ValueName: "{#MyAppAssocKey}"; ValueData: ""; Flags: uninsdeletevalue

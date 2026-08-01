@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
+using AppBase.Common;
 
 namespace JustyBaseLegacy.UI
 {
@@ -57,10 +58,10 @@ namespace JustyBaseLegacy.UI
             _preferenceSections.Clear();
             _preferenceSections.Add(new PreferenceSection(
                 "General",
-                "Import, export, startup and connection defaults.",
+                "Import, export and connection defaults.",
                 "◉",
                 tabGeneral,
-                "general import export csv xlsb encoding separator decimal delimiter newline startup login ctrl paste db2 netezza"));
+                "general import export csv xlsb encoding separator decimal delimiter newline login db2 netezza"));
             _preferenceSections.Add(new PreferenceSection(
                 "Colors & Editor",
                 "Editor colors, syntax styling and application theme.",
@@ -386,37 +387,37 @@ namespace JustyBaseLegacy.UI
             {
                 Name = "colorEditorHeader",
                 Dock = DockStyle.Top,
-                Height = 176
+                Height = ScalePreferencePixels(176)
             };
             var title = new Label
             {
                 AutoSize = true,
                 Font = new Font(Font, FontStyle.Bold),
-                Location = new Point(4, 2),
+                Location = new Point(ScalePreferencePixels(4), ScalePreferencePixels(2)),
                 Text = "Editor appearance"
             };
             var description = new Label
             {
                 AutoSize = true,
                 ForeColor = Color.FromArgb(108, 117, 125),
-                Location = new Point(4, 29),
+                Location = new Point(ScalePreferencePixels(4), ScalePreferencePixels(29)),
                 Text = "Choose a color below to change how the editor, results and navigation look."
             };
 
             checkBoxSpecialColoring.Text = "Use custom editor colors";
-            checkBoxSpecialColoring.Location = new Point(4, 55);
+            checkBoxSpecialColoring.Location = new Point(ScalePreferencePixels(4), ScalePreferencePixels(55));
             button3.Text = "Repaint main window";
-            button3.Location = new Point(4, 82);
+            button3.Location = new Point(ScalePreferencePixels(4), ScalePreferencePixels(82));
             button3.AutoSize = true;
-            button3.MinimumSize = new Size(170, 32);
+            button3.MinimumSize = new Size(ScalePreferencePixels(170), ScalePreferencePixels(32));
 
             _editorFontButton = new Button
             {
                 Name = "editorFontButton",
                 Text = "Editor font",
-                Location = new Point(4, 140),
+                Location = new Point(ScalePreferencePixels(4), ScalePreferencePixels(140)),
                 AutoSize = true,
-                MinimumSize = new Size(348, 32),
+                MinimumSize = new Size(ScalePreferencePixels(348), ScalePreferencePixels(32)),
                 FlatStyle = FlatStyle.Flat,
                 UseVisualStyleBackColor = false
             };
@@ -433,7 +434,7 @@ namespace JustyBaseLegacy.UI
                 Name = "colorEditorScrollPanel",
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
-                Padding = new Padding(0, 4, 8, 8)
+                Padding = new Padding(0, ScalePreferencePixels(4), ScalePreferencePixels(8), ScalePreferencePixels(8))
             };
             _colorEditorSections = new TableLayoutPanel
             {
@@ -579,6 +580,7 @@ namespace JustyBaseLegacy.UI
 
         private void RefreshPreferenceCardLayouts()
         {
+            RescalePreferenceCardHeights();
             foreach (Panel cards in _preferenceCardPanels)
             {
                 ResizePreferenceCards(cards);
@@ -592,11 +594,12 @@ namespace JustyBaseLegacy.UI
             var card = new GroupBox
             {
                 Text = title,
-                Height = height,
+                Height = ScalePreferencePixels(height),
                 Width = Math.Max(260, cards.ClientSize.Width - cards.Padding.Horizontal - 2),
                 Padding = new Padding(12, 30, 12, 12),
                 Margin = new Padding(0, 0, 0, 12),
-                Anchor = AnchorStyles.Left | AnchorStyles.Right
+                Anchor = AnchorStyles.Left | AnchorStyles.Right,
+                Tag = height
             };
             var table = new TableLayoutPanel
             {
@@ -632,8 +635,28 @@ namespace JustyBaseLegacy.UI
             table.Visible = true;
             body.Visible = true;
             card.PerformLayout();
+            int preferredBodyHeight = body.GetPreferredSize(new Size(Math.Max(260, card.Width - card.Padding.Horizontal), 0)).Height;
+            card.Height = Math.Max(card.Height, card.Padding.Vertical + text.Height + text.Margin.Bottom + preferredBodyHeight + 8);
             ResizePreferenceCards(cards);
             return card;
+        }
+
+        private int ScalePreferencePixels(int logicalPixels)
+        {
+            int dpi = DeviceDpi > 0 ? DeviceDpi : DpiScale.DefaultDpi;
+            return DpiScale.Scale(logicalPixels, dpi);
+        }
+
+        private void RescalePreferenceCardHeights()
+        {
+            foreach (Panel cards in _preferenceCardPanels)
+            {
+                foreach (GroupBox card in cards.Controls.OfType<GroupBox>())
+                {
+                    if (card.Tag is int logicalHeight)
+                        card.Height = ScalePreferencePixels(logicalHeight);
+                }
+            }
         }
 
         private static void AddFullRow(TableLayoutPanel body, Control control, int row = -1)
@@ -694,25 +717,13 @@ namespace JustyBaseLegacy.UI
             {
                 AddFullRow(body, cbImportExisting);
             });
-            AddPreferenceCard(cards, "Export / CSV", "Default separators and encoding used when exporting tabular data.", 222, body =>
+            AddPreferenceCard(cards, "Export / CSV", "Default separators and encoding used when exporting tabular data.", 320, body =>
             {
                 AddFullRow(body, cbUseXlsb);
                 AddField(body, "Column separator", tbCSVSep, "One character or string.");
                 AddField(body, "Decimal delimiter", tbCsvDecimalDelim);
                 AddField(body, "Row separator", tbSepRowsInExportedCsv, "For example \\r\\n or \\n.");
                 AddField(body, "Encoding", tbEncondingName, "UTF-8, UTF-16, ASCII or a code page.");
-            });
-            AddPreferenceCard(cards, "Paste behavior", "Select what Ctrl+V should do in the editor.", 146, body =>
-            {
-                AddFullRow(body, rbCtrlVAsk);
-                AddFullRow(body, rbCtrlVAuto);
-                AddFullRow(body, rbCtrlVNormal);
-            });
-            AddPreferenceCard(cards, "Startup", "Choose how the previous session and startup files are restored.", 270, body =>
-            {
-                AddFullRow(body, cbSimpleStarupRestore);
-                startupPathsDgv.Visible = true;
-                AddGrid(body, startupPathsDgv, 150);
             });
             AddPreferenceCard(cards, "Documentation links", "Open the vendor documentation for supported database connections.", 104, body =>
             {
@@ -744,8 +755,8 @@ namespace JustyBaseLegacy.UI
             add.Anchor = AnchorStyles.Left;
             add.Visible = true;
             add.AutoSize = false;
-            add.Width = 96;
-            add.Height = 30;
+            add.Width = ScalePreferencePixels(96);
+            add.Height = ScalePreferencePixels(30);
             split.Controls.Add(add, 0, 1);
             int row = body.RowCount++;
             body.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -882,7 +893,7 @@ namespace JustyBaseLegacy.UI
                 {
                     Dock = DockStyle.Fill,
                     Margin = new Padding(4),
-                    Height = 96,
+                    Height = ScalePreferencePixels(96),
                     TabIndex = _colorEditors.Count + 1
                 };
                 _colorEditors.Add(editor);
@@ -901,6 +912,28 @@ namespace JustyBaseLegacy.UI
             }
 
             UpdateEditorFontButton();
+        }
+
+        private void ApplyColorEditorDpiMetrics()
+        {
+            if (_colorEditorPanel is null)
+                return;
+
+            if (_colorEditorPanel.Controls["colorEditorHeader"] is Panel header)
+                header.Height = ScalePreferencePixels(176);
+
+            checkBoxSpecialColoring.Location = new Point(ScalePreferencePixels(4), ScalePreferencePixels(55));
+            button3.Location = new Point(ScalePreferencePixels(4), ScalePreferencePixels(82));
+            button3.MinimumSize = new Size(ScalePreferencePixels(170), ScalePreferencePixels(32));
+            if (_editorFontButton is not null)
+            {
+                _editorFontButton.Location = new Point(ScalePreferencePixels(4), ScalePreferencePixels(140));
+                _editorFontButton.MinimumSize = new Size(ScalePreferencePixels(348), ScalePreferencePixels(32));
+            }
+
+            _colorEditorScrollPanel.Padding = new Padding(0, ScalePreferencePixels(4), ScalePreferencePixels(8), ScalePreferencePixels(8));
+            foreach (ColorSettingControl editor in _colorEditors)
+                editor.Height = ScalePreferencePixels(96);
         }
 
         private void EditorFontButton_Click(object sender, EventArgs e)
@@ -1603,6 +1636,9 @@ namespace JustyBaseLegacy.UI
                 control.Height = (int)Math.Round(40 * scale);
             }
 
+            RescalePreferenceCardHeights();
+            RefreshPreferenceCardLayouts();
+            ApplyColorEditorDpiMetrics();
             UpdateNavigationItemsWidth();
         }
 

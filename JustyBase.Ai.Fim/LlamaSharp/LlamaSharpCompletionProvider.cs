@@ -18,6 +18,7 @@ public sealed class LlamaSharpModelHost : IAsyncDisposable, IDisposable
     private readonly IFimModelStore _modelStore;
     private readonly Func<int> _getGpuLayerCount;
     private readonly SemaphoreSlim _initGate = new(1, 1);
+    private readonly SemaphoreSlim _nativeUseGate = new(1, 1);
     private LLamaWeights? _weights;
     private ModelParams? _parameters;
     private StatelessExecutor? _executor;
@@ -60,7 +61,9 @@ public sealed class LlamaSharpModelHost : IAsyncDisposable, IDisposable
 
     public async Task EnsureLoadedAsync(IProgress<FimModelProgress>? progress = null, CancellationToken cancellationToken = default)
     {
-        await EnsureLoadedCoreAsync(allowDownload: true, progress, cancellationToken).ConfigureAwait(false);
+        await _nativeUseGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { await EnsureLoadedCoreAsync(allowDownload: true, progress, cancellationToken).ConfigureAwait(false); }
+        finally { _nativeUseGate.Release(); }
     }
 
     /// <summary>
@@ -68,19 +71,21 @@ public sealed class LlamaSharpModelHost : IAsyncDisposable, IDisposable
     /// </summary>
     public async Task<bool> TryEnsureLoadedIfPresentAsync(CancellationToken cancellationToken = default)
     {
+        await _nativeUseGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { return await TryEnsureLoadedIfPresentCoreAsync(cancellationToken).ConfigureAwait(false); }
+        finally { _nativeUseGate.Release(); }
+    }
+
+    private async Task<bool> TryEnsureLoadedIfPresentCoreAsync(CancellationToken cancellationToken)
+    {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var layers = EffectiveGpuLayerCount;
         if (IsLoaded
             && string.Equals(_loadedModelPath, _modelStore.LocalModelPath, StringComparison.OrdinalIgnoreCase)
             && _loadedGpuLayerCount == layers)
-        {
             return true;
-        }
-
         if (!_modelStore.IsModelPresent)
-        {
             return false;
-        }
 
         await EnsureLoadedCoreAsync(allowDownload: false, progress: null, cancellationToken).ConfigureAwait(false);
         return IsLoaded;
@@ -162,15 +167,14 @@ public sealed class LlamaSharpModelHost : IAsyncDisposable, IDisposable
     public async Task UnloadAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        await _initGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await _nativeUseGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            UnloadUnlocked();
+            await _initGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try { UnloadUnlocked(); }
+            finally { _initGate.Release(); }
         }
-        finally
-        {
-            _initGate.Release();
-        }
+        finally { _nativeUseGate.Release(); }
     }
 
     private void UnloadUnlocked()
@@ -208,12 +212,13 @@ public sealed class LlamaSharpModelHost : IAsyncDisposable, IDisposable
         ArgumentException.ThrowIfNullOrEmpty(prompt);
         ArgumentNullException.ThrowIfNull(antiPrompts);
 
-        if (!await TryEnsureLoadedIfPresentAsync(cancellationToken).ConfigureAwait(false))
+        await _nativeUseGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            return new FimInferTiming(string.Empty, 0, 0, 0);
-        }
+            if (!await TryEnsureLoadedIfPresentCoreAsync(cancellationToken).ConfigureAwait(false))
+                return new FimInferTiming(string.Empty, 0, 0, 0);
 
-        var executor = _executor ?? throw new InvalidOperationException("FIM executor not initialized.");
+            var executor = _executor ?? throw new InvalidOperationException("FIM executor not initialized.");
 
         using var samplingPipeline = new DefaultSamplingPipeline
         {
@@ -248,6 +253,8 @@ public sealed class LlamaSharpModelHost : IAsyncDisposable, IDisposable
             var trimmed = TrimAtAntiPrompts(raw, antiPrompts);
             return new FimInferTiming(trimmed, yields, raw.Length, sw.ElapsedMilliseconds);
         }, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _nativeUseGate.Release(); }
     }
 
     private static string TrimAtAntiPrompts(string text, IReadOnlyList<string> antiPrompts)
@@ -275,6 +282,7 @@ public sealed class LlamaSharpModelHost : IAsyncDisposable, IDisposable
         _parameters = null;
         _loadedModelPath = null;
         _initGate.Dispose();
+        _nativeUseGate.Dispose();
     }
 
     public ValueTask DisposeAsync()

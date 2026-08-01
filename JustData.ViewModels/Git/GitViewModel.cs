@@ -57,6 +57,7 @@ public sealed class GitViewModel : ObservableObject, IDisposable
         CommitCommand = new AsyncRelayCommand(CommitAsync, CanCommit);
         StageAllAndCommitCommand = new AsyncRelayCommand(StageAllAndCommitAsync, CanStageAllAndCommit);
         StageAllCommand = new AsyncRelayCommand(StageAllAsync, CanMutate);
+        UnstageAllCommand = new AsyncRelayCommand(UnstageAllAsync, CanMutate);
         PullCommand = new AsyncRelayCommand(PullAsync, CanMutate);
         PushCommand = new AsyncRelayCommand(PushAsync, CanMutate);
         SyncCommand = new AsyncRelayCommand(SyncAsync, CanMutate);
@@ -101,6 +102,7 @@ public sealed class GitViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(HasUncommittedChanges));
                 OnPropertyChanged(nameof(BranchDisplay));
                 StageAllAndCommitCommand.NotifyCanExecuteChanged();
+                UnstageAllCommand.NotifyCanExecuteChanged();
                 GenerateCommitMessageCommand.NotifyCanExecuteChanged();
             }
         }
@@ -280,6 +282,7 @@ public sealed class GitViewModel : ObservableObject, IDisposable
     public IAsyncRelayCommand CommitCommand { get; }
     public IAsyncRelayCommand StageAllAndCommitCommand { get; }
     public IAsyncRelayCommand StageAllCommand { get; }
+    public IAsyncRelayCommand UnstageAllCommand { get; }
     public IAsyncRelayCommand PullCommand { get; }
     public IAsyncRelayCommand PushCommand { get; }
     public IAsyncRelayCommand SyncCommand { get; }
@@ -820,6 +823,29 @@ public sealed class GitViewModel : ObservableObject, IDisposable
         try
         {
             GitCommandResult result = await _gitService.StageAllAsync(SelectedRepoPath!, _lifetime.Token).ConfigureAwait(false);
+            if (!result.Succeeded)
+                await ReportErrorAsync(Truncate(result.CombinedOutput)).ConfigureAwait(false);
+            else
+                await RefreshStatusOnlyAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task UnstageAllAsync()
+    {
+        if (!CanMutate() || StagedCount == 0)
+            return;
+
+        IsBusy = true;
+        try
+        {
+            string[] paths = StagedChanges.Select(c => c.Path).ToArray();
+            GitCommandResult result = await _gitService
+                .UnstageAsync(SelectedRepoPath!, paths, _lifetime.Token)
+                .ConfigureAwait(false);
             if (!result.Succeeded)
                 await ReportErrorAsync(Truncate(result.CombinedOutput)).ConfigureAwait(false);
             else
@@ -1442,6 +1468,7 @@ public sealed class GitViewModel : ObservableObject, IDisposable
         CommitCommand.NotifyCanExecuteChanged();
         StageAllAndCommitCommand.NotifyCanExecuteChanged();
         StageAllCommand.NotifyCanExecuteChanged();
+        UnstageAllCommand.NotifyCanExecuteChanged();
         PullCommand.NotifyCanExecuteChanged();
         PushCommand.NotifyCanExecuteChanged();
         SyncCommand.NotifyCanExecuteChanged();

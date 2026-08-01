@@ -595,7 +595,7 @@ public sealed partial class ImportExportTasks : IImportExportTasks
                     if (RowCounts != 123123124 && RowCounts > 0)
                         form?.SetProgressBarValue(Math.Min(100, (int)(100 * i / RowCounts)));
                     else if (i % 10_000 == 0)
-                        form?.SetProgressBarValue(Math.Min(100, (int)i % 100));
+                        form?.SetProgressBarValue(Math.Min(99, (int)(i / 10_000)));
                 },
                 progressEvery: pos)
             .ContinueWith(

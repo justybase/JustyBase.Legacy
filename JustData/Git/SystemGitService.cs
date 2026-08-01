@@ -601,16 +601,18 @@ public sealed class SystemGitService : IGitService
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();
         var exitTcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stdoutClosedTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stderrClosedTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         process.OutputDataReceived += (_, e) =>
         {
-            if (e.Data is not null)
-                stdout.AppendLine(e.Data);
+            if (e.Data is not null) stdout.AppendLine(e.Data);
+            else stdoutClosedTcs.TrySetResult();
         };
         process.ErrorDataReceived += (_, e) =>
         {
-            if (e.Data is not null)
-                stderr.AppendLine(e.Data);
+            if (e.Data is not null) stderr.AppendLine(e.Data);
+            else stderrClosedTcs.TrySetResult();
         };
         process.Exited += (_, _) =>
         {
@@ -651,6 +653,7 @@ public sealed class SystemGitService : IGitService
             }))
             {
                 int exitCode = await exitTcs.Task.ConfigureAwait(false);
+                await Task.WhenAll(stdoutClosedTcs.Task, stderrClosedTcs.Task).ConfigureAwait(false);
                 string outText = stdout.ToString();
                 string errText = stderr.ToString();
                 if (trimOutput)

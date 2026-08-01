@@ -22,7 +22,12 @@ public static class FimServiceCollectionExtensions
             var config = sp.GetRequiredService<IApplicationSettingsContext>().Config;
             return new HuggingFaceFimModelStore(catalog, () => config.EmbeddedFimModelId);
         });
-        collection.AddSingleton<IFimPromptBuilder, QwenFimPromptBuilder>();
+        collection.AddSingleton<IFimPromptBuilder>(sp =>
+        {
+            var catalog = sp.GetRequiredService<IFimModelCatalog>();
+            var config = sp.GetRequiredService<IApplicationSettingsContext>().Config;
+            return new CatalogFimPromptBuilder(catalog, () => config.EmbeddedFimModelId);
+        });
         collection.AddSingleton(sp =>
         {
             var store = sp.GetRequiredService<IFimModelStore>();

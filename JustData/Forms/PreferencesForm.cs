@@ -8,6 +8,7 @@ using DatabaseDataGridView.WinForms;
 using DatabaseDataGridView.WinForms.Coloring;
 using JustData.Application.Settings;
 using JustData.ViewModels.Preferences;
+using JustyBaseLegacy.UI.Controls;
 using JustyBaseLegacy.UI.Configuration;
 using System;
 using System.Collections.Generic;
@@ -15,6 +16,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Threading;
 using System.Windows.Forms;
 
 
@@ -34,11 +36,13 @@ namespace JustyBaseLegacy.UI
         private readonly Action _saveRecentFiles;
         private readonly IUiHelperService _uiHelperService;
         private readonly IColorTheme _colorize;
+        private readonly WinFormsSettingsThemePreviewAdapter _themePreviewAdapter;
         private readonly PreferencesViewModel _settingsViewModel;
         private SnippetSettings _pendingSnippets = new();
         private bool _specialColoringHandlerAttached;
         private readonly JustyBase.Ai.Fim.Download.IFimModelCatalog? _fimCatalog;
         private readonly JustyBaseLegacy.UI.Fim.IFimModelBootstrapService? _fimBootstrap;
+        private EmbeddedFimPreferencesPanel? _embeddedFimPanel;
 
         public PreferencesForm(Action repaintApplication, Action saveManySqlToDisk,
             IApplicationSettingsContext applicationSettingsContext,
@@ -63,9 +67,17 @@ namespace JustyBaseLegacy.UI
             _config = _applicationSettingsContext.Config;
             _fimCatalog = fimCatalog;
             _fimBootstrap = fimBootstrap;
+            _themePreviewAdapter = new WinFormsSettingsThemePreviewAdapter(
+                _applicationSettingsContext,
+                _repaintApplication)
+            {
+                DeferCommitRepaint = true
+            };
             _settingsViewModel = settingsViewModel ?? new PreferencesViewModel(
                 new WinFormsApplicationSettingsStore(_applicationSettingsContext, _netezzaAutocompleteState),
-                new WinFormsSettingsThemePreviewAdapter(_applicationSettingsContext, _repaintApplication));
+                _themePreviewAdapter);
+            DoubleBuffered = true;
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
             InitializeComponent();
             _colorize = colorTheme;
             BuildModernLayout();
@@ -119,6 +131,7 @@ namespace JustyBaseLegacy.UI
             {
                 Dock = DockStyle.Fill
             };
+            _embeddedFimPanel = panel;
             _tabEmbeddedFim.Controls.Add(panel);
         }
 
@@ -796,6 +809,7 @@ namespace JustyBaseLegacy.UI
 
         private void SyncViewModelFromLegacyBuffer()
         {
+            _embeddedFimPanel?.ApplyCurrentSettingsTo(_config);
             _settingsViewModel.ReplaceDraft(LegacyApplicationSettingsMapper.ToSnapshot(_config, _pendingSnippets).ToDraft());
         }
 
@@ -823,7 +837,7 @@ namespace JustyBaseLegacy.UI
             TryNewColors();
         }
 
-        private async Task<bool> SaveAsync()
+        private async Task<bool> SaveAsync(bool deferRepaint = false)
         {
             TextVsDataGridAction(dgvStandard, tbStandard);
             TextVsDataGridAction(dgvQuick, tbQuick);
@@ -834,8 +848,15 @@ namespace JustyBaseLegacy.UI
             SyncViewModelFromLegacyBuffer();
             await _settingsViewModel.SaveAsync();
 
-            RePaint2();
+            if (!deferRepaint)
+                RePaint2();
             return _settingsViewModel.IsSaved;
+        }
+
+        /// <summary>Schedules the expensive repaint after the form has closed.</summary>
+        private void FireDeferredRepaint()
+        {
+            SynchronizationContext.Current?.Post(_ => RePaint2(), null);
         }
 
         private async Task ObserveAsync(Task task)
@@ -1160,8 +1181,14 @@ namespace JustyBaseLegacy.UI
         {
             try
             {
-                if (await SaveAsync())
-                    this.Close();
+                if (await SaveAsync(deferRepaint: true))
+                {
+                    // The repaint walks the whole main UI and can take long
+                    // enough to make WinForms report "Not responding".
+                    Hide();
+                    Close();
+                    FireDeferredRepaint();
+                }
             }
             catch (Exception exception)
             {
@@ -1171,9 +1198,14 @@ namespace JustyBaseLegacy.UI
 
         private async void BtRestart2_Click(object sender, EventArgs e)
         {
+            bool saved = false;
             try
             {
-                await SaveAsync();
+                if (await SaveAsync(deferRepaint: true))
+                {
+                    saved = true;
+                    Hide();
+                }
             }
             catch (Exception exception)
             {
@@ -1184,6 +1216,14 @@ namespace JustyBaseLegacy.UI
             {
                 Application.Restart();
                 Environment.Exit(0);
+            }
+            else
+            {
+                Close();
+            }
+            if (saved)
+            {
+                FireDeferredRepaint();
             }
         }
 

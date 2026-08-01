@@ -149,6 +149,14 @@ Self-contained publish:
 dotnet publish JustData/JustData.csproj -c Release -r win-x64 --self-contained true
 ```
 
+Build the local Native AOT installer (requires Inno Setup 6):
+
+```powershell
+./scripts/build-installer.ps1 -Version 1.0.0.0
+```
+
+The script recreates the publish staging directory on every run, removes development symbols/documentation files, and leaves exactly one installer in `JustData/Installers/Offline/Output`.
+
 ---
 
 ## Security
