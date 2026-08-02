@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0.6] - 2026-08-02
+
+### Fixed
+- Preserve ghost continuation across FastColoredTextBox's intermediate clear notification while replacing an autocomplete fragment.
+
 ## [1.1.0.5] - 2026-08-02
 
 ### Fixed

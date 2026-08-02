@@ -140,6 +140,15 @@ public sealed class FctbInlineCompletionController : IDisposable
     {
         if (_completionAcceptancePending && _completionSelection is not null)
         {
+            if (!IsCompletionInserted(_completionSelection))
+            {
+                // AutocompleteMenu replaces a selected fragment as two
+                // commands (clear, then insert). Ignore the intermediate
+                // clear notification and keep waiting for the inserted item.
+                ClearGhostText();
+                return;
+            }
+
             var ghost = HasGhostText ? _ghostText ?? string.Empty : string.Empty;
             var continuation = _completionContinuationCandidate
                 ?? (_ghostCompletionPrefixLength >= ghost.Length
@@ -514,6 +523,20 @@ public sealed class FctbInlineCompletionController : IDisposable
         return _ghostCompletionPrefixLength >= _ghostText.Length
             ? null
             : _ghostText[_ghostCompletionPrefixLength..];
+    }
+
+    private bool IsCompletionInserted(CompletionSelectionSnapshot selection)
+    {
+        var start = Math.Clamp(selection.ReplacementStartOffset, 0, _editor.TextLength);
+        var insertText = selection.InsertText ?? string.Empty;
+        var end = start + insertText.Length;
+        if (_editor.SelectionStart < end || end > _editor.TextLength)
+            return false;
+
+        return string.Equals(
+            _editor.Text.Substring(start, insertText.Length),
+            insertText,
+            StringComparison.Ordinal);
     }
 
     private void QueueCompletionContinuation(string continuation)
