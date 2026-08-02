@@ -29,6 +29,7 @@ public sealed class FctbInlineCompletionController : IDisposable
     private bool _completionAcceptancePending;
     private bool _completionContinuationActive;
     private bool _completionTabInFlight;
+    private string? _pendingCompletionContinuation;
     private int _ghostCompletionPrefixLength;
 
     public FctbInlineCompletionController(
@@ -149,11 +150,12 @@ public sealed class FctbInlineCompletionController : IDisposable
             CancelPending();
             ClearGhostText();
             if (!string.IsNullOrEmpty(continuation))
-                SetGhostText(_editor.SelectionStart, continuation);
+                QueueCompletionContinuation(continuation);
 
             return;
         }
 
+        _pendingCompletionContinuation = null;
         _completionContinuationActive = false;
         if (HasGhostText)
             ClearGhostText();
@@ -164,6 +166,12 @@ public sealed class FctbInlineCompletionController : IDisposable
     {
         if (_completionAcceptancePending)
             return;
+
+        if (_pendingCompletionContinuation is not null)
+        {
+            ApplyPendingCompletionContinuation();
+            return;
+        }
 
         if (HasGhostText && _ghostOffset != _editor.SelectionStart)
             ClearGhostText();
@@ -225,6 +233,7 @@ public sealed class FctbInlineCompletionController : IDisposable
 
         _completionAcceptancePending = false;
         _completionContinuationActive = false;
+        _pendingCompletionContinuation = null;
         _completionSelection = CreateCompletionSelection();
         CancelPending();
         ClearGhostText();
@@ -257,6 +266,7 @@ public sealed class FctbInlineCompletionController : IDisposable
             return;
         }
 
+        _pendingCompletionContinuation = null;
         _completionSelection = null;
         CancelPending();
         ClearGhostText();
@@ -276,6 +286,7 @@ public sealed class FctbInlineCompletionController : IDisposable
         _completionAcceptancePending = false;
         _completionSelection = null;
         _completionContinuationActive = false;
+        _pendingCompletionContinuation = null;
         CancelPending();
         ClearGhostText();
     }
@@ -478,6 +489,28 @@ public sealed class FctbInlineCompletionController : IDisposable
         _ghostOffset = offset;
         _ghostText = text;
         _editor.Invalidate();
+    }
+
+    private void QueueCompletionContinuation(string continuation)
+    {
+        _pendingCompletionContinuation = continuation;
+        if (_editor.IsDisposed || !_editor.IsHandleCreated)
+        {
+            ApplyPendingCompletionContinuation();
+            return;
+        }
+
+        _editor.BeginInvoke((Action)ApplyPendingCompletionContinuation);
+    }
+
+    private void ApplyPendingCompletionContinuation()
+    {
+        var continuation = _pendingCompletionContinuation;
+        _pendingCompletionContinuation = null;
+        if (string.IsNullOrEmpty(continuation) || _editor.IsDisposed)
+            return;
+
+        SetGhostText(_editor.SelectionStart, continuation);
     }
 
     private static string NormalizeContinuation(string suggestion, CompletionSelectionSnapshot? selection)

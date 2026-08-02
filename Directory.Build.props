@@ -4,7 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <NoWarn>$(NoWarn);WFO1000</NoWarn>
-    <Version>1.1.0.2</Version>
+    <Version>1.1.0.3</Version>
     <Authors>Krzysztof Duśko</Authors>
     <PackageLicenseExpression>LGPL-3.0-or-later</PackageLicenseExpression>
     <Deterministic>true</Deterministic>
