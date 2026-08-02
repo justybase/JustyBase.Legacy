@@ -188,8 +188,9 @@ public sealed class FctbInlineCompletionController : IDisposable
             && e.Modifiers == Keys.None
             && _completionMenu?.Visible == true)
         {
-            _completionAcceptancePending = _completionSelection is not null;
             _completionContinuationCandidate = CaptureCompletionContinuation();
+            _completionAcceptancePending = _completionSelection is not null
+                && _completionContinuationCandidate is not null;
             _completionTabInFlight = true;
         }
     }
@@ -290,8 +291,8 @@ public sealed class FctbInlineCompletionController : IDisposable
             // AutocompleteMenu raises Selecting immediately before replacing
             // the fragment. Capture the current continuation before the
             // editor starts raising TextChanged/SelectionChanged events.
-            _completionAcceptancePending = true;
             _completionContinuationCandidate = CaptureCompletionContinuation();
+            _completionAcceptancePending = _completionContinuationCandidate is not null;
         }
     }
 
