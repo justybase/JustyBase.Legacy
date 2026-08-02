@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using AppBase.Common.Interfaces;
 using FastColoredTextBoxNS;
+using FastColoredTextBoxNS.Helpers;
 
 namespace JustyBaseLegacy.UI.Fim;
 
@@ -38,7 +39,8 @@ public sealed class FimEditorHost : IDisposable
                     return FctbInlineCompletionController.DebounceMsFromSeconds(cfg.EmbeddedFimDebounceSeconds);
                 return FctbInlineCompletionController.DefaultDebounceMs;
             },
-            isEnabledProvider: () => _settings.Config.EnableEmbeddedFimAi);
+            isEnabledProvider: () => _settings.Config.EnableEmbeddedFimAi,
+            completionMenu: (editor.Tag as TbInfo)?.PopupMenu);
         controller.Attach();
         _controllers.Add(editor, controller);
 

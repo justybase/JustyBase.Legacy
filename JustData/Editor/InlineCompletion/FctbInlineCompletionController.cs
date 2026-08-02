@@ -15,6 +15,7 @@ public sealed class FctbInlineCompletionController : IDisposable
     public static IReadOnlyList<int> AllowedDebounceMs { get; } = [250, 400, 600, 1000, 2000, 3000];
 
     private readonly FastColoredTextBox _editor;
+    private readonly AutocompleteMenu? _completionMenu;
     private readonly Func<InlineCompletionContext, CancellationToken, Task<string?>> _completeAsync;
     private readonly Func<int>? _getDebounceMs;
     private readonly Func<bool>? _isEnabledProvider;
@@ -24,18 +25,25 @@ public sealed class FctbInlineCompletionController : IDisposable
     private int _ghostOffset = -1;
     private bool _attached;
     private bool _disposed;
+    private CompletionSelectionSnapshot? _completionSelection;
+    private bool _completionAcceptancePending;
+    private bool _completionContinuationActive;
+    private bool _completionTabInFlight;
+    private int _ghostCompletionPrefixLength;
 
     public FctbInlineCompletionController(
         FastColoredTextBox editor,
         Func<InlineCompletionContext, CancellationToken, Task<string?>> completeAsync,
         int debounceMs = DefaultDebounceMs,
         Func<int>? getDebounceMs = null,
-        Func<bool>? isEnabledProvider = null)
+        Func<bool>? isEnabledProvider = null,
+        AutocompleteMenu? completionMenu = null)
     {
         _editor = editor ?? throw new ArgumentNullException(nameof(editor));
         _completeAsync = completeAsync ?? throw new ArgumentNullException(nameof(completeAsync));
         _getDebounceMs = getDebounceMs;
         _isEnabledProvider = isEnabledProvider;
+        _completionMenu = completionMenu;
         _debounceMs = SnapDebounceMs(debounceMs);
     }
 
@@ -80,8 +88,16 @@ public sealed class FctbInlineCompletionController : IDisposable
 
         _editor.TextChanged += OnTextChanged;
         _editor.SelectionChanged += OnSelectionChanged;
+        _editor.PreviewKeyDown += OnPreviewKeyDown;
         _editor.KeyDown += OnKeyDown;
         _editor.PaintLine += OnPaintLine;
+        if (_completionMenu is not null)
+        {
+            _completionMenu.Items.FocussedItemIndexChanged += OnCompletionSelectionChanged;
+            _completionMenu.VisibleChanged += OnCompletionMenuVisibleChanged;
+            _completionMenu.Selecting += OnCompletionSelecting;
+            _completionMenu.Selected += OnCompletionSelected;
+        }
         _attached = true;
     }
 
@@ -94,8 +110,16 @@ public sealed class FctbInlineCompletionController : IDisposable
         ClearGhostText();
         _editor.TextChanged -= OnTextChanged;
         _editor.SelectionChanged -= OnSelectionChanged;
+        _editor.PreviewKeyDown -= OnPreviewKeyDown;
         _editor.KeyDown -= OnKeyDown;
         _editor.PaintLine -= OnPaintLine;
+        if (_completionMenu is not null)
+        {
+            _completionMenu.Items.FocussedItemIndexChanged -= OnCompletionSelectionChanged;
+            _completionMenu.VisibleChanged -= OnCompletionMenuVisibleChanged;
+            _completionMenu.Selecting -= OnCompletionSelecting;
+            _completionMenu.Selected -= OnCompletionSelected;
+        }
         _attached = false;
     }
 
@@ -112,6 +136,25 @@ public sealed class FctbInlineCompletionController : IDisposable
 
     private void OnTextChanged(object? sender, TextChangedEventArgs e)
     {
+        if (_completionAcceptancePending && _completionSelection is not null)
+        {
+            var ghost = HasGhostText ? _ghostText ?? string.Empty : string.Empty;
+            var continuation = _ghostCompletionPrefixLength >= ghost.Length
+                ? string.Empty
+                : ghost[_ghostCompletionPrefixLength..];
+
+            _completionAcceptancePending = false;
+            _completionSelection = null;
+            _completionContinuationActive = !string.IsNullOrEmpty(continuation);
+            CancelPending();
+            ClearGhostText();
+            if (!string.IsNullOrEmpty(continuation))
+                SetGhostText(_editor.SelectionStart, continuation);
+
+            return;
+        }
+
+        _completionContinuationActive = false;
         if (HasGhostText)
             ClearGhostText();
         Schedule();
@@ -119,15 +162,39 @@ public sealed class FctbInlineCompletionController : IDisposable
 
     private void OnSelectionChanged(object? sender, EventArgs e)
     {
+        if (_completionAcceptancePending)
+            return;
+
         if (HasGhostText && _ghostOffset != _editor.SelectionStart)
             ClearGhostText();
         Schedule();
     }
 
-    private void OnKeyDown(object? sender, KeyEventArgs e)
+    private void OnPreviewKeyDown(object? sender, PreviewKeyDownEventArgs e)
     {
         if (e.KeyCode == Keys.Tab
             && e.Modifiers == Keys.None
+            && _completionMenu?.Visible == true)
+        {
+            _completionAcceptancePending = _completionSelection is not null;
+            _completionTabInFlight = true;
+        }
+    }
+
+    private void OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (_completionTabInFlight && e.KeyCode == Keys.Tab && e.Modifiers == Keys.None)
+        {
+            _completionTabInFlight = false;
+            return;
+        }
+
+        if (_completionAcceptancePending && e.KeyCode == Keys.Tab && e.Modifiers == Keys.None)
+            return;
+
+        if (e.KeyCode == Keys.Tab
+            && e.Modifiers == Keys.None
+            && _completionMenu?.Visible != true
             && HasGhostText
             && !string.IsNullOrEmpty(_ghostText))
         {
@@ -146,9 +213,93 @@ public sealed class FctbInlineCompletionController : IDisposable
 
         if (e.KeyCode is Keys.Left or Keys.Right or Keys.Up or Keys.Down)
         {
-            if (HasGhostText)
+            if (_completionMenu?.Visible != true && HasGhostText)
                 ClearGhostText();
         }
+    }
+
+    private void OnCompletionSelectionChanged(object? sender, EventArgs e)
+    {
+        if (_completionMenu?.Visible != true)
+            return;
+
+        _completionAcceptancePending = false;
+        _completionContinuationActive = false;
+        _completionSelection = CreateCompletionSelection();
+        CancelPending();
+        ClearGhostText();
+
+        if (_completionSelection is not null)
+        {
+            var visibleSeed = GetVisibleCompletionText(_completionSelection);
+            _ghostCompletionPrefixLength = visibleSeed.Length;
+            if (!string.IsNullOrEmpty(visibleSeed))
+                SetGhostText(_editor.SelectionStart, visibleSeed);
+        }
+
+        Schedule();
+    }
+
+    private void OnCompletionMenuVisibleChanged(object? sender, EventArgs e)
+    {
+        if (_completionMenu?.Visible == true)
+        {
+            OnCompletionSelectionChanged(sender, e);
+            return;
+        }
+
+        if (_completionAcceptancePending)
+            return;
+
+        if (_completionContinuationActive)
+        {
+            _completionContinuationActive = false;
+            return;
+        }
+
+        _completionSelection = null;
+        CancelPending();
+        ClearGhostText();
+    }
+
+    private void OnCompletionSelecting(object? sender, SelectingEventArgs e)
+    {
+        if (_completionMenu?.Visible == true && _completionSelection is null)
+            _completionSelection = CreateCompletionSelection(e.Item);
+    }
+
+    private void OnCompletionSelected(object? sender, SelectedEventArgs e)
+    {
+        if (!_completionAcceptancePending)
+            return;
+
+        _completionAcceptancePending = false;
+        _completionSelection = null;
+        _completionContinuationActive = false;
+        CancelPending();
+        ClearGhostText();
+    }
+
+    private CompletionSelectionSnapshot? CreateCompletionSelection(AutocompleteItem? item = null)
+    {
+        item ??= _completionMenu?.Items.FocussedItem;
+        if (item is null || _completionMenu is null)
+            return null;
+
+        var end = Math.Clamp(_editor.SelectionStart, 0, _editor.TextLength);
+        var fragmentText = _completionMenu.Fragment?.Text ?? string.Empty;
+        var start = Math.Clamp(end - fragmentText.Length, 0, end);
+        return new CompletionSelectionSnapshot(item.GetTextForReplace(), start, end);
+    }
+
+    private string GetVisibleCompletionText(CompletionSelectionSnapshot selection)
+    {
+        var start = Math.Clamp(selection.ReplacementStartOffset, 0, _editor.TextLength);
+        var end = Math.Clamp(selection.ReplacementEndOffset, start, _editor.TextLength);
+        var typed = _editor.Text.Substring(start, Math.Min(end, _editor.SelectionStart) - start);
+        return selection.InsertText.StartsWith(typed, StringComparison.OrdinalIgnoreCase)
+            ? selection.InsertText[typed.Length..]
+            : selection.InsertText;
     }
 
     private void OnPaintLine(object? sender, PaintLineEventArgs e)
@@ -213,6 +364,7 @@ public sealed class FctbInlineCompletionController : IDisposable
 
             string documentText = string.Empty;
             int caret = 0;
+            CompletionSelectionSnapshot? completionSelection = null;
             if (_editor.IsDisposed || !_editor.IsHandleCreated)
                 return;
 
@@ -220,13 +372,14 @@ public sealed class FctbInlineCompletionController : IDisposable
             {
                 documentText = _editor.Text;
                 caret = _editor.SelectionStart;
+                completionSelection = _completionSelection;
             }).ConfigureAwait(false);
 
             if (token.IsCancellationRequested || string.IsNullOrWhiteSpace(documentText))
                 return;
 
             var suggestion = await _completeAsync(
-                new InlineCompletionContext(documentText, caret),
+                new InlineCompletionContext(documentText, caret, completionSelection),
                 token).ConfigureAwait(false);
 
             if (token.IsCancellationRequested || string.IsNullOrEmpty(suggestion))
@@ -234,12 +387,17 @@ public sealed class FctbInlineCompletionController : IDisposable
 
             await InvokeOnUiAsync(() =>
             {
-                if (token.IsCancellationRequested || _editor.SelectionStart != caret)
+                if (token.IsCancellationRequested
+                    || _editor.SelectionStart != caret
+                    || !Equals(_completionSelection, completionSelection))
                     return;
 
-                _ghostOffset = caret;
-                _ghostText = suggestion;
-                _editor.Invalidate();
+                var continuation = NormalizeContinuation(suggestion, completionSelection);
+                var visibleSeed = completionSelection is null
+                    ? string.Empty
+                    : GetVisibleCompletionText(completionSelection);
+                _ghostCompletionPrefixLength = visibleSeed.Length;
+                SetGhostText(caret, visibleSeed + continuation);
             }).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -297,11 +455,39 @@ public sealed class FctbInlineCompletionController : IDisposable
     private void ClearGhostText()
     {
         if (!HasGhostText)
+        {
+            _ghostCompletionPrefixLength = 0;
             return;
+        }
 
         _ghostText = null;
         _ghostOffset = -1;
+        _ghostCompletionPrefixLength = 0;
         if (!_editor.IsDisposed && _editor.IsHandleCreated)
             _editor.Invalidate();
+    }
+
+    private void SetGhostText(int offset, string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            ClearGhostText();
+            return;
+        }
+
+        _ghostOffset = offset;
+        _ghostText = text;
+        _editor.Invalidate();
+    }
+
+    private static string NormalizeContinuation(string suggestion, CompletionSelectionSnapshot? selection)
+    {
+        if (selection is null || string.IsNullOrEmpty(suggestion))
+            return suggestion;
+
+        var selectedText = selection.InsertText;
+        return suggestion.StartsWith(selectedText, StringComparison.OrdinalIgnoreCase)
+            ? suggestion[selectedText.Length..]
+            : suggestion;
     }
 }

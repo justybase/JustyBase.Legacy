@@ -39,9 +39,10 @@ public sealed class FimInlineCompletionBridge
         try
         {
             var budget = _getBudget();
+            var (promptText, promptCaret) = BuildPromptDocument(context);
             var (prefix, suffix) = FimContextExtractor.Extract(
-                context.DocumentText,
-                context.CaretOffset,
+                promptText,
+                promptCaret,
                 budget.MaxPromptTokens,
                 budget.PrefixPercentage,
                 budget.SuffixPercentage);
@@ -70,6 +71,19 @@ public sealed class FimInlineCompletionBridge
             return null;
         }
     }
+
+    private static (string Text, int CaretOffset) BuildPromptDocument(InlineCompletionContext context)
+    {
+        var selection = context.CompletionSelection;
+        if (selection is null)
+            return (context.DocumentText, context.CaretOffset);
+
+        var documentText = context.DocumentText;
+        var caret = Math.Clamp(context.CaretOffset, 0, documentText.Length);
+        var start = Math.Clamp(selection.ReplacementStartOffset, 0, caret);
+        var virtualText = string.Concat(documentText[..start], selection.InsertText, documentText[caret..]);
+        return (virtualText, start + selection.InsertText.Length);
+    }
 }
 
 public readonly record struct FimPromptBudget(
@@ -81,4 +95,12 @@ public readonly record struct FimPromptBudget(
     public static FimPromptBudget MediumDefault { get; } = new(1536, 0.65, 0.35, 50);
 }
 
-public readonly record struct InlineCompletionContext(string DocumentText, int CaretOffset);
+public sealed record CompletionSelectionSnapshot(
+    string InsertText,
+    int ReplacementStartOffset,
+    int ReplacementEndOffset);
+
+public readonly record struct InlineCompletionContext(
+    string DocumentText,
+    int CaretOffset,
+    CompletionSelectionSnapshot? CompletionSelection = null);
