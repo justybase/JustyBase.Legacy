@@ -29,6 +29,7 @@ public sealed class FctbInlineCompletionController : IDisposable
     private bool _completionAcceptancePending;
     private bool _completionContinuationActive;
     private bool _completionTabInFlight;
+    private string? _completionContinuationCandidate;
     private string? _pendingCompletionContinuation;
     private int _ghostCompletionPrefixLength;
 
@@ -140,11 +141,13 @@ public sealed class FctbInlineCompletionController : IDisposable
         if (_completionAcceptancePending && _completionSelection is not null)
         {
             var ghost = HasGhostText ? _ghostText ?? string.Empty : string.Empty;
-            var continuation = _ghostCompletionPrefixLength >= ghost.Length
-                ? string.Empty
-                : ghost[_ghostCompletionPrefixLength..];
+            var continuation = _completionContinuationCandidate
+                ?? (_ghostCompletionPrefixLength >= ghost.Length
+                    ? string.Empty
+                    : ghost[_ghostCompletionPrefixLength..]);
 
             _completionAcceptancePending = false;
+            _completionContinuationCandidate = null;
             _completionSelection = null;
             _completionContinuationActive = !string.IsNullOrEmpty(continuation);
             CancelPending();
@@ -155,6 +158,7 @@ public sealed class FctbInlineCompletionController : IDisposable
             return;
         }
 
+        _completionContinuationCandidate = null;
         _pendingCompletionContinuation = null;
         _completionContinuationActive = false;
         if (HasGhostText)
@@ -185,6 +189,7 @@ public sealed class FctbInlineCompletionController : IDisposable
             && _completionMenu?.Visible == true)
         {
             _completionAcceptancePending = _completionSelection is not null;
+            _completionContinuationCandidate = CaptureCompletionContinuation();
             _completionTabInFlight = true;
         }
     }
@@ -233,6 +238,7 @@ public sealed class FctbInlineCompletionController : IDisposable
 
         _completionAcceptancePending = false;
         _completionContinuationActive = false;
+        _completionContinuationCandidate = null;
         _pendingCompletionContinuation = null;
         _completionSelection = CreateCompletionSelection();
         CancelPending();
@@ -266,6 +272,7 @@ public sealed class FctbInlineCompletionController : IDisposable
             return;
         }
 
+        _completionContinuationCandidate = null;
         _pendingCompletionContinuation = null;
         _completionSelection = null;
         CancelPending();
@@ -274,8 +281,18 @@ public sealed class FctbInlineCompletionController : IDisposable
 
     private void OnCompletionSelecting(object? sender, SelectingEventArgs e)
     {
-        if (_completionMenu?.Visible == true && _completionSelection is null)
-            _completionSelection = CreateCompletionSelection(e.Item);
+        if (_completionMenu?.Visible != true)
+            return;
+
+        _completionSelection ??= CreateCompletionSelection(e.Item);
+        if (_completionSelection is not null)
+        {
+            // AutocompleteMenu raises Selecting immediately before replacing
+            // the fragment. Capture the current continuation before the
+            // editor starts raising TextChanged/SelectionChanged events.
+            _completionAcceptancePending = true;
+            _completionContinuationCandidate = CaptureCompletionContinuation();
+        }
     }
 
     private void OnCompletionSelected(object? sender, SelectedEventArgs e)
@@ -283,12 +300,9 @@ public sealed class FctbInlineCompletionController : IDisposable
         if (!_completionAcceptancePending)
             return;
 
-        _completionAcceptancePending = false;
-        _completionSelection = null;
-        _completionContinuationActive = false;
-        _pendingCompletionContinuation = null;
-        CancelPending();
-        ClearGhostText();
+        // TextChanged performs the hand-off after the selected item is
+        // inserted. Keep the candidate here because event ordering differs
+        // between FastColoredTextBox versions.
     }
 
     private CompletionSelectionSnapshot? CreateCompletionSelection(AutocompleteItem? item = null)
@@ -489,6 +503,16 @@ public sealed class FctbInlineCompletionController : IDisposable
         _ghostOffset = offset;
         _ghostText = text;
         _editor.Invalidate();
+    }
+
+    private string? CaptureCompletionContinuation()
+    {
+        if (!HasGhostText || string.IsNullOrEmpty(_ghostText))
+            return null;
+
+        return _ghostCompletionPrefixLength >= _ghostText.Length
+            ? null
+            : _ghostText[_ghostCompletionPrefixLength..];
     }
 
     private void QueueCompletionContinuation(string continuation)
