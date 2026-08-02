@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0.2] - 2026-08-02
+
+### Fixed
+- Inline FIM ghost text now follows the selected SQL autocomplete item, matching VS Code-style Tab acceptance.
+
 ## [1.1.0.1] - 2026-08-01
 
 ### Added
