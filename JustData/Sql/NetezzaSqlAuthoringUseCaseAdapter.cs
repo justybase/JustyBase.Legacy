@@ -49,7 +49,8 @@ public sealed class NetezzaSqlAuthoringUseCaseAdapter : ISqlAuthoringUseCase
                 request.DocumentId.ToString(),
                 cancellationToken,
                 knownLineCount: -1,
-                invocation: SqlLintInvocation.Manual)
+                invocation: SqlLintInvocation.Manual,
+                dialect: _legacyServices.ResolveDialect(request.ConnectionName))
             .ConfigureAwait(false);
         LintIssue? issue = issues.FirstOrDefault(candidate =>
             string.Equals(candidate.RuleId, request.Diagnostic.Code, StringComparison.OrdinalIgnoreCase)

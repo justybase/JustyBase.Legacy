@@ -51,7 +51,10 @@ $publishArguments = @(
     '-c', $Configuration,
     '-r', 'win-x64',
     '-p:Platform=x64',
-    '-p:UseAOT=true',
+    '-p:IncludeDB2=true',
+    '-p:UseAOT=false',
+    '-p:PublishAot=false',
+    '-p:PublishTrimmed=false',
     '--self-contained', 'true',
     '-o', $stagingPath,
     "-p:Version=$Version"
@@ -84,6 +87,25 @@ Get-ChildItem -LiteralPath $stagingPath -Recurse -File |
 $executable = Join-Path $stagingPath 'JustyBaseLegacy.exe'
 if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
     throw "Published executable was not produced: $executable"
+}
+
+$requiredRuntimeAssemblies = @(
+    'DatabaseDataGridView.WinForms.dll'
+)
+$missingRuntimeAssemblies = $requiredRuntimeAssemblies |
+    Where-Object { -not (Test-Path -LiteralPath (Join-Path $stagingPath $_) -PathType Leaf) }
+if ($missingRuntimeAssemblies) {
+    throw "Required runtime assemblies were not included in publish staging: $($missingRuntimeAssemblies -join ', ')"
+}
+
+if (-not (Test-Path -LiteralPath (Join-Path $stagingPath 'IBM.Data.Db2.dll') -PathType Leaf)) {
+    throw "DB2 managed provider was not included in publish staging: $stagingPath"
+}
+
+$db2NativeDriver = Get-ChildItem -LiteralPath $stagingPath -Recurse -File -Filter 'db2app64.dll' |
+    Select-Object -First 1
+if (-not $db2NativeDriver) {
+    throw "DB2 native clidriver was not included in publish staging: $stagingPath"
 }
 
 $unexpectedFiles = Get-ChildItem -LiteralPath $stagingPath -Recurse -File |

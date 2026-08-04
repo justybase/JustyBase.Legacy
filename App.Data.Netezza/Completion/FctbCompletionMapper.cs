@@ -17,7 +17,54 @@ public static class FctbCompletionMapper
     private static readonly Regex RelationAliasRegex = new(
         @"\b(?:FROM|JOIN)\s+(?<relation>[A-Za-z_][\w$]*(?:\s*\.\s*(?:\.\s*)?[A-Za-z_][\w$]*){0,2})(?:\s+(?:AS\s+)?(?<alias>[A-Za-z_][\w$]*))?",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex RelationCompletionContextRegex = new(
+        @"(?:\b(?:FROM|JOIN|UPDATE|INTO|MERGE\s+INTO|DELETE\s+FROM)\s+)(?:[A-Za-z_][\w$""]*\.)*(?:[A-Za-z_][\w$""]*)?$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    /// <summary>
+    /// Keeps schemas above tables while completing a relation reference. DB2
+    /// exposes tables from several schemas in one flat completion list, so the
+    /// schema choice must be the first navigation level after FROM/JOIN.
+    /// </summary>
+    public static IReadOnlyList<AutocompleteItem> PrioritizeSchemasForRelationContext(
+        IReadOnlyList<AutocompleteItem> items,
+        string sql,
+        int cursorOffset)
+    {
+        if (items is null || items.Count < 2 || !IsRelationCompletionContext(sql, cursorOffset))
+            return items ?? [];
+
+        return items
+            .Select((item, index) => (item, index))
+            .OrderBy(pair => Db2RelationCompletionPriority(pair.item))
+            .ThenBy(pair => pair.index)
+            .Select(pair => pair.item)
+            .ToArray();
+    }
+
+    private static int Db2RelationCompletionPriority(AutocompleteItem item)
+    {
+        if (item.ImageIndex == (int)CompletionIconKind.Schema)
+            return 0;
+        if (item.ImageIndex == (int)CompletionIconKind.Table)
+            return 1;
+        if (item.ImageIndex == (int)CompletionIconKind.View)
+            return 2;
+        if (string.Equals(item.DetailText, "db2nickname", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(item.DetailText, "nickname", StringComparison.OrdinalIgnoreCase))
+            return 3;
+
+        return 4;
+    }
+
+    private static bool IsRelationCompletionContext(string sql, int cursorOffset)
+    {
+        if (string.IsNullOrWhiteSpace(sql))
+            return false;
+
+        int safeOffset = Math.Clamp(cursorOffset, 0, sql.Length);
+        return RelationCompletionContextRegex.IsMatch(sql[..safeOffset]);
+    }
     /// <summary>
     /// Fast path for Netezza <c>database..table</c> — schema lookup only, deduped by table name.
     /// </summary>

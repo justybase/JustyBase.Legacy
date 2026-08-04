@@ -72,6 +72,29 @@ public sealed class Phase8SqlAuthoringAdapterTests
         Assert.Contains(signature.Signatures, item => item.Label.StartsWith("COUNT(", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task Db2_connection_selects_db2_authoring_catalog_and_diagnostic_source()
+    {
+        var completion = CreateCompletion();
+        var generalDbService = Substitute.For<IGeneralDbService>();
+        generalDbService.DriverName(Arg.Any<string>()).Returns("DB2");
+
+        using var legacy = new LegacySqlAuthoringServices(completion, generalDbService);
+        var adapter = new NetezzaSqlAuthoringUseCaseAdapter(
+            new NetezzaSqlAuthoringUseCase(completion, legacy, generalDbService),
+            legacy);
+        EditorDocumentId documentId = EditorDocumentId.New();
+
+        IReadOnlyList<SqlCompletionItem> items = await adapter.CompleteAsync(
+            new SqlCompletionRequest(documentId, "SELECT COA", 10, "db2"));
+        SqlLintResult lint = await adapter.LintAsync(
+            new SqlLintRequest(documentId, "SELECT * FROM missing_table", "db2"));
+
+        Assert.Contains(items, item => item.Label.Equals("COALESCE", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(lint.Diagnostics, diagnostic => diagnostic.Source == "Db2 SQL");
+        Assert.DoesNotContain(lint.Diagnostics, diagnostic => diagnostic.Code?.StartsWith("NZ", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
     private static string ApplyEdits(string sql, IReadOnlyList<SqlTextEdit> edits)
     {
         string result = sql;

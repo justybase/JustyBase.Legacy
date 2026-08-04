@@ -33,7 +33,6 @@ using JustyBaseLegacy.UI.Helpers;
 using JustyBaseLegacy.Services;
 using JustyBaseLegacy.UI.Controls;
 using JustyBaseLegacy.UI.DbForms;
-using JustyBaseLegacy.UI.Extensions;
 using JustyBaseLegacy.UI.Models;
 using JustyBaseLegacy.UI.Login;
 using JustyBaseLegacy.UI.Windowing;
@@ -866,15 +865,12 @@ namespace JustyBaseLegacy.UI
                     _selConenctionError = value;
                 }
 
-                if (_mvvmDatabaseExplorerControl is not null
-                    && !string.IsNullOrWhiteSpace(value)
-                    && MvvmDatabaseExplorerControl.RequiresConnectionReload(
-                        _databaseExplorerViewModel.ConnectionName,
-                        _databaseExplorerViewModel.RootNodes.Count,
-                        value))
-                {
-                    _ = _mvvmDatabaseExplorerControl.RefreshAsync(value);
-                }
+                // Connection changes are refreshed by CbConnectionsSelectedIndexChanged.
+                // Starting another MVVM refresh here races with that handler: the
+                // explorer cancels the first operation and LegacySchemaRepository
+                // then observes TaskCanceledException in refresh.WaitAsync(...).
+                // Keep this setter side-effect free and let the connection-change
+                // handler own provider/session initialization and schema refresh.
             }
         }
 
@@ -1008,6 +1004,28 @@ namespace JustyBaseLegacy.UI
         {
             try
             {
+                // DockSuite persists file paths and layout, while the Many
+                // SQL startup bundle carries per-document editor state such
+                // as the selected connection. Read that metadata alongside
+                // the layout so each restored tab gets its own connection.
+                ManySqlBundle? startupBundle = null;
+                string startupBundlePath = Path.Combine(
+                    _applicationSettingsContext.ConfigDirectory,
+                    "simpleStartup.manysql");
+                if (File.Exists(startupBundlePath))
+                {
+                    try
+                    {
+                        startupBundle = await LoadManySqlBundleWithRecoveryAsync(
+                            startupBundlePath,
+                            CancellationToken.None);
+                    }
+                    catch (Exception exception)
+                    {
+                        Trace.WriteLine($"Could not load startup tab metadata: {exception.Message}");
+                    }
+                }
+
                 var loadedDocuments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (string path in dockSuiteTabManager.GetPersistedFilePaths(layoutPath))
                 {
@@ -1048,10 +1066,15 @@ namespace JustyBaseLegacy.UI
                         return null;
                     }
 
+                    ManySqlDocumentState? state = startupBundle is null
+                        ? null
+                        : FindManySqlDocumentState(startupBundle, persistString);
                     AddMainTabCore(
                         persistString,
                         title: "",
-                        trescSQL: documentText);
+                        trescSQL: documentText,
+                        state?.ConnectionName,
+                        state?.DatabaseName);
 
                     foreach (TabPage tab in EditorTabPages)
                     {
@@ -1338,13 +1361,38 @@ namespace JustyBaseLegacy.UI
             return AddMainTabCore(fileName, title, trescSQL);
         }
 
+        /// <summary>
+        /// Opens a generated SQL document using the connection represented by a
+        /// schema node instead of the globally active editor connection.
+        /// </summary>
+        private FastColoredTextBox AddMainTabForSchemaNode(
+            SchemaNode node,
+            string title,
+            string sql)
+        {
+            ArgumentNullException.ThrowIfNull(node);
+            return AddMainTabCore(
+                fileName: null,
+                title,
+                sql,
+                node.Path.Connection,
+                node.Path.Database);
+        }
+
         private FastColoredTextBox AddMainTabCore(
             string fileName,
             string title,
-            string trescSQL)
+            string trescSQL,
+            string? targetConnectionName = null,
+            string? targetDatabaseName = null)
         {
-            string conName = _completionContext.SelectedConnectionName;
+            string conName = string.IsNullOrWhiteSpace(targetConnectionName)
+                ? _completionContext.SelectedConnectionName
+                : targetConnectionName;
             string driver = _generalDbService.DriverName(conName);
+            string selectedDatabase = string.IsNullOrWhiteSpace(targetDatabaseName)
+                ? SelectedDatabase
+                : targetDatabaseName;
 
             if (!string.IsNullOrWhiteSpace(fileName)
                 && _editorWorkspaceViewModel.FindByPath(fileName) is { } workspaceDocument)
@@ -1400,8 +1448,8 @@ namespace JustyBaseLegacy.UI
                 _codeActionProvider,
                 _editorCatalogState,
                 driver,
-                SelectedConnectionName,
-                SelectedDatabase,
+                conName,
+                selectedDatabase,
                 IsEnabledMode)
             {
                 Dock = DockStyle.Fill

@@ -494,7 +494,6 @@ public sealed class MvvmDatabaseExplorerControl : UserControl
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(connectionName)
-            || string.IsNullOrWhiteSpace(schemaName)
             || string.IsNullOrWhiteSpace(objectName))
             return false;
 
@@ -526,16 +525,44 @@ public sealed class MvvmDatabaseExplorerControl : UserControl
         TreeNode? schemaNode = FindChild(databaseNode, node =>
             node.Tag is ExplorerNodeViewModel vm
             && vm.Kind == SchemaNodeKind.Schema
-            && (vm.Name.Trim('"').Equals(schemaName.Trim('"'), StringComparison.OrdinalIgnoreCase)
+            && (string.IsNullOrWhiteSpace(schemaName)
+                || vm.Name.Trim('"').Equals(schemaName.Trim('"'), StringComparison.OrdinalIgnoreCase)
                 || vm.Path.Schema?.Trim('"').Equals(schemaName.Trim('"'), StringComparison.OrdinalIgnoreCase) == true));
-        if (schemaNode?.Tag is not ExplorerNodeViewModel schemaVm)
-            return false;
 
-        await ExpandTreeNodeAsync(schemaNode, cancellationToken).ConfigureAwait(true);
-        TreeNode? objectNode = FindChild(schemaNode, node =>
-            node.Tag is ExplorerNodeViewModel vm
-            && vm.Name.Trim('"').Equals(objectName.Trim('"'), StringComparison.OrdinalIgnoreCase)
-            && (objectKind is null || vm.Kind == objectKind));
+        TreeNode? objectNode = null;
+        if (schemaNode?.Tag is ExplorerNodeViewModel)
+        {
+            await ExpandTreeNodeAsync(schemaNode, cancellationToken).ConfigureAwait(true);
+            objectNode = FindChild(schemaNode, node =>
+                node.Tag is ExplorerNodeViewModel vm
+                && vm.Name.Trim('"').Equals(objectName.Trim('"'), StringComparison.OrdinalIgnoreCase)
+                && (objectKind is null || vm.Kind == objectKind));
+        }
+
+        // DB2 follows the VS Code layout: Database -> type group -> objects.
+        // Schema-scoped objects retain their schema in SchemaPath instead of
+        // requiring a schema node in the visual hierarchy.
+        if (objectNode is null && objectKind is not null)
+        {
+            string? groupName = GetDb2GroupName(objectKind.Value);
+            if (!string.IsNullOrWhiteSpace(groupName))
+            {
+                TreeNode? groupNode = FindChild(databaseNode, node =>
+                    node.Tag is ExplorerNodeViewModel vm
+                    && vm.Kind == SchemaNodeKind.ObjectGroup
+                    && vm.Name.Equals(groupName, StringComparison.OrdinalIgnoreCase));
+                if (groupNode?.Tag is ExplorerNodeViewModel)
+                {
+                    await ExpandTreeNodeAsync(groupNode, cancellationToken).ConfigureAwait(true);
+                    objectNode = FindChild(groupNode, node =>
+                        node.Tag is ExplorerNodeViewModel vm
+                        && vm.Name.Trim('"').Equals(objectName.Trim('"'), StringComparison.OrdinalIgnoreCase)
+                        && vm.Kind == objectKind
+                        && (string.IsNullOrWhiteSpace(schemaName)
+                            || vm.Path.Schema?.Trim('"').Equals(schemaName.Trim('"'), StringComparison.OrdinalIgnoreCase) == true));
+                }
+            }
+        }
         if (objectNode?.Tag is not ExplorerNodeViewModel objectVm)
             return false;
 
@@ -545,6 +572,23 @@ public sealed class MvvmDatabaseExplorerControl : UserControl
         _treeView.Focus();
         return true;
     }
+
+    private static string? GetDb2GroupName(SchemaNodeKind kind) => kind switch
+    {
+        SchemaNodeKind.Table => "TABLE",
+        SchemaNodeKind.View => "VIEW",
+        SchemaNodeKind.Nickname => "NICKNAME",
+        SchemaNodeKind.Alias => "ALIAS",
+        SchemaNodeKind.Procedure => "PROCEDURE",
+        SchemaNodeKind.Function => "FUNCTION",
+        SchemaNodeKind.Server => "SERVER",
+        SchemaNodeKind.ServerOption => "SERVER OPTION",
+        SchemaNodeKind.Wrapper => "WRAPPER",
+        SchemaNodeKind.WrapperOption => "WRAPPER OPTION",
+        SchemaNodeKind.UserMapping => "USER MAPPING",
+        SchemaNodeKind.PassthruAuth => "PASSTHRU AUTH",
+        _ => null
+    };
 
     private async Task SearchAsync()
     {
@@ -561,7 +605,7 @@ public sealed class MvvmDatabaseExplorerControl : UserControl
         {
             int rowIndex = _fastBrowser.Rows.Add(
                 result.Model.ProviderKind ?? result.Kind.ToString(),
-                result.Name,
+                result.Model.DisplayName ?? result.Name,
                 result.Path.Database ?? string.Empty,
                 result.Model.Description ?? string.Empty,
                 result.Model.Owner ?? string.Empty);
@@ -580,7 +624,23 @@ public sealed class MvvmDatabaseExplorerControl : UserControl
 
     private async Task ExpandNodeAsync(TreeNode treeNode)
     {
-        await ExpandTreeNodeAsync(treeNode);
+        try
+        {
+            await ExpandTreeNodeAsync(treeNode);
+        }
+        catch (OperationCanceledException)
+        {
+            // A refresh/expand can be superseded while the user is interacting
+            // with the tree. Cancellation is expected and must not reach the
+            // WinForms synchronization context.
+        }
+        catch (Exception exception)
+        {
+            // BeforeExpand is an async-void event boundary. A provider failure
+            // (for example DB2 SQL30081N when the server is unavailable) must be
+            // reported as an operation error, not as a process-level crash.
+            FileDiagnosticLog.WriteError("Schema tree expansion failed", exception);
+        }
     }
 
     private async Task ExpandTreeNodeAsync(TreeNode treeNode, CancellationToken cancellationToken = default)
@@ -617,12 +677,17 @@ public sealed class MvvmDatabaseExplorerControl : UserControl
             SchemaNodeKind.Connection => "server_connect.png",
             SchemaNodeKind.Database => "database.png",
             SchemaNodeKind.Schema => "Folder.png",
+            SchemaNodeKind.ObjectGroup => "Folder.png",
             SchemaNodeKind.Table => "Table.bmp",
             SchemaNodeKind.View => "application_view_tile.png",
             SchemaNodeKind.Procedure => "bug.png",
             SchemaNodeKind.Function => "sum.png",
             SchemaNodeKind.Alias => "table_link.png",
+            SchemaNodeKind.Nickname => "table_link.png",
             SchemaNodeKind.Synonym => "application_lightning.png",
+            SchemaNodeKind.Server or SchemaNodeKind.ServerOption
+                or SchemaNodeKind.Wrapper or SchemaNodeKind.WrapperOption
+                or SchemaNodeKind.UserMapping or SchemaNodeKind.PassthruAuth => "server_connect.png",
             SchemaNodeKind.Column => "table_column.png",
             _ => "bullet_white.png"
         };

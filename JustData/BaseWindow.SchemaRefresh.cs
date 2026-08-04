@@ -28,7 +28,6 @@ using JustyBaseLegacy.UI.Helpers;
 using JustyBaseLegacy.Services;
 using JustyBaseLegacy.UI.Controls;
 using JustyBaseLegacy.UI.DbForms;
-using JustyBaseLegacy.UI.Extensions;
 using JustyBaseLegacy.UI.Models;
 using SpreadSheetTasks;
 using System;
@@ -230,7 +229,7 @@ namespace JustyBaseLegacy.UI
                     try
                     {
                         await Task.Run(() => gdb.InitDb());
-                        // Schema populated via MVVM ViewModel instead of legacy InitSchema.
+                        // Schema is populated through the MVVM repository.
                         // Use selConnName overload instead of parameterless to avoid
                         // rendering ALL connections before the final fixup call.
                         if (_mvvmDatabaseExplorerControl is not null)

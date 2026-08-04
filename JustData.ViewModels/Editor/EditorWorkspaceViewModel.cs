@@ -287,12 +287,14 @@ public sealed class EditorWorkspaceViewModel : ObservableObject, IDisposable
 
         foreach (string token in bundle.TabsOrder)
         {
+            ManySqlDocumentState? state = FindDocumentState(bundle, token);
             int pathIndex = FindPath(bundle.SqlPaths, token, openedPaths);
             if (pathIndex >= 0)
             {
                 try
                 {
-                    await OpenPathAsync(bundle.SqlPaths[pathIndex], cancellationToken).ConfigureAwait(false);
+                    EditorDocumentViewModel document = await OpenPathAsync(bundle.SqlPaths[pathIndex], cancellationToken).ConfigureAwait(false);
+                    ApplyDocumentState(document, state);
                     openedPaths.Add(NormalizePath(bundle.SqlPaths[pathIndex]));
                 }
                 catch (FileNotFoundException)
@@ -306,7 +308,9 @@ public sealed class EditorWorkspaceViewModel : ObservableObject, IDisposable
             if (contentIndex >= 0)
             {
                 ManySqlContent content = bundle.SqlContentList[contentIndex];
-                await OnUiAsync(() => NewDocument(content.Title, content.Text), cancellationToken).ConfigureAwait(false);
+                EditorDocumentViewModel? document = null;
+                await OnUiAsync(() => document = NewDocument(content.Title, content.Text), cancellationToken).ConfigureAwait(false);
+                ApplyDocumentState(document, state);
                 openedContent.Add(contentIndex);
             }
         }
@@ -317,7 +321,8 @@ public sealed class EditorWorkspaceViewModel : ObservableObject, IDisposable
                 continue;
             try
             {
-                await OpenPathAsync(bundle.SqlPaths[i], cancellationToken).ConfigureAwait(false);
+                EditorDocumentViewModel document = await OpenPathAsync(bundle.SqlPaths[i], cancellationToken).ConfigureAwait(false);
+                ApplyDocumentState(document, FindDocumentState(bundle, bundle.SqlPaths[i]));
                 openedPaths.Add(NormalizePath(bundle.SqlPaths[i]));
             }
             catch (FileNotFoundException)
@@ -330,7 +335,9 @@ public sealed class EditorWorkspaceViewModel : ObservableObject, IDisposable
             if (!openedContent.Contains(i))
             {
                 ManySqlContent content = bundle.SqlContentList[i];
-                await OnUiAsync(() => NewDocument(content.Title, content.Text), cancellationToken).ConfigureAwait(false);
+                EditorDocumentViewModel? document = null;
+                await OnUiAsync(() => document = NewDocument(content.Title, content.Text), cancellationToken).ConfigureAwait(false);
+                ApplyDocumentState(document, FindDocumentState(bundle, content.Title));
             }
         }
 
@@ -358,6 +365,7 @@ public sealed class EditorWorkspaceViewModel : ObservableObject, IDisposable
         var paths = new List<string>();
         var contents = new List<ManySqlContent>();
         var order = new List<string>();
+        var documentStates = new List<ManySqlDocumentState>();
         var tokens = new Dictionary<EditorDocumentId, string>();
         var documents = Documents.ToArray();
 
@@ -373,6 +381,11 @@ public sealed class EditorWorkspaceViewModel : ObservableObject, IDisposable
                 contents.Add(new ManySqlContent(document.Title, document.Text));
                 tokens[document.Id] = document.Title;
             }
+
+            documentStates.Add(new ManySqlDocumentState(
+                tokens[document.Id],
+                document.ConnectionName,
+                document.DatabaseName));
         }
 
         foreach (var document in documents)
@@ -392,7 +405,7 @@ public sealed class EditorWorkspaceViewModel : ObservableObject, IDisposable
         }
         await _bundleService.SaveAsync(
             path,
-            new ManySqlBundle(paths, contents, order, selected),
+            new ManySqlBundle(paths, contents, order, selected, documentStates),
             cancellationToken).ConfigureAwait(false);
         await _recentFileStore.RecordAsync(RecentFileKind.ManySql, NormalizePath(path), cancellationToken).ConfigureAwait(false);
     }
@@ -431,6 +444,21 @@ public sealed class EditorWorkspaceViewModel : ObservableObject, IDisposable
     private Task<bool> SaveCommandAsync(EditorDocumentId? id) => SaveAsync(id);
 
     private Task<bool> SaveAsCommandAsync(EditorDocumentId? id) => SaveAsAsync(id);
+
+    private static ManySqlDocumentState? FindDocumentState(ManySqlBundle bundle, string token) =>
+        bundle.DocumentStates?.FirstOrDefault(state =>
+            string.Equals(state.Token, token, StringComparison.OrdinalIgnoreCase));
+
+    private static void ApplyDocumentState(
+        EditorDocumentViewModel? document,
+        ManySqlDocumentState? state)
+    {
+        if (document is null || state is null)
+            return;
+
+        document.ConnectionName = state.ConnectionName;
+        document.DatabaseName = state.DatabaseName;
+    }
 
     private EditorDocumentViewModel CreateDocument(
         string title,

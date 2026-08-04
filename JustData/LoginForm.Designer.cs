@@ -554,7 +554,6 @@ namespace JustyBaseLegacy.UI
             Opacity = 0.95D;
             StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             Text = "Login";
-            TopMost = true;
             DoubleBuffered = true;
             FormClosing += LoginForm_FormClosing;
             Load += LoginForm_Load;

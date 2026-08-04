@@ -4,6 +4,7 @@ using AppBase.Common.Configuration;
 using AppBase.Common.Interfaces;
 using AppBase.Data;
 using AppBase.Data.Core.Core;
+using AppBase.Data.Core.Enums;
 using AppBase.Data.Core.Interfaces;
 using AppBase.Data.Core.Models;
 using JustData.Application.Login;
@@ -25,6 +26,9 @@ public sealed class LegacySchemaRepository : ISchemaRepository, IOutlineReposito
     private readonly IConnectionSessionRegistry _connectionSessions;
     private readonly INetezzaSchemaTableCatalogWriter _schemaTables;
     private readonly IConnectionProfileCatalog _profiles;
+    private readonly ILogger? _logger;
+    private readonly IImportExportTasks? _importExportTasks;
+    private readonly object _sessionInitializationGate = new();
     private readonly ConcurrentDictionary<string, Task> _refreshes = new(StringComparer.OrdinalIgnoreCase);
 
     public LegacySchemaRepository(
@@ -33,7 +37,9 @@ public sealed class LegacySchemaRepository : ISchemaRepository, IOutlineReposito
         INetezzaCompletionRuntimeContext completionRuntime,
         IConnectionSessionRegistry connectionSessions,
         INetezzaSchemaTableCatalogWriter schemaTables,
-        IConnectionProfileCatalog profiles)
+        IConnectionProfileCatalog profiles,
+        ILogger? logger = null,
+        IImportExportTasks? importExportTasks = null)
     {
         _generalDbService = generalDbService ?? throw new ArgumentNullException(nameof(generalDbService));
         _databaseRuntimeContext = databaseRuntimeContext ?? throw new ArgumentNullException(nameof(databaseRuntimeContext));
@@ -41,6 +47,8 @@ public sealed class LegacySchemaRepository : ISchemaRepository, IOutlineReposito
         _connectionSessions = connectionSessions ?? throw new ArgumentNullException(nameof(connectionSessions));
         _schemaTables = schemaTables ?? throw new ArgumentNullException(nameof(schemaTables));
         _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
+        _logger = logger;
+        _importExportTasks = importExportTasks;
     }
 
     public Task<IReadOnlyList<SchemaNode>> GetRootsAsync(string? connectionName = null, CancellationToken cancellationToken = default)
@@ -91,6 +99,19 @@ public sealed class LegacySchemaRepository : ISchemaRepository, IOutlineReposito
             }, cancellationToken).ConfigureAwait(false);
         }
 
+        if (database.DatabaseType == DatabaseTypeEnum.DB2)
+        {
+            return parent.Kind switch
+            {
+                SchemaNodeKind.Connection => MapDatabases(parent, database),
+                SchemaNodeKind.Database => MapDb2ObjectGroups(parent),
+                SchemaNodeKind.ObjectGroup => MapDb2Objects(parent, database),
+                SchemaNodeKind.Table or SchemaNodeKind.View
+                    or SchemaNodeKind.Alias or SchemaNodeKind.Nickname or SchemaNodeKind.Synonym => MapColumns(parent, database),
+                _ => []
+            };
+        }
+
         IReadOnlyList<SchemaNode> result = parent.Kind switch
         {
             SchemaNodeKind.Connection => MapDatabases(parent, database),
@@ -131,13 +152,39 @@ public sealed class LegacySchemaRepository : ISchemaRepository, IOutlineReposito
                 continue;
             }
 
+            if (database.DatabaseType == DatabaseTypeEnum.DB2)
+            {
+                string databaseName = database.DefaultDatabaseName;
+                if (string.IsNullOrWhiteSpace(databaseName)
+                    && _profiles.TryGetProfile(connection, out ConnectionProfile db2Profile))
+                    databaseName = db2Profile.Database;
+                if (!string.IsNullOrWhiteSpace(request.Database)
+                    && !string.Equals(databaseName, request.Database, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                SchemaSearchResult db2Result = await Task.Run(
+                    () => SearchDb2Catalog(database, connection, databaseName, query, request),
+                    cancellationToken).ConfigureAwait(false);
+                matches.AddRange(db2Result.Nodes);
+                if (db2Result.IsTruncated || matches.Count >= request.MaxResults)
+                    return new SchemaSearchResult(matches.Take(request.MaxResults).ToArray(), true);
+                continue;
+            }
+
             foreach (var schema in database.objectInSchema)
             {
+                if (!string.IsNullOrWhiteSpace(request.Database)
+                    && !string.Equals(database.DefaultDatabaseName, request.Database, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (!string.IsNullOrWhiteSpace(request.Schema)
+                    && !string.Equals(schema.Key, request.Schema, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
                 foreach (var item in schema.Value)
                 {
                     if (!item.Key.Contains(query, StringComparison.OrdinalIgnoreCase)) continue;
                     matches.Add(new SchemaNode(
-                        $"{connection}/{schema.Key}/{item.Key}", item.Key,
+                        $"{connection}/{database.DefaultDatabaseName}/{schema.Key}/{GetDb2Category(item.Value)}/{item.Key}", item.Key,
                         LegacySchemaTypeMapper.Map(item.Value), new(connection, database.DefaultDatabaseName, schema.Key, item.Key), false,
                         ProviderKind: item.Value.ToString()));
                     if (matches.Count >= request.MaxResults)
@@ -148,6 +195,99 @@ public sealed class LegacySchemaRepository : ISchemaRepository, IOutlineReposito
 
         return new SchemaSearchResult(matches.ToArray());
     }
+
+    private static SchemaSearchResult SearchDb2Catalog(
+        IGeneralDb database,
+        string connection,
+        string databaseName,
+        string query,
+        SchemaSearchRequest request)
+    {
+        if (request.MaxResults <= 0)
+            return new SchemaSearchResult([]);
+
+        var matches = new List<SchemaNode>(Math.Min(request.MaxResults, 32));
+        if (database is IDb2MetadataCatalog db2Catalog)
+        {
+            foreach (Db2CatalogObject item in db2Catalog.Db2CatalogObjects
+                         .OrderBy(item => item.Type)
+                         .ThenBy(item => item.Schema, StringComparer.OrdinalIgnoreCase)
+                         .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrWhiteSpace(request.Schema)
+                    && !string.Equals(item.Schema, request.Schema, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                bool objectMatched = item.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
+                    || item.Description?.Contains(query, StringComparison.OrdinalIgnoreCase) == true
+                    || item.Owner?.Contains(query, StringComparison.OrdinalIgnoreCase) == true;
+                bool columnMatched = false;
+                if (!objectMatched && request.IncludeColumns && item.SupportsColumns && item.Schema is not null)
+                {
+                    try
+                    {
+                        string[] columns = database.GetColumns(databaseName, item.Schema, item.Name);
+                        columnMatched = columns.Any(column => column.Contains(query, StringComparison.OrdinalIgnoreCase));
+                    }
+                    catch
+                    {
+                        // A single inaccessible object must not make the whole
+                        // schema search fail. The object itself is still returned
+                        // when its name matches the query.
+                    }
+                }
+
+                if (!objectMatched && !columnMatched)
+                    continue;
+
+                SchemaNodeKind nodeKind = MapDb2ObjectKind(item.Type);
+                matches.Add(new SchemaNode(
+                    BuildDb2ObjectId(connection, databaseName, item),
+                    item.Name,
+                    nodeKind,
+                    new(connection, databaseName, item.Schema, item.Name),
+                    item.SupportsColumns,
+                    ProviderKind: item.Type.ToString().ToUpperInvariant(),
+                    DisplayName: FormatDb2ObjectDisplayName(item.Schema, item.Name),
+                    Description: item.Description,
+                    Owner: item.Owner));
+                if (matches.Count >= request.MaxResults)
+                    return new SchemaSearchResult(matches.ToArray(), true);
+            }
+
+            return new SchemaSearchResult(matches.ToArray());
+        }
+
+        // Compatibility fallback for test doubles and non-upgraded DB2 providers.
+        foreach (var schema in database.objectInSchema.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!string.IsNullOrWhiteSpace(request.Schema)
+                && !string.Equals(schema.Key, request.Schema, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            foreach (var item in schema.Value.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                if (!item.Key.Contains(query, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                matches.Add(new SchemaNode(
+                    $"{connection}/{databaseName}/{schema.Key}/{GetDb2Category(item.Value)}/{item.Key}",
+                    item.Key,
+                    LegacySchemaTypeMapper.Map(item.Value),
+                    new(connection, databaseName, schema.Key, item.Key),
+                    IsDb2ColumnObject(item.Value),
+                    ProviderKind: item.Value.ToString()));
+                if (matches.Count >= request.MaxResults)
+                    return new SchemaSearchResult(matches.ToArray(), true);
+            }
+        }
+
+        return new SchemaSearchResult(matches.ToArray());
+    }
+
+    private static bool IsDb2ColumnObject(TypeInDatabase kind) => kind is
+        TypeInDatabase.table or TypeInDatabase.view or TypeInDatabase.db2alias
+            or TypeInDatabase.db2nickname or TypeInDatabase.synonym;
 
     internal static SchemaSearchResult SearchNetezzaCatalog(
         string connection,
@@ -245,7 +385,8 @@ public sealed class LegacySchemaRepository : ISchemaRepository, IOutlineReposito
             : [connectionName];
         foreach (string name in names.Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            if (!_connectionSessions.TryGetValue(name, out var database)) continue;
+            IGeneralDb? database = EnsureConnectionSession(name);
+            if (database is null) continue;
             cancellationToken.ThrowIfCancellationRequested();
 
             // Single-flight per connection. The in-flight work must NOT be tied to a
@@ -306,6 +447,47 @@ public sealed class LegacySchemaRepository : ISchemaRepository, IOutlineReposito
         finally
         {
             _refreshes.TryRemove(connectionName, out _);
+        }
+    }
+
+    /// <summary>
+    /// The explorer can display every saved profile, while only the initially
+    /// selected connection has been materialized by BaseWindow. Materialize the
+    /// provider for the connection represented by the requested node before a
+    /// refresh. This keeps DB2 and Netezza sessions independent when the user
+    /// expands a non-active connection in the tree.
+    /// </summary>
+    private IGeneralDb? EnsureConnectionSession(string connectionName)
+    {
+        if (_connectionSessions.TryGetValue(connectionName, out IGeneralDb? existing))
+            return existing;
+
+        if (!_profiles.TryGetProfile(connectionName, out ConnectionProfile profile))
+            return null;
+
+        lock (_sessionInitializationGate)
+        {
+            if (_connectionSessions.TryGetValue(connectionName, out existing))
+                return existing;
+
+            if (_logger is null || _importExportTasks is null)
+            {
+                throw new InvalidOperationException(
+                    "A logger and import/export service are required to initialize a database connection.");
+            }
+
+            IGeneralDb? database = _generalDbService.GetGeneralDb(
+                _databaseRuntimeContext,
+                _logger,
+                _importExportTasks,
+                connectionName,
+                out _);
+            if (database is null)
+                return null;
+
+            database.Username = profile.UserName;
+            _connectionSessions.Set(connectionName, database);
+            return database;
         }
     }
 
@@ -410,6 +592,124 @@ public sealed class LegacySchemaRepository : ISchemaRepository, IOutlineReposito
             .Select(name => new SchemaNode($"{parent.Id}/{name}", name, SchemaNodeKind.Schema,
                 new(parent.Path.Connection, parent.Path.Database, name), true)).ToArray();
     }
+
+    private static IReadOnlyList<SchemaNode> MapDb2ObjectGroups(SchemaNode parent)
+    {
+        string[] groups =
+        [
+            "TABLE",
+            "VIEW",
+            "NICKNAME",
+            "ALIAS",
+            "PROCEDURE",
+            "FUNCTION",
+            "SERVER",
+            "SERVER OPTION",
+            "WRAPPER",
+            "WRAPPER OPTION",
+            "USER MAPPING",
+            "PASSTHRU AUTH"
+        ];
+        return groups.Select(group => new SchemaNode(
+            $"{parent.Id}/{group}",
+            group,
+            SchemaNodeKind.ObjectGroup,
+            new(parent.Path.Connection, parent.Path.Database),
+            true,
+            ProviderKind: group))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<SchemaNode> MapDb2Objects(SchemaNode parent, IGeneralDb database)
+    {
+        if (database is IDb2MetadataCatalog db2Catalog)
+        {
+            return db2Catalog.Db2CatalogObjects
+                .Where(item => string.Equals(GetDb2GroupName(item.Type), parent.Name, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(item => item.Schema, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(item => new SchemaNode(
+                    BuildDb2ObjectId(parent.Path.Connection, parent.Path.Database ?? database.DefaultDatabaseName, item),
+                    item.Name,
+                    MapDb2ObjectKind(item.Type),
+                    new(parent.Path.Connection, parent.Path.Database, item.Schema, item.Name),
+                    item.SupportsColumns,
+                    ProviderKind: item.Type.ToString().ToUpperInvariant(),
+                    DisplayName: FormatDb2ObjectDisplayName(item.Schema, item.Name),
+                    Description: item.Description,
+                    Owner: item.Owner))
+                .ToArray();
+        }
+
+        // Compatibility fallback for providers/test doubles without the DB2 snapshot contract.
+        string? schema = parent.Path.Schema;
+        if (string.IsNullOrWhiteSpace(schema)
+            || !database.objectInSchema.TryGetValue(schema, out var objects))
+            return [];
+
+        return objects
+            .Where(item => string.Equals(GetDb2Category(item.Value), parent.Name, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(item => new SchemaNode(
+                $"{parent.Id}/{item.Key}",
+                item.Key,
+                LegacySchemaTypeMapper.Map(item.Value),
+                new(parent.Path.Connection, parent.Path.Database, schema, item.Key),
+                IsDb2ColumnObject(item.Value),
+                ProviderKind: item.Value.ToString()))
+            .ToArray();
+    }
+
+    private static string BuildDb2ObjectId(string connection, string database, Db2CatalogObject item) =>
+        $"{connection}/{database}/{GetDb2GroupName(item.Type)}/{item.Schema ?? "_global"}/{item.Name}";
+
+    private static string FormatDb2ObjectDisplayName(string? schema, string name) =>
+        string.IsNullOrWhiteSpace(schema) ? name : $"{schema}.{name}";
+
+    private static string GetDb2GroupName(Db2CatalogObjectType type) => type switch
+    {
+        Db2CatalogObjectType.Table => "TABLE",
+        Db2CatalogObjectType.View => "VIEW",
+        Db2CatalogObjectType.Nickname => "NICKNAME",
+        Db2CatalogObjectType.Alias => "ALIAS",
+        Db2CatalogObjectType.Procedure => "PROCEDURE",
+        Db2CatalogObjectType.Function => "FUNCTION",
+        Db2CatalogObjectType.Server => "SERVER",
+        Db2CatalogObjectType.ServerOption => "SERVER OPTION",
+        Db2CatalogObjectType.Wrapper => "WRAPPER",
+        Db2CatalogObjectType.WrapperOption => "WRAPPER OPTION",
+        Db2CatalogObjectType.UserMapping => "USER MAPPING",
+        Db2CatalogObjectType.PassthruAuth => "PASSTHRU AUTH",
+        _ => type.ToString().ToUpperInvariant()
+    };
+
+    private static SchemaNodeKind MapDb2ObjectKind(Db2CatalogObjectType type) => type switch
+    {
+        Db2CatalogObjectType.Table => SchemaNodeKind.Table,
+        Db2CatalogObjectType.View => SchemaNodeKind.View,
+        Db2CatalogObjectType.Nickname => SchemaNodeKind.Nickname,
+        Db2CatalogObjectType.Alias => SchemaNodeKind.Alias,
+        Db2CatalogObjectType.Procedure => SchemaNodeKind.Procedure,
+        Db2CatalogObjectType.Function => SchemaNodeKind.Function,
+        Db2CatalogObjectType.Server => SchemaNodeKind.Server,
+        Db2CatalogObjectType.ServerOption => SchemaNodeKind.ServerOption,
+        Db2CatalogObjectType.Wrapper => SchemaNodeKind.Wrapper,
+        Db2CatalogObjectType.WrapperOption => SchemaNodeKind.WrapperOption,
+        Db2CatalogObjectType.UserMapping => SchemaNodeKind.UserMapping,
+        Db2CatalogObjectType.PassthruAuth => SchemaNodeKind.PassthruAuth,
+        _ => SchemaNodeKind.Unknown
+    };
+
+    private static string GetDb2Category(TypeInDatabase kind) => kind switch
+    {
+        TypeInDatabase.table => "Tables",
+        TypeInDatabase.view => "Views",
+        TypeInDatabase.db2nickname => "NICKNAME",
+        TypeInDatabase.synonym => "Synonyms",
+        TypeInDatabase.db2alias => "Aliases",
+        TypeInDatabase.function => "Functions",
+        _ => "Procedures"
+    };
 
     private static IReadOnlyList<SchemaNode> MapObjects(SchemaNode parent, IGeneralDb database)
     {

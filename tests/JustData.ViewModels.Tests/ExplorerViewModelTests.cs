@@ -172,6 +172,26 @@ public sealed class ExplorerViewModelTests
         Assert.False(root.IsLoading);
     }
 
+    [Fact]
+    public async Task Empty_db2_object_group_refreshes_catalog_before_completing_expansion()
+    {
+        var repository = new Db2LazyCatalogRepository();
+        using var vm = new DatabaseExplorerViewModel(repository, new FakeDdlService());
+
+        await vm.InitializeAsync("db2", refresh: false);
+        ExplorerNodeViewModel connection = Assert.Single(vm.RootNodes);
+        await vm.ExpandAsync(connection);
+        ExplorerNodeViewModel database = Assert.Single(connection.Children);
+        await vm.ExpandAsync(database);
+        ExplorerNodeViewModel tableGroup = Assert.Single(database.Children);
+
+        await vm.ExpandAsync(tableGroup);
+
+        Assert.Equal(1, repository.RefreshCalls);
+        Assert.True(tableGroup.ChildrenLoaded);
+        Assert.Equal("JBL_LIVE.JBL_ORDERS", Assert.Single(tableGroup.Children).Model.DisplayName);
+    }
+
     private sealed class BlockingBatchScheduler : IExplorerBatchScheduler
     {
         private readonly TaskCompletionSource _firstBatch = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -185,6 +205,59 @@ public sealed class ExplorerViewModelTests
         }
 
         public void ReleaseFirstBatch() => _firstBatch.TrySetResult();
+    }
+
+    private sealed class Db2LazyCatalogRepository : ISchemaRepository
+    {
+        public int RefreshCalls { get; private set; }
+
+        public Task<IReadOnlyList<SchemaNode>> GetRootsAsync(
+            string? connectionName = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<SchemaNode>>([
+                new("db2", "db2", SchemaNodeKind.Connection, new("db2"), true)
+            ]);
+
+        public Task<IReadOnlyList<SchemaNode>> GetChildrenAsync(
+            SchemaNode parent,
+            CancellationToken cancellationToken = default)
+        {
+            return parent.Kind switch
+            {
+                SchemaNodeKind.Connection => Task.FromResult<IReadOnlyList<SchemaNode>>([
+                    new("db2/TESTDB", "TESTDB", SchemaNodeKind.Database, new("db2", "TESTDB"), true)
+                ]),
+                SchemaNodeKind.Database => Task.FromResult<IReadOnlyList<SchemaNode>>([
+                    new("db2/TESTDB/TABLE", "TABLE", SchemaNodeKind.ObjectGroup, new("db2", "TESTDB"), true)
+                ]),
+                SchemaNodeKind.ObjectGroup when RefreshCalls == 0 => Task.FromResult<IReadOnlyList<SchemaNode>>([]),
+                SchemaNodeKind.ObjectGroup => Task.FromResult<IReadOnlyList<SchemaNode>>([
+                    new(
+                        "db2/TESTDB/TABLE/JBL_LIVE/JBL_ORDERS",
+                        "JBL_ORDERS",
+                        SchemaNodeKind.Table,
+                        new("db2", "TESTDB", "JBL_LIVE", "JBL_ORDERS"),
+                        false,
+                        DisplayName: "JBL_LIVE.JBL_ORDERS")
+                ]),
+                _ => Task.FromResult<IReadOnlyList<SchemaNode>>([])
+            };
+        }
+
+        public Task<SchemaSearchResult> SearchAsync(SchemaSearchRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new SchemaSearchResult([]));
+
+        public Task<IReadOnlyList<SchemaReference>> GetReferencesAsync(string sql, string? connectionName = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<SchemaReference>>([]);
+
+        public Task RefreshAsync(string? connectionName = null, CancellationToken cancellationToken = default, SchemaRefreshRequest? request = null)
+        {
+            RefreshCalls++;
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> AttachDatabaseAsync(string connectionName, string databaseName, CancellationToken cancellationToken = default) =>
+            Task.FromResult(true);
     }
 
     private sealed class FakeSchemaRepository : ISchemaRepository

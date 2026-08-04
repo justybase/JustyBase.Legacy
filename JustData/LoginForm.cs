@@ -33,8 +33,6 @@ namespace JustyBaseLegacy.UI
         private readonly IUiHelperService _uiHelperService;
         private readonly ILoginDataValidator _loginDataValidator;
         private readonly LoginViewModel _viewModel;
-        public bool SuppressBlurOverlay { get; set; }
-
         /// <summary>When set, the form saves a PNG of itself after the load animation and closes.</summary>
         public string? DocumentationScreenshotPath { get; set; }
 
@@ -392,7 +390,6 @@ namespace JustyBaseLegacy.UI
         {
             checkBox1.Checked = false;
             passwordTextBox.UseSystemPasswordChar = true;
-            this.TopMost = true;
             this.Enabled = true;
             toolTip1.SetToolTip(selectDatabaseButton, "save before selecting if you want");
             toolTip1.SetToolTip(saveBt, "save credential and other login info to encrypted file");
@@ -589,11 +586,6 @@ namespace JustyBaseLegacy.UI
             // Style existing buttons with modern flat design
             StyleModernButtons();
             SetRoundedButtonCorners();
-            if (!_applicationSettingsContext.Config.FastLogin && !SuppressBlurOverlay)
-            {
-                ShowBlurOverlay();
-            }
-
             // Set rounded corners
             SetRoundedCorners(CornerRadius);
         }
@@ -779,19 +771,8 @@ namespace JustyBaseLegacy.UI
             groupBox1.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
         }
 
-        private BlurOverlay _blurOverlay;
-        private void ShowBlurOverlay()
-        {
-            _blurOverlay = new BlurOverlay();
-            _blurOverlay.Show();
-            _blurOverlay.BringToFront();
-            BringToFront();
-            TopMost = true;
-        }
-
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
-            _blurOverlay?.Close();
             _viewModel.Dispose();
             base.OnFormClosed(e);
         }

@@ -120,6 +120,35 @@ public sealed class EditorWorkspaceViewModelTests
     }
 
     [Fact]
+    public async Task Many_sql_restores_connection_state_per_document()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "bundle-state-file.sql");
+        var files = new FakeEditorFileService();
+        files.Files[path] = "SELECT file";
+        var bundle = new FakeBundleService
+        {
+            Loaded = new ManySqlBundle(
+                [path],
+                [new ManySqlContent("memory", "SELECT memory")],
+                ["memory", path],
+                0,
+                [
+                    new ManySqlDocumentState("memory", "NETEZZ_CONN_1", "DB_ONE"),
+                    new ManySqlDocumentState(path, "DB_CONN_2", "DB_TWO")
+                ])
+        };
+        var setup = Create(files, bundle);
+        using var workspace = setup.Workspace;
+
+        await workspace.OpenManySqlAsync("session.manysql");
+
+        Assert.Equal("NETEZZ_CONN_1", workspace.Documents[0].ConnectionName);
+        Assert.Equal("DB_ONE", workspace.Documents[0].DatabaseName);
+        Assert.Equal("DB_CONN_2", workspace.Documents[1].ConnectionName);
+        Assert.Equal("DB_TWO", workspace.Documents[1].DatabaseName);
+    }
+
+    [Fact]
     public async Task Saving_many_sql_preserves_paths_content_order_and_selection()
     {
         string path = Path.Combine(Path.GetTempPath(), "bundle-save-file.sql");
@@ -140,6 +169,12 @@ public sealed class EditorWorkspaceViewModelTests
         Assert.Equal([new ManySqlContent("scratch", "SELECT memory")], bundle.Saved.SqlContentList);
         Assert.Equal([path, "scratch"], bundle.Saved.TabsOrder);
         Assert.Equal(1, bundle.Saved.SelectedTabNum);
+        Assert.Equal(
+            [
+                new ManySqlDocumentState(path, fileDocument.ConnectionName, fileDocument.DatabaseName),
+                new ManySqlDocumentState("scratch", memoryDocument.ConnectionName, memoryDocument.DatabaseName)
+            ],
+            bundle.Saved.DocumentStates);
         Assert.Equal(fileDocument, workspace.Documents[0]);
     }
 

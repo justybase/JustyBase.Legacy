@@ -67,6 +67,7 @@ public sealed class DatabaseProviderFactory : IDatabaseProviderFactory
         {
             IGeneralDb database = new DB2(databaseRuntimeContext, logger, importExportTasks, databaseService)
             {
+                LogErrorStdColor = logErrorStdColor,
                 ConnectionName = connectionName,
                 ConnectionString = databaseService.ConnectionStringForDB2(connectionName)
             };

@@ -17,7 +17,16 @@ public enum SchemaNodeKind
     Constraint,
     Partition,
     Trigger,
-    Unknown
+    Unknown,
+    /// <summary>Provider-owned object group such as DB2 Tables or Views.</summary>
+    ObjectGroup,
+    Nickname,
+    Server,
+    ServerOption,
+    Wrapper,
+    WrapperOption,
+    UserMapping,
+    PassthruAuth
 }
 
 public sealed record SchemaPath(
@@ -46,6 +55,8 @@ public sealed record SchemaNode(
 public sealed record SchemaSearchRequest(
     string Query,
     string? Connection = null,
+    string? Database = null,
+    string? Schema = null,
     bool IncludeColumns = false,
     int MaxResults = 1_000);
 

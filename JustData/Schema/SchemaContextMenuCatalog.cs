@@ -93,8 +93,23 @@ internal static class SchemaContextMenuCatalog
             new("Select Top 100 to new query window", SchemaContextAction.SelectNew),
             new("Select duplicates to clipboard", SchemaContextAction.SelectDuplicates)
         ],
-        SchemaNodeKind.View or SchemaNodeKind.Procedure or SchemaNodeKind.Function or SchemaNodeKind.Alias or SchemaNodeKind.Synonym =>
-        [new("DDL to clipboard", SchemaContextAction.DdlClipboard)],
+        SchemaNodeKind.View or SchemaNodeKind.Procedure or SchemaNodeKind.Function
+            or SchemaNodeKind.Alias or SchemaNodeKind.Nickname or SchemaNodeKind.Synonym =>
+        [
+            new("DDL to new query window", SchemaContextAction.DdlNew),
+            new("DDL to clipboard", SchemaContextAction.DdlClipboard)
+        ],
+        SchemaNodeKind.ObjectGroup when IsTableGroup(node.Name) =>
+        [
+            new("Refresh", SchemaContextAction.Refresh),
+            new("Collapse all", SchemaContextAction.CollapseAll),
+            new("DDL Tables", SchemaContextAction.DdlAll)
+        ],
+        SchemaNodeKind.ObjectGroup =>
+        [
+            new("Refresh", SchemaContextAction.Refresh),
+            new("Collapse all", SchemaContextAction.CollapseAll)
+        ],
         SchemaNodeKind.Schema when node.Name.Equals("Tables", StringComparison.OrdinalIgnoreCase) =>
         [
             new("Refresh", SchemaContextAction.Refresh),
@@ -137,6 +152,10 @@ internal static class SchemaContextMenuCatalog
         ],
         _ => []
     };
+
+    private static bool IsTableGroup(string name) =>
+        name.Equals("TABLE", StringComparison.OrdinalIgnoreCase)
+        || name.Equals("Tables", StringComparison.OrdinalIgnoreCase);
 
     private static readonly IReadOnlyList<SchemaContextMenuEntry> TableEntries =
     [

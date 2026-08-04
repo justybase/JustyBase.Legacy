@@ -97,9 +97,6 @@ public abstract partial class GeneralDb : IGeneralDb
 
     public virtual void InitDb() { }
 
-    public bool _initSchemaInProgress = false;
-
-    public bool GetInitSchemaInProgress { get => _initSchemaInProgress; }
     abstract protected void AddToCache(string dbName, string schema, string tablename);
 
     virtual protected void AddToindexCache(string dbName, string schema, string tablename)

@@ -1,6 +1,8 @@
 using JustData.Application.Editor;
 using JustData.Application.Sql;
+using AppBase.Data.Core.Interfaces;
 using JustyBase.NetezzaSqlParser.Completion;
+using JustyBase.NetezzaSqlParser.Dialects;
 using JustyBase.NetezzaSqlParser.Linter;
 
 namespace AppBase.Data.Completion;
@@ -10,13 +12,23 @@ public sealed class NetezzaSqlAuthoringUseCase : ISqlAuthoringUseCase
 {
     private readonly NetezzaSqlCompletionServices _completionServices;
     private readonly LegacySqlAuthoringServices _authoringServices;
+    private readonly SqlDialectResolver _dialectResolver;
 
     public NetezzaSqlAuthoringUseCase(
         NetezzaSqlCompletionServices completionServices,
         LegacySqlAuthoringServices authoringServices)
+        : this(completionServices, authoringServices, null)
+    {
+    }
+
+    public NetezzaSqlAuthoringUseCase(
+        NetezzaSqlCompletionServices completionServices,
+        LegacySqlAuthoringServices authoringServices,
+        IGeneralDbService? generalDbService)
     {
         _completionServices = completionServices;
         _authoringServices = authoringServices;
+        _dialectResolver = new SqlDialectResolver(generalDbService);
     }
 
     public async Task<SqlLintResult> LintAsync(
@@ -29,11 +41,12 @@ public sealed class NetezzaSqlAuthoringUseCase : ISqlAuthoringUseCase
                 request.DocumentId.ToString(),
                 cancellationToken,
                 request.KnownLineCount,
-                request.Invocation)
+                request.Invocation,
+                _dialectResolver.Resolve(request.ConnectionName))
             .ConfigureAwait(false);
         return new SqlLintResult(
             request.DocumentId,
-            issues.Select(MapDiagnostic).ToArray());
+            issues.Select(issue => MapDiagnostic(issue, _dialectResolver.Resolve(request.ConnectionName))).ToArray());
     }
 
     public Task<IReadOnlyList<SqlCompletionItem>> CompleteAsync(
@@ -41,7 +54,8 @@ public sealed class NetezzaSqlAuthoringUseCase : ISqlAuthoringUseCase
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var engine = _completionServices.CreateEngine(request.DocumentId.ToString());
+        var dialect = _dialectResolver.Resolve(request.ConnectionName);
+        var engine = _completionServices.CreateEngine(request.DocumentId.ToString(), dialect);
         IReadOnlyList<SqlCompletionItem> items = engine
             .GetCompletions(request.SqlText ?? string.Empty, request.CaretOffset)
             .Select(item => new SqlCompletionItem(
@@ -61,7 +75,8 @@ public sealed class NetezzaSqlAuthoringUseCase : ISqlAuthoringUseCase
         var help = _authoringServices.GetSignatureHelp(
             request.SqlText ?? string.Empty,
             request.CaretOffset,
-            request.DocumentId.ToString());
+            request.DocumentId.ToString(),
+            _dialectResolver.Resolve(request.ConnectionName));
         if (help is null)
             return Task.FromResult<SqlSignatureHelp?>(null);
 
@@ -99,7 +114,7 @@ public sealed class NetezzaSqlAuthoringUseCase : ISqlAuthoringUseCase
     public void Release(EditorDocumentId documentId) =>
         _authoringServices.ReleaseLint(documentId.ToString());
 
-    private static SqlDiagnostic MapDiagnostic(LintIssue issue)
+    private static SqlDiagnostic MapDiagnostic(LintIssue issue, SqlDialect dialect)
     {
         SqlDiagnosticSeverity severity = issue.Severity switch
         {
@@ -114,6 +129,6 @@ public sealed class NetezzaSqlAuthoringUseCase : ISqlAuthoringUseCase
             issue.StartOffset,
             Math.Max(0, issue.EndOffset - issue.StartOffset),
             issue.RuleId,
-            "Netezza");
+            DialectRuntime.DiagnosticSource(dialect));
     }
 }

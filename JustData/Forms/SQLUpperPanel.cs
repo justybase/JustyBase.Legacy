@@ -192,7 +192,9 @@ namespace JustyBaseLegacy.UI.DbForms
                 _connectionSessions,
                 _schemaTables,
                 _netezzaSqlCompletionServices,
-                _netezzaAutocompleteState);
+                _netezzaAutocompleteState,
+                connectionNameProvider: () => SelectedConnectionName,
+                databaseNameProvider: () => SelectedDatabase);
             _autocompleteSource = autocompleteSource;
             popupMenu.Items.SetAutocompleteItems(autocompleteSource);
             fastColoredTextBox1.Tag = new TbInfo(StringComparer.OrdinalIgnoreCase);

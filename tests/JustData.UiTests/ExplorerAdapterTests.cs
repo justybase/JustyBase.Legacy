@@ -1,11 +1,14 @@
 using AppBase.Common;
 using AppBase.Common.Configuration;
 using AppBase.Common.Enums;
+using AppBase.Common.Interfaces;
 using AppBase.Data;
 using AppBase.Data.Core.Core;
+using AppBase.Data.Core.Enums;
 using AppBase.Data.Core.Interfaces;
 using AppBase.Data.Core.Models;
 using JustData.Application.Schema;
+using JustData.Application.Login;
 using JustyBaseLegacy.UI.Schema;
 using JustyBaseLegacy.UI.Controls;
 using NSubstitute;
@@ -21,6 +24,7 @@ public sealed class ExplorerAdapterTests
     [InlineData(TypeInDatabase.procedure, SchemaNodeKind.Procedure)]
     [InlineData(TypeInDatabase.function, SchemaNodeKind.Function)]
     [InlineData(TypeInDatabase.db2alias, SchemaNodeKind.Alias)]
+    [InlineData(TypeInDatabase.db2nickname, SchemaNodeKind.Nickname)]
     [InlineData(TypeInDatabase.synonym, SchemaNodeKind.Synonym)]
     [InlineData(TypeInDatabase.sequence, SchemaNodeKind.Sequence)]
     [InlineData(TypeInDatabase.baseTables, SchemaNodeKind.Table)]
@@ -228,6 +232,131 @@ public sealed class ExplorerAdapterTests
 
         Assert.Equal(["Edit Comment", "Drop Column", "Add Column"],
             Flatten(SchemaContextMenuCatalog.GetEntries(node)));
+    }
+
+    [Fact]
+    public async Task DB2_database_children_match_the_vscode_type_groups_and_keep_schema_paths()
+    {
+        const string connectionName = "db2-cloud";
+        var database = Substitute.For<IGeneralDb, IDb2MetadataCatalog>();
+        database.DatabaseType.Returns(DatabaseTypeEnum.DB2);
+        database.DefaultDatabaseName.Returns("TESTDB");
+        ((IDb2MetadataCatalog)database).Db2CatalogObjects.Returns([
+            new Db2CatalogObject(Db2CatalogObjectType.Table, "JBL_ORDERS", "JBL_LIVE", SupportsColumns: true),
+            new Db2CatalogObject(Db2CatalogObjectType.View, "JBL_VIEW", "JBL_LIVE", SupportsColumns: true),
+            new Db2CatalogObject(Db2CatalogObjectType.Nickname, "JBL_NICK", "JBL_LIVE", SupportsColumns: true),
+            new Db2CatalogObject(Db2CatalogObjectType.Alias, "JBL_ALIAS", "JBL_LIVE", SupportsColumns: true),
+            new Db2CatalogObject(Db2CatalogObjectType.Procedure, "JBL_PROC", "JBL_LIVE"),
+            new Db2CatalogObject(Db2CatalogObjectType.Function, "JBL_FUNC", "JBL_LIVE"),
+            new Db2CatalogObject(Db2CatalogObjectType.Server, "ORACLE_SERVER", Owner: "JDBC"),
+            new Db2CatalogObject(Db2CatalogObjectType.ServerOption, "ORACLE_SERVER / NODE", Owner: "JDBC"),
+            new Db2CatalogObject(Db2CatalogObjectType.Wrapper, "JDBC", Owner: "JDBC"),
+            new Db2CatalogObject(Db2CatalogObjectType.WrapperOption, "JDBC / FENCED", Owner: "JDBC"),
+            new Db2CatalogObject(Db2CatalogObjectType.UserMapping, "ORACLE_SERVER / APP", Owner: "U"),
+            new Db2CatalogObject(Db2CatalogObjectType.PassthruAuth, "ORACLE_SERVER / APP / DB2INST1", Owner: "APP")
+        ]);
+        database.objectInSchema.Returns(new Dictionary<string, Dictionary<string, TypeInDatabase>>
+        {
+            ["JBL_LIVE"] = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["JBL_ORDERS"] = TypeInDatabase.table,
+                ["JBL_VIEW"] = TypeInDatabase.view,
+                ["JBL_ALIAS"] = TypeInDatabase.db2alias,
+                ["JBL_PROC"] = TypeInDatabase.procedure,
+                ["JBL_FUNC"] = TypeInDatabase.function
+            }
+        });
+
+        var sessions = new ConnectionSessionRegistry();
+        sessions.Set(connectionName, database);
+        var repository = new LegacySchemaRepository(
+            Substitute.For<IGeneralDbService>(),
+            Substitute.For<IDatabaseRuntimeContext>(),
+            Substitute.For<INetezzaCompletionRuntimeContext>(),
+            sessions,
+            Substitute.For<INetezzaSchemaTableCatalogWriter>(),
+            Substitute.For<IConnectionProfileCatalog>());
+
+        var databaseNode = new SchemaNode(
+            "db2-cloud/TESTDB",
+            "TESTDB",
+            SchemaNodeKind.Database,
+            new(connectionName, "TESTDB"),
+            true);
+
+        IReadOnlyList<SchemaNode> groups = await repository.GetChildrenAsync(databaseNode);
+        Assert.Equal([
+            "TABLE", "VIEW", "NICKNAME", "ALIAS", "PROCEDURE", "FUNCTION",
+            "SERVER", "SERVER OPTION", "WRAPPER", "WRAPPER OPTION", "USER MAPPING", "PASSTHRU AUTH"
+        ], groups.Select(node => node.Name));
+
+        SchemaNode tables = Assert.Single(groups, node => node.Name == "TABLE");
+        IReadOnlyList<SchemaNode> tableObjects = await repository.GetChildrenAsync(tables);
+        SchemaNode table = Assert.Single(tableObjects);
+
+        Assert.Equal(SchemaNodeKind.ObjectGroup, tables.Kind);
+        Assert.Equal(SchemaNodeKind.Table, table.Kind);
+        Assert.Equal("TESTDB", table.Path.Database);
+        Assert.Equal("JBL_LIVE", table.Path.Schema);
+        Assert.Equal("JBL_ORDERS", table.Path.Object);
+        Assert.Equal("JBL_LIVE.JBL_ORDERS", table.DisplayName);
+        Assert.Contains(groups, node => node.Name == "VIEW");
+        Assert.Contains(groups, node => node.Name == "NICKNAME");
+        Assert.Contains(groups, node => node.Name == "ALIAS");
+        Assert.Contains(groups, node => node.Name == "PROCEDURE");
+        Assert.Contains(groups, node => node.Name == "FUNCTION");
+
+        SchemaNode globalGroup = Assert.Single(groups, node => node.Name == "PASSTHRU AUTH");
+        SchemaNode globalObject = Assert.Single(await repository.GetChildrenAsync(globalGroup));
+        Assert.Equal(SchemaNodeKind.PassthruAuth, globalObject.Kind);
+        Assert.Null(globalObject.Path.Schema);
+    }
+
+    [Fact]
+    public async Task DB2_schema_search_matches_objects_and_columns_in_selected_context()
+    {
+        const string connectionName = "db2-cloud";
+        var database = Substitute.For<IGeneralDb, IDb2MetadataCatalog>();
+        database.DatabaseType.Returns(DatabaseTypeEnum.DB2);
+        database.DefaultDatabaseName.Returns("TESTDB");
+        ((IDb2MetadataCatalog)database).Db2CatalogObjects.Returns([
+            new Db2CatalogObject(Db2CatalogObjectType.Table, "JBL_ORDERS", "JBL_LIVE", SupportsColumns: true),
+            new Db2CatalogObject(Db2CatalogObjectType.Table, "JBL_ORDERS_ARCHIVE", "OTHER_SCHEMA", SupportsColumns: true)
+        ]);
+        database.objectInSchema.Returns(new Dictionary<string, Dictionary<string, TypeInDatabase>>
+        {
+            ["JBL_LIVE"] = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["JBL_ORDERS"] = TypeInDatabase.table
+            },
+            ["OTHER_SCHEMA"] = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["JBL_ORDERS_ARCHIVE"] = TypeInDatabase.table
+            }
+        });
+        database.GetColumns("TESTDB", "JBL_LIVE", "JBL_ORDERS")
+            .Returns(["ORDER_ID", "CUSTOMER_ID"]);
+
+        var sessions = new ConnectionSessionRegistry();
+        sessions.Set(connectionName, database);
+        var repository = new LegacySchemaRepository(
+            Substitute.For<IGeneralDbService>(),
+            Substitute.For<IDatabaseRuntimeContext>(),
+            Substitute.For<INetezzaCompletionRuntimeContext>(),
+            sessions,
+            Substitute.For<INetezzaSchemaTableCatalogWriter>(),
+            Substitute.For<IConnectionProfileCatalog>());
+
+        SchemaSearchResult result = await repository.SearchAsync(
+            new SchemaSearchRequest("CUSTOMER_ID", connectionName, "TESTDB", "JBL_LIVE", true));
+
+        SchemaNode match = Assert.Single(result.Nodes);
+        Assert.Equal("JBL_ORDERS", match.Name);
+        Assert.Equal("JBL_LIVE", match.Path.Schema);
+        Assert.Equal("TESTDB", match.Path.Database);
+        SchemaSearchResult outOfContext = await repository.SearchAsync(
+            new SchemaSearchRequest("ARCHIVE", connectionName, "TESTDB", "JBL_LIVE", true));
+        Assert.Empty(outOfContext.Nodes);
     }
 
     [Theory]

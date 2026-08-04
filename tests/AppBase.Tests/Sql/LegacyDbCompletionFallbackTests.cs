@@ -5,6 +5,8 @@ using AppBase.Common.Interfaces;
 using AppBase.Data;
 using AppBase.Data.Completion;
 using AppBase.Data.Core.Interfaces;
+using AppBase.Data.Core.Core;
+using AppBase.Data.Core.Enums;
 using AppBase.Data.Core.Models;
 using NSubstitute;
 
@@ -99,6 +101,56 @@ public sealed class LegacyDbCompletionFallbackTests : IDisposable
     {
         _sut.ResetCache();
         Assert.NotNull(_sut.GetCompletions("EMP"));
+    }
+
+    [Fact]
+    public void GetCompletions_db2_uses_the_requested_connection_and_schema()
+    {
+        const string db2Connection = "db2-cloud";
+        var db2 = Substitute.For<IGeneralDb>();
+        db2.DatabaseType.Returns(DatabaseTypeEnum.DB2);
+        db2.DefaultDatabaseName.Returns("TESTDB");
+        db2.objectInSchema.Returns(new Dictionary<string, Dictionary<string, TypeInDatabase>>
+        {
+            ["JBL_LIVE"] = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["JBL_ORDERS"] = TypeInDatabase.table,
+                ["JBL_VIEW"] = TypeInDatabase.view
+            },
+            ["OTHER_SCHEMA"] = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["OTHER_TABLE"] = TypeInDatabase.table
+            }
+        });
+        db2.GetColumns("TESTDB", "JBL_LIVE", "JBL_ORDERS")
+            .Returns(["ORDER_ID", "CUSTOMER_ID"]);
+        _db.DriverName(db2Connection).Returns("DB2");
+
+        var sessions = new ConnectionSessionRegistry();
+        sessions.Set(db2Connection, db2);
+        var db2Fallback = new LegacyDbCompletionFallback(_context, _db, Substitute.For<INetezzaSchemaTableCatalog>(), sessions);
+
+        var objects = db2Fallback.GetCompletions("JBL_LIVE.", db2Connection, "TESTDB").ToList();
+        var columns = db2Fallback.GetCompletions("JBL_LIVE.JBL_ORDERS.", db2Connection, "TESTDB").ToList();
+        var schemaAliasColumns = db2Fallback.GetCompletions(
+            "A.",
+            db2Connection,
+            "TESTDB",
+            "SELECT * FROM JBL_LIVE.JBL_ORDERS A WHERE A.").ToList();
+        var databaseAliasColumns = db2Fallback.GetCompletions(
+            "A.",
+            db2Connection,
+            "TESTDB",
+            "SELECT * FROM TESTDB.JBL_LIVE.JBL_ORDERS A WHERE A.").ToList();
+
+        Assert.Contains(objects, item => item.ToString()!.Contains("JBL_ORDERS", StringComparison.Ordinal));
+        Assert.Contains(objects, item => item.ToString()!.Contains("JBL_VIEW", StringComparison.Ordinal));
+        Assert.DoesNotContain(objects, item => item.ToString()!.Contains("OTHER_TABLE", StringComparison.Ordinal));
+        Assert.Contains(columns, item => item.ToString()!.Contains("ORDER_ID", StringComparison.Ordinal));
+        Assert.Contains(columns, item => item.ToString()!.Contains("CUSTOMER_ID", StringComparison.Ordinal));
+        Assert.Contains(schemaAliasColumns, item => item.ToString()!.Contains("ORDER_ID", StringComparison.Ordinal));
+        Assert.Contains(databaseAliasColumns, item => item.ToString()!.Contains("CUSTOMER_ID", StringComparison.Ordinal));
+        db2.Received().GetColumns("TESTDB", "JBL_LIVE", "JBL_ORDERS");
     }
 
     private void SeedHappyPath()

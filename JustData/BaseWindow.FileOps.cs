@@ -23,13 +23,13 @@ using JustDataAdditionalForms;
 using JustyBase.NetezzaDriver;
 using JustyBase.NetezzaSqlParser.Authoring;
 using JustData.Application.Editor;
+using JustData.ViewModels.Editor;
 using System.Drawing;
 using JustyBase.NetezzaSqlParser.Linter;
 using JustyBaseLegacy.UI.Helpers;
 using JustyBaseLegacy.Services;
 using JustyBaseLegacy.UI.Controls;
 using JustyBaseLegacy.UI.DbForms;
-using JustyBaseLegacy.UI.Extensions;
 using JustyBaseLegacy.UI.Models;
 using SpreadSheetTasks;
 using System;
@@ -72,13 +72,20 @@ namespace JustyBaseLegacy.UI
 
         public async Task<FastColoredTextBox?> OpenSqlFileAsync(
             string fileName,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            string? targetConnectionName = null,
+            string? targetDatabaseName = null)
         {
             if (string.IsNullOrWhiteSpace(fileName))
                 return null;
 
             if (!File.Exists(fileName))
-                return AddMainTabCore(fileName, title: "", trescSQL: "");
+                return AddMainTabCore(
+                    fileName,
+                    title: "",
+                    trescSQL: "",
+                    targetConnectionName,
+                    targetDatabaseName);
 
             try
             {
@@ -86,7 +93,9 @@ namespace JustyBaseLegacy.UI
                 return AddMainTabCore(
                     fileName,
                     title: "",
-                    trescSQL: documentText);
+                    trescSQL: documentText,
+                    targetConnectionName,
+                    targetDatabaseName);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -128,7 +137,12 @@ namespace JustyBaseLegacy.UI
                     }
                     if (pathIndex >= 0 && pathIndex < bundle.SqlPaths.Count)
                     {
-                        await OpenSqlFileAsync(bundle.SqlPaths[pathIndex], cancellationToken);
+                        ManySqlDocumentState? state = FindManySqlDocumentState(bundle, bundle.SqlPaths[pathIndex]);
+                        await OpenSqlFileAsync(
+                            bundle.SqlPaths[pathIndex],
+                            cancellationToken,
+                            state?.ConnectionName,
+                            state?.DatabaseName);
                         openedPaths.Add(Path.GetFullPath(bundle.SqlPaths[pathIndex]));
                         continue;
                     }
@@ -146,7 +160,13 @@ namespace JustyBaseLegacy.UI
                     if (contentIndex >= 0 && contentIndex < bundle.SqlContentList.Count)
                     {
                         ManySqlContent content = bundle.SqlContentList[contentIndex];
-                        AddMainTab(null, title: content.Title, trescSQL: content.Text);
+                        ManySqlDocumentState? state = FindManySqlDocumentState(bundle, content.Title);
+                        AddMainTabCore(
+                            null,
+                            title: content.Title,
+                            trescSQL: content.Text,
+                            state?.ConnectionName,
+                            state?.DatabaseName);
                         openedContent.Add(contentIndex);
                     }
                 }
@@ -155,7 +175,8 @@ namespace JustyBaseLegacy.UI
                 {
                     if (!openedPaths.Contains(Path.GetFullPath(path)))
                     {
-                        await OpenSqlFileAsync(path, cancellationToken);
+                        ManySqlDocumentState? state = FindManySqlDocumentState(bundle, path);
+                        await OpenSqlFileAsync(path, cancellationToken, state?.ConnectionName, state?.DatabaseName);
                         openedPaths.Add(Path.GetFullPath(path));
                     }
                 }
@@ -165,7 +186,13 @@ namespace JustyBaseLegacy.UI
                     if (!openedContent.Contains(index))
                     {
                         ManySqlContent content = bundle.SqlContentList[index];
-                        AddMainTab(null, title: content.Title, trescSQL: content.Text);
+                        ManySqlDocumentState? state = FindManySqlDocumentState(bundle, content.Title);
+                        AddMainTabCore(
+                            null,
+                            title: content.Title,
+                            trescSQL: content.Text,
+                            state?.ConnectionName,
+                            state?.DatabaseName);
                     }
                 }
 
@@ -250,6 +277,7 @@ namespace JustyBaseLegacy.UI
             await _manySqlSaveGate.WaitAsync(cancellationToken);
             try
             {
+                SynchronizeEditorDocumentState();
                 IReadOnlyList<EditorDocumentId>? documentOrder = _tabManager is DockSuiteTabManager dockSuiteTabManager
                     ? dockSuiteTabManager.GetEditorDocumentOrder()
                     : null;
@@ -604,5 +632,30 @@ namespace JustyBaseLegacy.UI
                 }
             }
         }
+
+        private void SynchronizeEditorDocumentState()
+        {
+            foreach (TabPage tab in EditorTabPages)
+            {
+                if (!_documentIdsByTab.TryGetValue(tab, out EditorDocumentId documentId))
+                    continue;
+
+                EditorDocumentViewModel? document = _editorWorkspaceViewModel.Documents
+                    .FirstOrDefault(item => item.Id == documentId);
+                if (document is null || _tabManager.GetEditorPanel(tab) is not IEditorPanel panel)
+                    continue;
+
+                document.ConnectionName = panel.SelectedConnectionName;
+                document.DatabaseName = panel.SelectedDatabase;
+                document.KeepConnectionOpen = panel.KeepConnectionOpen;
+                document.ContinueOnError = panel.ContinueOnError;
+            }
+        }
+
+        private static ManySqlDocumentState? FindManySqlDocumentState(
+            ManySqlBundle bundle,
+            string token) =>
+            bundle.DocumentStates?.FirstOrDefault(state =>
+                string.Equals(state.Token, token, StringComparison.OrdinalIgnoreCase));
     }
 }

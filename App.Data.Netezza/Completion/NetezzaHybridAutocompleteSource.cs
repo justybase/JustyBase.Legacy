@@ -3,12 +3,14 @@ using AppBase.Common.Interfaces;
 using JustData.Application.Editor;
 using AppBase.Data.Core.Interfaces;
 using AppBase.Data.Core.Core;
+using AppBase.Data.Core.Enums;
 using AppBase.Data.Core.Models;
 using FastColoredTextBoxNS;
 using FastColoredTextBoxNS.Helpers;
 using JustData.Application.Sql;
 using JustyBase.NetezzaSqlParser.Authoring;
 using JustyBase.NetezzaSqlParser.Completion;
+using JustyBase.NetezzaSqlParser.Dialects;
 using JustyBase.NetezzaSqlParser.Visitor;
 using System.Collections;
 
@@ -28,11 +30,14 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
     private readonly INetezzaSchemaTableCatalog _schemaTables;
     private readonly NetezzaSqlCompletionServices _completionServices;
     private NzCompletionEngine _completionEngine;
+    private SqlDialect _dialect;
     private EditorDocumentId _documentId;
     private readonly ISchemaProvider _schemaProvider;
     private readonly LegacySnippetsProvider _snippetsProvider;
     private readonly LegacyDbCompletionFallback _dbFallback;
     private readonly INetezzaAutocompleteState _state;
+    private readonly Func<string> _connectionNameProvider;
+    private readonly Func<string> _databaseNameProvider;
     private readonly Dictionary<string, int> _keyValuePairsForAutocomplete = new();
 
     public NetezzaHybridAutocompleteSource(
@@ -47,7 +52,9 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         INetezzaSchemaTableCatalog schemaTables,
         NetezzaSqlCompletionServices completionServices,
         INetezzaAutocompleteState state,
-        EditorDocumentId? documentId = null)
+        EditorDocumentId? documentId = null,
+        Func<string>? connectionNameProvider = null,
+        Func<string>? databaseNameProvider = null)
     {
         _menu = menu;
         _completionContext = completionContext;
@@ -57,15 +64,22 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         _schemaTables = schemaTables ?? throw new ArgumentNullException(nameof(schemaTables));
         _completionServices = completionServices;
         _state = state ?? throw new ArgumentNullException(nameof(state));
+        _connectionNameProvider = connectionNameProvider ?? (() => _completionContext.SelectedConnectionName);
+        _databaseNameProvider = databaseNameProvider ?? (() => _completionContext.SelectedDatabase);
         _schemaProvider = completionServices.SchemaProvider;
         _snippetsProvider = new LegacySnippetsProvider(
             applicationSettingsContext,
             sessionVariableStore,
             _state);
-        _dbFallback = new LegacyDbCompletionFallback(completionContext, generalDbService, _schemaTables);
+        _dbFallback = new LegacyDbCompletionFallback(
+            completionContext,
+            generalDbService,
+            _schemaTables,
+            _connectionSessions);
 
         _documentId = documentId ?? EditorDocumentId.New();
-        _completionEngine = completionServices.CreateEngine(_documentId.ToString());
+        _dialect = ResolveDialect(_connectionNameProvider());
+        _completionEngine = completionServices.CreateEngine(_documentId.ToString(), _dialect);
     }
 
     public void SetDocumentId(EditorDocumentId documentId)
@@ -74,7 +88,7 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
             return;
         _completionServices.ParsingCoordinator.Release(_documentId.ToString());
         _documentId = documentId;
-        _completionEngine = _completionServices.CreateEngine(_documentId.ToString());
+        _completionEngine = _completionServices.CreateEngine(_documentId.ToString(), _dialect);
     }
 
     public void ResetCache() => _dbFallback.ResetCache();
@@ -119,17 +133,66 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         if (!_completionContext.SchemaRefreshed)
             yield break;
 
-        if (_generalDbService.DriverName(_completionContext.SelectedConnectionName) != "NetezzaSQL")
+        string activeConnectionName = _connectionNameProvider();
+        string activeDatabaseName = _databaseNameProvider();
+        SqlDialect previousDialect = _dialect;
+        _dialect = ResolveDialect(activeConnectionName);
+        if (_dialect != previousDialect)
+            _completionServices.InvalidateSchema();
+        _completionEngine = _completionServices.CreateEngine(_documentId.ToString(), _dialect);
+
+        if (_dialect is not (SqlDialect.Netezza or SqlDialect.Db2))
         {
-            foreach (var item in YieldGeneralDriverFallback())
+            foreach (var item in YieldGeneralDriverFallback(activeConnectionName))
                 yield return PrepareLegacyItem(item);
             yield break;
         }
 
-        _completionServices.EnsureSchemaForConnection(_completionContext, _completionContext.SelectedConnectionName);
+        if (_dialect == SqlDialect.Netezza)
+            _completionServices.EnsureSchemaForConnection(_completionContext, activeConnectionName);
+        else if (_connectionSessions.TryGetValue(activeConnectionName, out IGeneralDb? database)
+            && database.DatabaseType == DatabaseTypeEnum.DB2)
+            _completionServices.EnsureDb2Schema(database, activeConnectionName, activeDatabaseName);
 
-        foreach (var item in GetSqlCompletions(text))
+        List<AutocompleteItem> engineItems = GetSqlCompletions(
+            text,
+            activeConnectionName,
+            activeDatabaseName).ToList();
+        if (_dialect != SqlDialect.Db2)
+        {
+            foreach (var item in engineItems)
+                yield return PrepareLegacyItem(item);
+            yield break;
+        }
+
+        var db2Items = new List<AutocompleteItem>(engineItems);
+        var emitted = new HashSet<string>(
+            db2Items.Select(item => item.ToString()),
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var item in _dbFallback.GetCompletions(
+            text,
+            activeConnectionName,
+            activeDatabaseName,
+            _menu.Fragment.tb.Text))
+        {
+            if (emitted.Add(item.ToString()))
+                db2Items.Add(item);
+        }
+
+        foreach (var item in YieldGeneralDriverFallback(activeConnectionName))
+        {
+            if (emitted.Add(item.ToString()))
+                db2Items.Add(item);
+        }
+
+        int cursorOffset = _menu.Fragment.tb.PlaceToPosition(_menu.Fragment.End);
+        foreach (var item in FctbCompletionMapper.PrioritizeSchemasForRelationContext(
+            db2Items,
+            _menu.Fragment.tb.Text,
+            cursorOffset))
+        {
             yield return PrepareLegacyItem(item);
+        }
     }
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
@@ -154,7 +217,10 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         return CompletionItemAppearance.Apply(item, CompletionIconKind.Keyword, "Keyword");
     }
 
-    private IEnumerable<AutocompleteItem> GetSqlCompletions(string fragmentText)
+    private IEnumerable<AutocompleteItem> GetSqlCompletions(
+        string fragmentText,
+        string activeConnectionName,
+        string activeDatabaseName)
     {
         var tb = _menu.Fragment.tb;
         var sql = tb.Text;
@@ -163,11 +229,16 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         // shared DocumentParsingCoordinator. Do not cache the mapped FCTB list:
         // AliasHints and HintWithTable are intentionally mutated asynchronously
         // by AutocompleteClass and must be reflected immediately.
-        foreach (var item in BuildSqlCompletions(fragmentText, sql, cursorOffset, tb.LinesCount))
+        foreach (var item in BuildSqlCompletions(fragmentText, sql, cursorOffset, tb.LinesCount, activeDatabaseName))
             yield return item;
     }
 
-    private IEnumerable<AutocompleteItem> BuildSqlCompletions(string text, string sql, int cursorOffset, int lineCount)
+    private IEnumerable<AutocompleteItem> BuildSqlCompletions(
+        string text,
+        string sql,
+        int cursorOffset,
+        int lineCount,
+        string activeDatabaseName)
     {
         var ddTables = FctbCompletionMapper.MapDatabaseDoubleDotTables(
             text, _schemaProvider, _completionServices.MetadataSnapshot);
@@ -210,8 +281,9 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         foreach (var item in mappedEngineItems)
             yield return item;
 
-        bool needsLegacyFallback = LegacyCompletionPolicy.ShouldRunLegacyPath(engineItems, sql)
-            || (text.Contains('.') && mappedEngineItems.Count == 0);
+        bool needsLegacyFallback = _dialect == SqlDialect.Netezza
+            && (LegacyCompletionPolicy.ShouldRunLegacyPath(engineItems, sql)
+                || (text.Contains('.') && mappedEngineItems.Count == 0));
 
         if (needsLegacyFallback)
         {
@@ -322,9 +394,9 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         return labels;
     }
 
-    private IEnumerable<AutocompleteItem> YieldGeneralDriverFallback()
+    private IEnumerable<AutocompleteItem> YieldGeneralDriverFallback(string connectionName)
     {
-        if (!_connectionSessions.TryGetValue(_completionContext.SelectedConnectionName, out IGeneralDb database))
+        if (!_connectionSessions.TryGetValue(connectionName, out IGeneralDb database))
             yield break;
 
         IAutocompleteSuggestionStore suggestions = database.AutocompleteSuggestions;
@@ -359,4 +431,12 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
             yield return CompletionItemAppearance.Apply(
                 new AutocompleteItem(item), CompletionIconKind.Keyword, "Keyword");
     }
+
+    private SqlDialect ResolveDialect(string connectionName) =>
+        string.Equals(
+            _generalDbService.DriverName(connectionName),
+            "DB2",
+            StringComparison.OrdinalIgnoreCase)
+            ? SqlDialect.Db2
+            : SqlDialect.Netezza;
 }

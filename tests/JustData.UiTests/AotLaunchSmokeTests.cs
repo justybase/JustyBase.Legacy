@@ -7,11 +7,11 @@ using System.Diagnostics;
 namespace JustData.UiTests;
 
 /// <summary>
-/// Smoke tests that launch the AOT-published (native) executable to verify
+/// Smoke tests that launch the self-contained executable to verify
 /// it starts, renders the login window, and responds to basic interaction.
-/// These tests require an AOT publish to have been run first:
+/// These tests require a self-contained publish to have been run first:
 /// <code>
-/// dotnet publish JustData/JustData.csproj -p:UseAOT=true -p:SelfContained=true -c Release
+/// dotnet publish JustData/JustData.csproj -p:UseAOT=false -p:SelfContained=true -c Release
 /// </code>
 /// </summary>
 public sealed class AotLaunchSmokeTests
@@ -25,7 +25,7 @@ public sealed class AotLaunchSmokeTests
         Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
     /// <summary>
-    /// Expected path to the AOT-published executable.
+    /// Expected path to the self-contained executable.
     /// </summary>
     private static readonly string AotExePath = Path.Combine(
         RepoRoot,
@@ -38,10 +38,10 @@ public sealed class AotLaunchSmokeTests
         "JustyBaseLegacy.exe");
 
     [Fact]
-    [Trait("Category", "AOT")]
+    [Trait("Category", "SelfContained")]
     public void Aot_published_exe_launches_login_window()
     {
-        // Arrange: skip if AOT exe not found (publish hasn't been run yet)
+        // Arrange: skip if self-contained exe not found (publish hasn't been run yet)
         AssertSkipIfAotExeMissing();
 
         // Act
@@ -61,7 +61,7 @@ public sealed class AotLaunchSmokeTests
                 () => application.GetAllTopLevelWindows(automation)
                     .FirstOrDefault(window => window.FindFirstDescendant(
                         cf => cf.ByAutomationId("connectionSelectorComboBox")) is not null),
-                "the Login window from the AOT-compiled exe");
+                        "the Login window from the self-contained exe");
 
             // Verify key AutomationIds are present in the login window
             Assert.NotNull(login.FindFirstDescendant(cf => cf.ByAutomationId("userNameTextBox")));
@@ -69,11 +69,11 @@ public sealed class AotLaunchSmokeTests
             Assert.NotNull(login.FindFirstDescendant(cf => cf.ByAutomationId("selectDatabaseButton")));
             Assert.NotNull(login.FindFirstDescendant(cf => cf.ByAutomationId("saveBt")));
 
-            // Note: The login window does not respond to Escape or Alt+F4 in the AOT build.
+            // Note: The login window does not respond to Escape or Alt+F4 in this build.
             // The process is cleaned up in the finally block below.
             // If this test times out, the login window is likely blocking.
             // In that case, the finally block will kill it.
-            // This is not a regression — the same behavior occurs in the non-AOT build.
+            // This is not a regression — the same behavior occurs in framework-dependent builds.
         }
         finally
         {
@@ -90,9 +90,9 @@ public sealed class AotLaunchSmokeTests
     {
         if (!File.Exists(AotExePath))
         {
-            Assert.Fail($"AOT-published executable not found at: {AotExePath}{Environment.NewLine}" +
-                        "Run the AOT publish first:" +
-                        "  dotnet publish JustData/JustData.csproj -p:UseAOT=true -p:SelfContained=true -c Release");
+            Assert.Fail($"Self-contained executable not found at: {AotExePath}{Environment.NewLine}" +
+                        "Run the self-contained publish first:" +
+                        "  dotnet publish JustData/JustData.csproj -p:UseAOT=false -p:SelfContained=true -c Release");
         }
     }
 

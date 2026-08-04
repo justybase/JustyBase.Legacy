@@ -7,7 +7,7 @@ using System.Diagnostics;
 namespace JustData.UiTests;
 
 /// <summary>
-/// AOT-specific smoke tests that launch the native-compiled executable,
+/// Self-contained smoke tests that launch the published executable,
 /// log in with the default profile, and exercise key panels that are most
 /// vulnerable to trimming/PInvoke issues: the SQL editor, files/variables
 /// panels, database explorer tree, object explorer grid, and diagnostics.
@@ -34,7 +34,7 @@ public sealed class AotWorkflowSmokeTests
     // ──────────────────────────────────────────────
 
     [Fact]
-    [Trait("Category", "AOT")]
+    [Trait("Category", "SelfContained")]
     public void Aot_SQL_editor_is_present_and_enabled()
     {
         AssertSkipIfAotExeMissing();
@@ -43,7 +43,7 @@ public sealed class AotWorkflowSmokeTests
         AutomationElement editor = UiTestHelpers.WaitFor(
             () => session.MainWindow.FindFirstDescendant(
                 cf => cf.ByAutomationId(MainWindowId)),
-            "the SQL editor in the AOT-compiled app");
+            "the SQL editor in the self-contained app");
 
         Assert.NotNull(editor);
         Assert.True(editor.IsEnabled,
@@ -51,7 +51,7 @@ public sealed class AotWorkflowSmokeTests
     }
 
     [Fact]
-    [Trait("Category", "AOT")]
+    [Trait("Category", "SelfContained")]
     public void Aot_SQL_editor_accepts_typing()
     {
         AssertSkipIfAotExeMissing();
@@ -60,7 +60,7 @@ public sealed class AotWorkflowSmokeTests
         AutomationElement editor = UiTestHelpers.WaitFor(
             () => session.MainWindow.FindFirstDescendant(
                 cf => cf.ByAutomationId(MainWindowId)),
-            "the SQL editor in the AOT-compiled app");
+            "the SQL editor in the self-contained app");
 
         Assert.NotNull(editor);
 
@@ -69,7 +69,7 @@ public sealed class AotWorkflowSmokeTests
         editor.Focus();
         Thread.Sleep(500);
         Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_A);
-        Keyboard.Type("SELECT 1 AS AOT_TEST");
+        Keyboard.Type("SELECT 1 AS SELF_CONTAINED_TEST");
 
         // Give the editor time to process the input
         Thread.Sleep(500);
@@ -91,7 +91,7 @@ public sealed class AotWorkflowSmokeTests
         Assert.True(clipboardThread.Join(TimeSpan.FromSeconds(5)),
             "Timed out reading clipboard for editor text.");
 
-        Assert.Contains("AOT_TEST", clipboardText ?? string.Empty);
+        Assert.Contains("SELF_CONTAINED_TEST", clipboardText ?? string.Empty);
     }
 
     // ──────────────────────────────────────────────
@@ -99,7 +99,7 @@ public sealed class AotWorkflowSmokeTests
     // ──────────────────────────────────────────────
 
     [Fact]
-    [Trait("Category", "AOT")]
+    [Trait("Category", "SelfContained")]
     public void Aot_Files_and_variables_panels_have_automation_ids()
     {
         AssertSkipIfAotExeMissing();
@@ -118,7 +118,7 @@ public sealed class AotWorkflowSmokeTests
     // ──────────────────────────────────────────────
 
     [Fact]
-    [Trait("Category", "AOT")]
+    [Trait("Category", "SelfContained")]
     public void Aot_Database_explorer_mvvm_controls_are_present()
     {
         AssertSkipIfAotExeMissing();
@@ -139,7 +139,7 @@ public sealed class AotWorkflowSmokeTests
 
         // Verify the explorer is tall enough to be useful (not clipped/zero-height)
         Assert.True(dbExplorer.BoundingRectangle.Height >= 100,
-            $"The database explorer is clipped to {dbExplorer.BoundingRectangle.Height}px in the AOT build.");
+            $"The database explorer is clipped to {dbExplorer.BoundingRectangle.Height}px in the self-contained build.");
     }
 
     // ──────────────────────────────────────────────
@@ -147,7 +147,7 @@ public sealed class AotWorkflowSmokeTests
     // ──────────────────────────────────────────────
 
     [Fact]
-    [Trait("Category", "AOT")]
+    [Trait("Category", "SelfContained")]
     public void Aot_Object_explorer_grid_is_present()
     {
         AssertSkipIfAotExeMissing();
@@ -167,7 +167,7 @@ public sealed class AotWorkflowSmokeTests
     // ──────────────────────────────────────────────
 
     [Fact]
-    [Trait("Category", "AOT")]
+    [Trait("Category", "SelfContained")]
     public void Aot_Diagnostics_panel_elements_are_present()
     {
         AssertSkipIfAotExeMissing();
@@ -186,7 +186,7 @@ public sealed class AotWorkflowSmokeTests
     // ──────────────────────────────────────────────
 
     [Fact]
-    [Trait("Category", "AOT")]
+    [Trait("Category", "SelfContained")]
     public void Aot_DockPanel_stable_after_login()
     {
         AssertSkipIfAotExeMissing();
@@ -205,9 +205,9 @@ public sealed class AotWorkflowSmokeTests
     {
         if (!File.Exists(AotExePath))
         {
-            Assert.Fail($"AOT-published executable not found at: {AotExePath}{Environment.NewLine}" +
-                        "Run the AOT publish first:" +
-                        "  dotnet publish JustData/JustData.csproj -p:UseAOT=true -p:SelfContained=true -c Release");
+            Assert.Fail($"Self-contained executable not found at: {AotExePath}{Environment.NewLine}" +
+                        "Run the self-contained publish first:" +
+                        "  dotnet publish JustData/JustData.csproj -p:UseAOT=false -p:SelfContained=true -c Release");
         }
     }
 
@@ -228,20 +228,20 @@ public sealed class AotWorkflowSmokeTests
                 () => application.GetAllTopLevelWindows(automation)
                     .FirstOrDefault(window => window.FindFirstDescendant(
                         cf => cf.ByAutomationId("connectionSelectorComboBox")) is not null),
-                "the Login window from the AOT-compiled exe");
+                "the Login window from the self-contained exe");
 
             // Press the Save & Select button to log in with the default profile
             UiTestHelpers.WaitFor(
                 () => login.FindFirstDescendant(
                     cf => cf.ByAutomationId("selectDatabaseButton"))?.AsButton(),
-                "the Save & Select button in the AOT login window")
+                "the Save & Select button in the self-contained login window")
                 .Invoke();
 
             Window main = UiTestHelpers.WaitFor(
                 () => application.GetAllTopLevelWindows(automation)
                     .FirstOrDefault(window => window.FindFirstDescendant(
                         cf => cf.ByAutomationId(MainWindowId)) is not null),
-                "the main JustData window from the AOT-compiled exe",
+                "the main JustData window from the self-contained exe",
                 timeout: TimeSpan.FromSeconds(45));
 
             return new UiSession(application, automation, process, main);
