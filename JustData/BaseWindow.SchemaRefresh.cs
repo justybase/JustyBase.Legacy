@@ -263,11 +263,11 @@ namespace JustyBaseLegacy.UI
                 if (SelectedConnectionName == selConnName
                     && _connectionSessions.TryGetValue(selConnName, out var gdbExtend))
                 {
-                    if (gdbExtend.DatabaseList is not null)
+                    if (gdbExtend.DatabaseList is { Count: > 0 })
                     {
                         CurrentUpper.ExtendDatabasesList(gdbExtend.DatabaseList.ToArray());
                     }
-                    else
+                    else if (!string.IsNullOrWhiteSpace(gdbExtend.DefaultDatabaseName))
                     {
                         CurrentUpper.ExtendDatabasesList(new string[] { gdbExtend.DefaultDatabaseName });
                     }

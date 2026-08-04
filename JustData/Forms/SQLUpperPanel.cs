@@ -96,8 +96,23 @@ namespace JustyBaseLegacy.UI.DbForms
                 DisposeAutocompleteIcons();
             };
             SetupEditorLayout();
-            cbDatabases.Items.Add(string.Intern(selectedDatabase));
-            cbDatabases.SelectedIndex = 0;
+            // A newly created document must start with the complete database
+            // projection for its connection.  DDL documents used to appear to
+            // work because they supplied one database explicitly from the
+            // schema node, while a blank document only added the current
+            // database and therefore had nothing else to select.
+            string[] catalogDatabases = _editorCatalogState.Snapshot
+                .DatabasesFor(selectedConnection)
+                .Where(database => !string.IsNullOrWhiteSpace(database))
+                .ToArray();
+            if (!string.IsNullOrWhiteSpace(selectedDatabase)
+                && !catalogDatabases.Contains(selectedDatabase, StringComparer.OrdinalIgnoreCase))
+            {
+                cbDatabases.Items.Add(string.Intern(selectedDatabase));
+            }
+            cbDatabases.Items.AddRange(catalogDatabases.Select(string.Intern).ToArray());
+            if (cbDatabases.Items.Count > 0)
+                cbDatabases.SelectedIndex = 0;
             cbDatabases.SelectedIndexChanged += new System.EventHandler(cbDatabases_SelectedIndexChanged);
 
             SetEnabledConnectionsDatabases(isEnabledMode);
@@ -278,11 +293,11 @@ namespace JustyBaseLegacy.UI.DbForms
             {
                 ExtendDatabasesList(databases.Values.Select(arg => string.Intern(arg.DatabaseName)));
             }
-            else if (selectedDatabase.DatabaseList is not null)
+            else if (selectedDatabase.DatabaseList is { Count: > 0 })
             {
                 ExtendDatabasesList(selectedDatabase.DatabaseList.Select(o => string.Intern(o)));
             }
-            else if (selectedDatabase.DefaultDatabaseName is not null)
+            else if (!string.IsNullOrWhiteSpace(selectedDatabase.DefaultDatabaseName))
             {
                 ExtendDatabasesList(new string[] { string.Intern(selectedDatabase.DefaultDatabaseName) });
             }

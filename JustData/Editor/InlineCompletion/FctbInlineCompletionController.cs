@@ -317,14 +317,24 @@ public sealed class FctbInlineCompletionController : IDisposable
 
     private CompletionSelectionSnapshot? CreateCompletionSelection(AutocompleteItem? item = null)
     {
-        item ??= _completionMenu?.Items.FocussedItem;
-        if (item is null || _completionMenu is null)
-            return null;
+        try
+        {
+            item ??= _completionMenu?.Items.FocussedItem;
+            if (item is null || _completionMenu is null)
+                return null;
 
-        var end = Math.Clamp(_editor.SelectionStart, 0, _editor.TextLength);
-        var fragmentText = _completionMenu.Fragment?.Text ?? string.Empty;
-        var start = Math.Clamp(end - fragmentText.Length, 0, end);
-        return new CompletionSelectionSnapshot(item.GetTextForReplace(), start, end);
+            var end = Math.Clamp(_editor.SelectionStart, 0, _editor.TextLength);
+            var fragmentText = _completionMenu.Fragment?.Text ?? string.Empty;
+            var start = Math.Clamp(end - fragmentText.Length, 0, end);
+            return new CompletionSelectionSnapshot(item.GetTextForReplace(), start, end);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // The editor can update its lines between the autocomplete menu
+            // event and reading Fragment.Text. The completion is optional;
+            // discard this stale selection instead of terminating the UI.
+            return null;
+        }
     }
 
     private string GetVisibleCompletionText(CompletionSelectionSnapshot selection)

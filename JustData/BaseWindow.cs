@@ -1391,7 +1391,7 @@ namespace JustyBaseLegacy.UI
                 : targetConnectionName;
             string driver = _generalDbService.DriverName(conName);
             string selectedDatabase = string.IsNullOrWhiteSpace(targetDatabaseName)
-                ? SelectedDatabase
+                ? ResolveInitialDatabase(conName)
                 : targetDatabaseName;
 
             if (!string.IsNullOrWhiteSpace(fileName)
@@ -1588,6 +1588,26 @@ namespace JustyBaseLegacy.UI
                 CollapseAllregion(sqlUpper.CurrentTb);
             }
             return sqlUpper.CurrentTb;
+        }
+
+        private string ResolveInitialDatabase(string connectionName)
+        {
+            // SelectedDatabase belongs to the active editor, which may be a
+            // different connection when a new document is opened. Prefer the
+            // catalog/profile value for the requested connection in that case.
+            if (string.Equals(SelectedConnectionName, connectionName, StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(SelectedDatabase))
+            {
+                return SelectedDatabase;
+            }
+
+            string catalogDatabase = _editorCatalogState.Snapshot
+                .DatabasesFor(connectionName)
+                .FirstOrDefault(database => !string.IsNullOrWhiteSpace(database));
+            if (!string.IsNullOrWhiteSpace(catalogDatabase))
+                return catalogDatabase;
+
+            return _generalDbService.DBname(connectionName) ?? string.Empty;
         }
 
         private void OnEditorDocumentReloaded(EditorDocumentViewModel document)
