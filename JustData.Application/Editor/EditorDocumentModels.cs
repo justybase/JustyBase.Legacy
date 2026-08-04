@@ -28,6 +28,16 @@ public sealed record EditorFileChange(
 public sealed record ManySqlContent(string Title, string Text);
 
 /// <summary>
+/// Editor state that must follow a tab when a Many SQL session is restored.
+/// The token is the file path for file-backed documents or the tab title for
+/// in-memory documents.
+/// </summary>
+public sealed record ManySqlDocumentState(
+    string Token,
+    string ConnectionName,
+    string DatabaseName);
+
+/// <summary>
 /// Neutral representation of the legacy .manysql wire format.
 /// The adapter is responsible for preserving its JSON property names.
 /// </summary>
@@ -35,7 +45,8 @@ public sealed record ManySqlBundle(
     IReadOnlyList<string> SqlPaths,
     IReadOnlyList<ManySqlContent> SqlContentList,
     IReadOnlyList<string> TabsOrder,
-    int SelectedTabNum);
+    int SelectedTabNum,
+    IReadOnlyList<ManySqlDocumentState>? DocumentStates = null);
 
 public enum UnsavedDocumentDecision
 {

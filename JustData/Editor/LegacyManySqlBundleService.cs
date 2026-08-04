@@ -19,7 +19,8 @@ public sealed class WinFormsManySqlBundleService : IManySqlBundleService
                 .Select(items => new ManySqlContent(items[0], items[1]))
                 .ToArray(),
             wire.TabsOrder ?? [],
-            wire.SelectedTabNum);
+            wire.SelectedTabNum,
+            wire.DocumentStates ?? []);
     }
 
     public async Task SaveAsync(
@@ -39,7 +40,8 @@ public sealed class WinFormsManySqlBundleService : IManySqlBundleService
                 .Select(content => new List<string> { content.Title, content.Text })
                 .ToList(),
             TabsOrder = bundle.TabsOrder.ToList(),
-            SelectedTabNum = bundle.SelectedTabNum
+            SelectedTabNum = bundle.SelectedTabNum,
+            DocumentStates = bundle.DocumentStates?.ToList()
         };
 
         string json = JsonSerializer.Serialize(wire, AppJsonSerializerContext.Default.ManySqlWireModel);

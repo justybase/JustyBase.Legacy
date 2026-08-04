@@ -1,10 +1,16 @@
+using AppBase.Common.Enums;
+using AppBase.Data;
 using AppBase.Data.Completion;
+using AppBase.Data.Core.Core;
+using AppBase.Data.Core.Enums;
 using AppBase.Data.Core.Interfaces;
 using JustyBase.Netezza.Models;
 using JustyBase.NetezzaSqlParser.Ast;
 using JustyBase.NetezzaSqlParser.Completion;
+using JustyBase.NetezzaSqlParser.Dialects;
 using JustyBase.NetezzaSqlParser.Visitor;
 using NSubstitute;
+using FastColoredTextBoxNS;
 
 namespace AppBase.Tests.Sql;
 
@@ -31,6 +37,101 @@ public sealed class NetezzaCompletionMapperTests
         Assert.True(invalidated);
         Assert.True(services.SchemaProvider.MetadataEpoch > previousEpoch);
         Assert.False(services.SchemaProvider.HasTables());
+    }
+
+    [Fact]
+    public void Relation_completion_prioritizes_schema_names_after_from()
+    {
+        var table = CompletionItemAppearance.Apply(
+            new MethodAutocompleteItem2("JBL_ORDERS"),
+            CompletionIconKind.Table,
+            "Table");
+        var schema = CompletionItemAppearance.Apply(
+            new MethodAutocompleteItem2("JBL_LIVE"),
+            CompletionIconKind.Schema,
+            "Schema");
+
+        IReadOnlyList<AutocompleteItem> result = FctbCompletionMapper
+            .PrioritizeSchemasForRelationContext([table, schema], "SELECT * FROM ", "SELECT * FROM ".Length);
+
+        Assert.Equal(["JBL_LIVE", "JBL_ORDERS"], result.Select(item => item.ToString()));
+    }
+
+    [Fact]
+    public void Relation_completion_keeps_normal_order_outside_relation_context()
+    {
+        var table = CompletionItemAppearance.Apply(
+            new MethodAutocompleteItem2("JBL_ORDERS"),
+            CompletionIconKind.Table,
+            "Table");
+        var schema = CompletionItemAppearance.Apply(
+            new MethodAutocompleteItem2("JBL_LIVE"),
+            CompletionIconKind.Schema,
+            "Schema");
+
+        IReadOnlyList<AutocompleteItem> result = FctbCompletionMapper
+            .PrioritizeSchemasForRelationContext([table, schema], "SELECT ", "SELECT ".Length);
+
+        Assert.Equal(["JBL_ORDERS", "JBL_LIVE"], result.Select(item => item.ToString()));
+    }
+
+    [Fact]
+    public void Qualified_relation_completion_orders_tables_views_nicknames_then_other_objects()
+    {
+        var other = CompletionItemAppearance.Apply(
+            new MethodAutocompleteItem2("JBL_LIVE.JBL_PROC"),
+            CompletionIconKind.Function,
+            "procedure");
+        var nickname = CompletionItemAppearance.Apply(
+            new MethodAutocompleteItem2("JBL_LIVE.JBL_NICK"),
+            CompletionIconKind.Alias,
+            "db2nickname");
+        var view = CompletionItemAppearance.Apply(
+            new MethodAutocompleteItem2("JBL_LIVE.JBL_VIEW"),
+            CompletionIconKind.View,
+            "View");
+        var table = CompletionItemAppearance.Apply(
+            new MethodAutocompleteItem2("JBL_LIVE.JBL_TABLE"),
+            CompletionIconKind.Table,
+            "Table");
+
+        IReadOnlyList<AutocompleteItem> result = FctbCompletionMapper
+            .PrioritizeSchemasForRelationContext(
+                [other, nickname, view, table],
+                "SELECT * FROM JBL_LIVE.",
+                "SELECT * FROM JBL_LIVE.".Length);
+
+        Assert.Equal(
+            ["JBL_TABLE", "JBL_VIEW", "JBL_NICK", "JBL_PROC"],
+            result.Select(item => item.ToString()));
+    }
+
+    [Fact]
+    public void EnsureDb2Schema_uses_shared_engine_for_schema_and_database_qualified_aliases()
+    {
+        var database = Substitute.For<IGeneralDb>();
+        database.objectInSchema.Returns(new Dictionary<string, Dictionary<string, TypeInDatabase>>
+        {
+            ["JBL_LIVE"] = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["JBL_DEPARTMENTS"] = TypeInDatabase.table
+            }
+        });
+        database.GetColumns("TESTDB", "JBL_LIVE", "JBL_DEPARTMENTS")
+            .Returns(["DEPARTMENT_ID", "DEPARTMENT_NAME"]);
+
+        var services = CreateServices();
+        services.EnsureDb2Schema(database, "db2-cloud", "TESTDB");
+        var engine = services.CreateEngine("db2-doc", SqlDialect.Db2);
+
+        string schemaQualified = "SELECT * FROM JBL_LIVE.JBL_DEPARTMENTS A WHERE A.";
+        string databaseQualified = "SELECT * FROM TESTDB.JBL_LIVE.JBL_DEPARTMENTS A WHERE A.";
+
+        var schemaItems = engine.GetCompletions(schemaQualified, schemaQualified.Length);
+        var databaseItems = engine.GetCompletions(databaseQualified, databaseQualified.Length);
+
+        Assert.Contains(schemaItems, item => item.Label == "DEPARTMENT_ID" && item.Detail == "A.DEPARTMENT_ID");
+        Assert.Contains(databaseItems, item => item.Label == "DEPARTMENT_NAME" && item.Detail == "A.DEPARTMENT_NAME");
     }
 
     [Fact]

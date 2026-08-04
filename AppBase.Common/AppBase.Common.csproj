@@ -17,7 +17,6 @@
 
   <PropertyGroup>
     <DisableRuntimeMarshalling>true</DisableRuntimeMarshalling>
-    <IncludeDB2 Condition="'$(IncludeDB2)' == ''">false</IncludeDB2>
 	<IncludeOracle Condition="'$(IncludeOracle)' == ''">false</IncludeOracle>
   </PropertyGroup>
 

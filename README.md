@@ -33,7 +33,7 @@
 **JustyBase.Legacy** is a solo-maintained desktop IDE focused on **IBM Netezza / PureData**.  
 Write and run SQL, browse catalog objects, tune preferences in a docked settings tab, and keep connection profiles encrypted on disk.
 
-Netezza is the default shipped provider. MS SQL, Oracle, DB2, and PostgreSQL are available as optional compile-time flags for contributors — not in the default release binary.
+Netezza and DB2 are included in the default shipped provider set. The SQL editor selects the matching dialect for the active connection; Netezza remains the fallback for unknown connections. MS SQL, Oracle, and PostgreSQL remain optional compile-time providers.
 
 ---
 
@@ -61,7 +61,7 @@ Light and dark themes are both first-class (`UseSpecialColoring`).
 
 ## Features
 
-- **Netezza-first SQL editor** — syntax highlighting, completion, and linting aimed at NPS SQL
+- **Dialect-aware SQL editor** — Netezza and DB2 syntax highlighting, completion, hover, signature help, and linting selected per active connection
 - **Quick Open (`Ctrl+P`)** — VS Code–style search across `.sql` file names and contents in the Files panel roots, the selected Git repo (when set), and open SQL tabs; Enter opens/focuses the file and jumps to a content match line when applicable
 - **Virtual-mode result grid** — large result sets, filter/export to CSV / Excel
 - **Object explorer** — connections, databases, tables; open DDL and navigate into objects
@@ -89,7 +89,7 @@ flowchart TB
 
   subgraph providers [Providers]
     NZ[App.Data.Netezza]
-    OPT[Optional MsSql / Oracle / DB2 / Postgres]
+    OPT[Optional MsSql / Oracle / Postgres]
   end
 
   JVM --> JA
@@ -149,7 +149,7 @@ Self-contained publish:
 dotnet publish JustData/JustData.csproj -c Release -r win-x64 --self-contained true
 ```
 
-Build the local Native AOT installer (requires Inno Setup 6):
+Build the local self-contained `win-x64` installer (requires Inno Setup 6):
 
 ```powershell
 ./scripts/build-installer.ps1 -Version 1.0.0.0

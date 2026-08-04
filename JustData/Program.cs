@@ -82,7 +82,9 @@ public static class Program
     [STAThread]
     static void Main(params string[] args)
     {
-        LogToFile(StartupLogPath, "Starting Main");
+        LogToFile(
+            StartupLogPath,
+            $"Starting Main; process={Environment.ProcessPath}; base={AppContext.BaseDirectory}");
         ServiceProvider? provider = null;
         try
         {

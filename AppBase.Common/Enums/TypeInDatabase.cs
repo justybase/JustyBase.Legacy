@@ -37,5 +37,6 @@ public enum TypeInDatabase
     server,
     db2alias,
     baseFluides,
-    fluid
+    fluid,
+    db2nickname
 };

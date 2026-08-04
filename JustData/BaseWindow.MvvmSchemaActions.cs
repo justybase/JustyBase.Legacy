@@ -2,6 +2,7 @@ using AppBase.Common;
 using AppBase.Common.Enums;
 using AppBase.Data;
 using AppBase.Data.Core.Core;
+using AppBase.Data.Core.Enums;
 using AppBase.Data.Core.Interfaces;
 using AppBase.Data.Core.Models;
 using JustData.Application.Schema;
@@ -162,7 +163,7 @@ public partial class BaseWindow
             if (action == SchemaContextAction.DdlClipboard)
                 SetClipboardText(ddl);
             else
-                AddMainTab(null, $"ddl for {node.Name}", ddl);
+                AddMainTabForSchemaNode(node.Model, $"ddl for {node.Name}", ddl);
             return;
         }
         if (action is SchemaContextAction.SelectClipboard or SchemaContextAction.SelectNew)
@@ -171,7 +172,7 @@ public partial class BaseWindow
             if (action == SchemaContextAction.SelectClipboard)
                 SetClipboardText(select);
             else
-                AddMainTab(null, $"select from {node.Name}", select);
+                AddMainTabForSchemaNode(node.Model, $"select from {node.Name}", select);
             return;
         }
 
@@ -311,8 +312,29 @@ public partial class BaseWindow
         if (string.IsNullOrWhiteSpace(databaseName))
             throw new InvalidOperationException("Database is required for DDL Tables.");
 
+        if (_connectionSessions.TryGetValue(connectionName, out IGeneralDb? database)
+            && database.DatabaseType == DatabaseTypeEnum.DB2)
+        {
+            var tableNodes = node.Children
+                .Where(child => child.Kind == SchemaNodeKind.Table)
+                .ToArray();
+            var ddlParts = new List<string>(tableNodes.Length);
+            foreach (ExplorerNodeViewModel tableNode in tableNodes)
+            {
+                ddlParts.Add(await _ddlService
+                    .GetDdlAsync(new SchemaDdlRequest(tableNode.Model, SchemaDdlKind.Create))
+                    .ConfigureAwait(true));
+            }
+
+            AddMainTabForSchemaNode(
+                node.Model,
+                $"ddl {databaseName} {node.Name}",
+                string.Join(Environment.NewLine + Environment.NewLine, ddlParts));
+            return;
+        }
+
         string ddl = await _netezzaHelperService.GetAllTablesDdlAsync(connectionName, databaseName);
-        AddMainTab(null, $"ddl {databaseName} tables", ddl);
+        AddMainTabForSchemaNode(node.Model, $"ddl {databaseName} tables", ddl);
     }
 
     private void OpenGroomForm(string databaseName, string tableName)

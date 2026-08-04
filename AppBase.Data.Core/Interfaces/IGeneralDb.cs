@@ -26,7 +26,6 @@ public interface IGeneralDb
     string ConnectionString { get; set; }
     List<string> DatabaseList { get; set; }
     string DefaultDatabaseName { get; set; }
-    bool GetInitSchemaInProgress { get; }
     bool ImportNotifyEventAdded { get; set; }
     int NotifyAfter { get; set; }
     string Username { get; set; }

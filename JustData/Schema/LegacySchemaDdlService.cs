@@ -200,7 +200,7 @@ public sealed class LegacySchemaDdlService : ISchemaDdlService
             SchemaNodeKind.View => database.GetCreateViewText(db, schema, name),
             SchemaNodeKind.Procedure or SchemaNodeKind.Function => await database.GetCreateProcedureText(qualified).ConfigureAwait(false),
             SchemaNodeKind.Alias => await database.GetCreateAliasTextAsync(qualified).ConfigureAwait(false),
-            SchemaNodeKind.Synonym => await database.GetCreateSynonymTextAsync(qualified).ConfigureAwait(false),
+            SchemaNodeKind.Nickname or SchemaNodeKind.Synonym => await database.GetCreateSynonymTextAsync(qualified).ConfigureAwait(false),
             _ => database.GetSqlAddCode(kind.ToString(), db, schema, name)
         };
     }

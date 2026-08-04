@@ -1,4 +1,5 @@
 using AppBase.Common;
+using AppBase.Common.Enums;
 using AppBase.Common.Interfaces;
 using AppBase.Data.Core;
 using AppBase.Data.Core.Enums;
@@ -13,7 +14,7 @@ using System.Text.RegularExpressions;
 
 namespace App.Data.DB2;
 
-public sealed class DB2 : GeneralDb
+public sealed class DB2 : GeneralDb, IDb2MetadataCatalog
 {
     public override DatabaseTypeEnum DatabaseType => DatabaseTypeEnum.DB2;
 
@@ -61,7 +62,11 @@ ORDER BY
 
     public DataTable _schemas;
     public DataTable _synonyms;
+    public DataTable _nicknames;
     public DataTable _aliases;
+    public DataTable functions = new();
+
+    public IReadOnlyList<Db2CatalogObject> Db2CatalogObjects { get; private set; } = [];
 
     private readonly Dictionary<int, (string PROVIDER_TYPE_NAME, string CREATE_PARAMS, string SQL_TYPE_NAME)> _dataTypes = new();
 
@@ -72,10 +77,23 @@ ORDER BY
 
 
     public static List<string> GetDatabaseList(int connectionTimeout, string server, string user, string port, string pass)
+        => GetDatabaseList(connectionTimeout, server, user, port, pass, "SAMPLE");
+
+    public static List<string> GetDatabaseList(
+        int connectionTimeout,
+        string server,
+        string user,
+        string port,
+        string pass,
+        string databaseName)
     {
         DB2ConnectionStringBuilder builder = new DB2ConnectionStringBuilder();
-        builder.Add("Server", server);
-        builder.Add("Database", "SAMPLE");
+        // IBM.Data.Db2 expects the endpoint as Server=host:port; Port is not
+        // a valid standalone connection-string keyword for this provider.
+        builder.Add(
+            "Server",
+            string.IsNullOrWhiteSpace(port) ? server : $"{server}:{port}");
+        builder.Add("Database", string.IsNullOrWhiteSpace(databaseName) ? "SAMPLE" : databaseName);
         builder.Add("UID", user);
         builder.Add("PWD", pass);
 
@@ -119,12 +137,88 @@ ORDER BY
                 _dataTypes[(int)dt.Rows[i]["PROVIDER_TYPE"]] = (dt.Rows[i]["PROVIDER_TYPE_NAME"].ToString(), dt.Rows[i]["CREATE_PARAMS"].ToString(), dt.Rows[i]["SQL_TYPE_NAME"].ToString());
             }
 
-            _schemas = conn.GetSchema("Schemas");
-            tables = conn.GetSchema("Tables", new string[] { null, null, null, "TABLE" });
-            _synonyms = conn.GetSchema("Tables", new string[] { null, null, null, "SYNONYM" });
-            _aliases = conn.GetSchema("Tables", new string[] { null, null, null, "ALIAS" });
-            views = conn.GetSchema("Tables", new string[] { null, null, null, "VIEW" });
-            procedures = conn.GetSchema("Procedures");
+            // IBM's GetSchema column names differ between driver versions.
+            // Use the same SYSCAT projections as the VS Code DB2 provider and
+            // keep the legacy TABLE_SCHEMA/TABLE_NAME column contract.
+            _schemas = LoadCatalogTable(conn, @"
+                SELECT RTRIM(SCHEMANAME) AS TABLE_SCHEMA
+                FROM SYSCAT.SCHEMATA
+                ORDER BY SCHEMANAME
+                WITH UR");
+            tables = LoadCatalogTable(conn, @"
+                SELECT CURRENT SERVER AS TABLE_CATALOG,
+                       RTRIM(TABSCHEMA) AS TABLE_SCHEMA,
+                       RTRIM(TABNAME) AS TABLE_NAME,
+                       'TABLE' AS TABLE_TYPE,
+                       COALESCE(REMARKS, '') AS REMARKS
+                FROM SYSCAT.TABLES
+                WHERE TYPE = 'T'
+                ORDER BY TABSCHEMA, TABNAME
+                WITH UR");
+            views = LoadCatalogTable(conn, @"
+                SELECT CURRENT SERVER AS TABLE_CATALOG,
+                       RTRIM(TABSCHEMA) AS TABLE_SCHEMA,
+                       RTRIM(TABNAME) AS TABLE_NAME,
+                       'VIEW' AS TABLE_TYPE,
+                       COALESCE(REMARKS, '') AS REMARKS
+                FROM SYSCAT.TABLES
+                WHERE TYPE = 'V'
+                ORDER BY TABSCHEMA, TABNAME
+                WITH UR");
+            _synonyms = LoadCatalogTable(conn, @"
+                SELECT CURRENT SERVER AS TABLE_CATALOG,
+                       RTRIM(TABSCHEMA) AS TABLE_SCHEMA,
+                       RTRIM(TABNAME) AS TABLE_NAME,
+                       'SYNONYM' AS TABLE_TYPE,
+                       COALESCE(REMARKS, '') AS REMARKS
+                FROM SYSCAT.TABLES
+                WHERE TYPE = 'S'
+                ORDER BY TABSCHEMA, TABNAME
+                WITH UR");
+            _nicknames = LoadCatalogTable(conn, @"
+                SELECT CURRENT SERVER AS TABLE_CATALOG,
+                       RTRIM(TABSCHEMA) AS TABLE_SCHEMA,
+                       RTRIM(TABNAME) AS TABLE_NAME,
+                       'NICKNAME' AS TABLE_TYPE,
+                       COALESCE(REMARKS, '') AS REMARKS
+                FROM SYSCAT.TABLES
+                WHERE TYPE = 'N'
+                ORDER BY TABSCHEMA, TABNAME
+                WITH UR");
+            _aliases = LoadCatalogTable(conn, @"
+                SELECT CURRENT SERVER AS TABLE_CATALOG,
+                       RTRIM(TABSCHEMA) AS TABLE_SCHEMA,
+                       RTRIM(TABNAME) AS TABLE_NAME,
+                       'ALIAS' AS TABLE_TYPE,
+                       COALESCE(REMARKS, '') AS REMARKS
+                FROM SYSCAT.TABLES
+                WHERE TYPE = 'A'
+                ORDER BY TABSCHEMA, TABNAME
+                WITH UR");
+            procedures = LoadCatalogTable(conn, @"
+                SELECT CURRENT SERVER AS PROCEDURE_CATALOG,
+                       RTRIM(ROUTINESCHEMA) AS PROCEDURE_SCHEMA,
+                       RTRIM(ROUTINENAME) AS PROCEDURE_NAME,
+                       'PROCEDURE' AS PROCEDURE_TYPE,
+                       COALESCE(REMARKS, '') AS REMARKS
+                FROM SYSCAT.ROUTINES
+                WHERE ROUTINETYPE = 'P'
+                ORDER BY ROUTINESCHEMA, ROUTINENAME
+                WITH UR");
+            functions = LoadCatalogTable(conn, @"
+                SELECT CURRENT SERVER AS PROCEDURE_CATALOG,
+                       RTRIM(ROUTINESCHEMA) AS PROCEDURE_SCHEMA,
+                       RTRIM(ROUTINENAME) AS PROCEDURE_NAME,
+                       'FUNCTION' AS PROCEDURE_TYPE,
+                       COALESCE(REMARKS, '') AS REMARKS
+                FROM SYSCAT.ROUTINES
+                WHERE ROUTINETYPE = 'F'
+                ORDER BY ROUTINESCHEMA, ROUTINENAME
+                WITH UR");
+
+            // Keep the completion catalog in sync with the provider-neutral
+            // DB2 snapshot consumed by the MVVM schema explorer.
+            RebuildObjectInSchema();
 
             using (var cmd = new DB2Command("SELECT CURRENT SERVER FROM SYSIBM.SYSDUMMY1", conn))
             {
@@ -177,6 +271,8 @@ ORDER BY
                 _passthruDt.Clear();
                 _passthruDt.Load(rdr);
             }
+
+            Db2CatalogObjects = BuildDb2CatalogObjects();
             conn.Close();
         }
     }
@@ -1579,7 +1675,284 @@ WHERE
 
     public override DbConnection GetConnection(string databaseName, bool usePool = true)
     {
-        throw new NotImplementedException();
+        if (string.IsNullOrWhiteSpace(databaseName))
+            return GetConnection();
+
+        DB2ConnectionStringBuilder builder = new DB2ConnectionStringBuilder(ConnectionString);
+        builder.Remove("Database");
+        builder.Add("Database", databaseName);
+        return new DB2Connection(builder.ConnectionString);
+    }
+
+    private static DataTable LoadCatalogTable(DB2Connection connection, string sql)
+    {
+        using var command = new DB2Command(sql, connection);
+        using DB2DataReader reader = command.ExecuteReader();
+        var result = new DataTable();
+        result.Load(reader);
+        return result;
+    }
+
+    private void RebuildObjectInSchema()
+    {
+        objectInSchema.Clear();
+
+        if (_schemas is not null)
+        {
+            foreach (DataRow row in _schemas.Rows)
+            {
+                string schema = GetMetadataName(row, "TABLE_SCHEMA", "SCHEMA_NAME", "TABLE_SCHEM", "SCHEMANAME");
+                if (schema.Length > 0)
+                    objectInSchema.TryAdd(schema, new Dictionary<string, TypeInDatabase>(StringComparer.OrdinalIgnoreCase));
+            }
+        }
+
+        AddMetadataObjects(tables, TypeInDatabase.table,
+            ["TABLE_SCHEMA", "TABLE_SCHEM", "TABSCHEMA"],
+            ["TABLE_NAME", "TABNAME"]);
+        AddMetadataObjects(views, TypeInDatabase.view,
+            ["TABLE_SCHEMA", "TABLE_SCHEM", "TABSCHEMA"],
+            ["TABLE_NAME", "TABNAME"]);
+        AddMetadataObjects(_synonyms, TypeInDatabase.synonym,
+            ["TABLE_SCHEMA", "TABLE_SCHEM", "TABSCHEMA"],
+            ["TABLE_NAME", "TABNAME"]);
+        AddMetadataObjects(_nicknames, TypeInDatabase.db2nickname,
+            ["TABLE_SCHEMA", "TABLE_SCHEM", "TABSCHEMA"],
+            ["TABLE_NAME", "TABNAME"]);
+        AddMetadataObjects(_aliases, TypeInDatabase.db2alias,
+            ["TABLE_SCHEMA", "TABLE_SCHEM", "TABSCHEMA"],
+            ["TABLE_NAME", "TABNAME"]);
+        AddMetadataObjects(procedures, TypeInDatabase.procedure,
+            ["PROCEDURE_SCHEMA", "PROCEDURE_SCHEM", "PROCSCHEMA", "ROUTINESCHEMA"],
+            ["PROCEDURE_NAME", "PROCEDURE", "PROCNAME", "ROUTINENAME"]);
+        AddMetadataObjects(functions, TypeInDatabase.function,
+            ["PROCEDURE_SCHEMA", "PROCEDURE_SCHEM", "PROCSCHEMA", "ROUTINESCHEMA"],
+            ["PROCEDURE_NAME", "PROCEDURE", "PROCNAME", "ROUTINENAME"]);
+    }
+
+    private void AddMetadataObjects(
+        DataTable? metadata,
+        TypeInDatabase objectType,
+        string[] schemaColumns,
+        string[] objectColumns)
+    {
+        if (metadata is null)
+            return;
+
+        foreach (DataRow row in metadata.Rows)
+        {
+            string schema = string.Empty;
+            string objectName = string.Empty;
+            foreach (string schemaColumn in schemaColumns)
+            {
+                schema = GetMetadataName(row, schemaColumn);
+                if (schema.Length == 0)
+                    continue;
+
+                foreach (string objectColumn in objectColumns)
+                {
+                    objectName = GetMetadataName(row, objectColumn);
+                    if (objectName.Length > 0)
+                        break;
+                }
+
+                if (objectName.Length > 0)
+                    break;
+            }
+            if (schema.Length == 0 || objectName.Length == 0)
+                continue;
+
+            if (!objectInSchema.TryGetValue(schema, out Dictionary<string, TypeInDatabase>? objects))
+            {
+                objects = new Dictionary<string, TypeInDatabase>(StringComparer.OrdinalIgnoreCase);
+                objectInSchema[schema] = objects;
+            }
+
+            // Keep the first type when a provider catalog exposes the same
+            // name through more than one metadata collection.
+            objects.TryAdd(objectName, objectType);
+            AutocompleteSuggestions.TwoWords.Add($"{schema}.{objectName}");
+        }
+    }
+
+    private IReadOnlyList<Db2CatalogObject> BuildDb2CatalogObjects()
+    {
+        var objects = new List<Db2CatalogObject>();
+
+        AddTableCatalogObjects(objects, tables, Db2CatalogObjectType.Table, supportsColumns: true);
+        AddTableCatalogObjects(objects, views, Db2CatalogObjectType.View, supportsColumns: true);
+        AddTableCatalogObjects(objects, _nicknames, Db2CatalogObjectType.Nickname, supportsColumns: true);
+        AddTableCatalogObjects(objects, _aliases, Db2CatalogObjectType.Alias, supportsColumns: true);
+        AddRoutineCatalogObjects(objects, procedures, Db2CatalogObjectType.Procedure);
+        AddRoutineCatalogObjects(objects, functions, Db2CatalogObjectType.Function);
+
+        AddGlobalCatalogObjects(objects);
+        return objects;
+    }
+
+    private static void AddTableCatalogObjects(
+        ICollection<Db2CatalogObject> target,
+        DataTable? source,
+        Db2CatalogObjectType type,
+        bool supportsColumns)
+    {
+        if (source is null)
+            return;
+
+        foreach (DataRow row in source.Rows)
+        {
+            string schema = GetMetadataName(row, "TABLE_SCHEMA", "TABLE_SCHEM", "TABSCHEMA");
+            string name = GetMetadataName(row, "TABLE_NAME", "TABNAME");
+            if (schema.Length == 0 || name.Length == 0)
+                continue;
+
+            target.Add(new Db2CatalogObject(
+                type,
+                name,
+                schema,
+                GetMetadataName(row, "REMARKS"),
+                GetMetadataName(row, "OWNER"),
+                supportsColumns));
+        }
+    }
+
+    private static void AddRoutineCatalogObjects(
+        ICollection<Db2CatalogObject> target,
+        DataTable? source,
+        Db2CatalogObjectType type)
+    {
+        if (source is null)
+            return;
+
+        foreach (DataRow row in source.Rows)
+        {
+            string schema = GetMetadataName(row, "PROCEDURE_SCHEMA", "PROCEDURE_SCHEM", "PROCSCHEMA", "ROUTINESCHEMA");
+            string name = GetMetadataName(row, "PROCEDURE_NAME", "PROCEDURE", "PROCNAME", "ROUTINENAME");
+            if (schema.Length == 0 || name.Length == 0)
+                continue;
+
+            target.Add(new Db2CatalogObject(
+                type,
+                name,
+                schema,
+                GetMetadataName(row, "REMARKS"),
+                GetMetadataName(row, "OWNER", "DEFINER")));
+        }
+    }
+
+    private void AddGlobalCatalogObjects(ICollection<Db2CatalogObject> target)
+    {
+        foreach (DataRow row in _wrappersDt.Rows)
+        {
+            string name = GetMetadataName(row, "WRAPNAME");
+            if (name.Length == 0)
+                continue;
+
+            target.Add(new Db2CatalogObject(
+                Db2CatalogObjectType.Wrapper,
+                name,
+                Description: GetMetadataName(row, "REMARKS"),
+                Owner: GetMetadataName(row, "WRAPTYPE")));
+        }
+
+        foreach (DataRow row in _wrappersOptionsDt.Rows)
+        {
+            string wrapper = GetMetadataName(row, "WRAPNAME");
+            string option = GetMetadataName(row, "OPTION");
+            if (wrapper.Length == 0 || option.Length == 0)
+                continue;
+
+            target.Add(new Db2CatalogObject(
+                Db2CatalogObjectType.WrapperOption,
+                $"{wrapper} / {option}",
+                Description: GetMetadataName(row, "SETTING"),
+                Owner: wrapper));
+        }
+
+        foreach (DataRow row in _linkedServersDt.Rows)
+        {
+            string server = GetMetadataName(row, "SERVERNAME");
+            if (server.Length == 0)
+                continue;
+
+            target.Add(new Db2CatalogObject(
+                Db2CatalogObjectType.Server,
+                server,
+                Description: GetMetadataName(row, "REMARKS"),
+                Owner: GetMetadataName(row, "WRAPNAME")));
+        }
+
+        foreach (DataRow row in _linkedServersOptionsDt.Rows)
+        {
+            string server = GetMetadataName(row, "SERVERNAME");
+            string option = GetMetadataName(row, "OPTION");
+            if (server.Length == 0 || option.Length == 0)
+                continue;
+
+            string wrapper = _linkedServersDt.AsEnumerable()
+                .Where(serverRow => string.Equals(GetMetadataName(serverRow, "SERVERNAME"), server, StringComparison.OrdinalIgnoreCase))
+                .Select(serverRow => GetMetadataName(serverRow, "WRAPNAME"))
+                .FirstOrDefault() ?? string.Empty;
+
+            target.Add(new Db2CatalogObject(
+                Db2CatalogObjectType.ServerOption,
+                $"{server} / {option}",
+                Description: GetMetadataName(row, "SETTING"),
+                Owner: wrapper));
+        }
+
+        foreach (var group in _userMapingsDt.AsEnumerable()
+                     .GroupBy(row => (
+                         Server: GetMetadataName(row, "SERVERNAME"),
+                         AuthId: GetMetadataName(row, "AUTHID"),
+                         AuthType: GetMetadataName(row, "AUTHIDTYPE"))))
+        {
+            if (group.Key.Server.Length == 0 || group.Key.AuthId.Length == 0)
+                continue;
+
+            target.Add(new Db2CatalogObject(
+                Db2CatalogObjectType.UserMapping,
+                $"{group.Key.Server} / {group.Key.AuthId}",
+                Description: group.Select(row => GetMetadataName(row, "SETTING"))
+                    .FirstOrDefault(value => value.Length > 0) ?? string.Empty,
+                Owner: group.Key.AuthType));
+        }
+
+        foreach (DataRow row in _passthruDt.Rows)
+        {
+            string server = GetMetadataName(row, "SERVERNAME");
+            string grantee = GetMetadataName(row, "GRANTEE");
+            string grantor = GetMetadataName(row, "GRANTOR");
+            if (server.Length == 0 || grantee.Length == 0 || grantor.Length == 0)
+                continue;
+
+            string granteeType = GetMetadataName(row, "GRANTEETYPE");
+            string grantorType = GetMetadataName(row, "GRANTORTYPE");
+            string description = granteeType;
+            if (grantorType.Length > 0)
+                description = $"{description} -> {grantorType}";
+
+            target.Add(new Db2CatalogObject(
+                Db2CatalogObjectType.PassthruAuth,
+                $"{server} / {grantee} / {grantor}",
+                Description: description,
+                Owner: grantee));
+        }
+    }
+
+    private static string GetMetadataName(DataRow row, params string[] columnNames)
+    {
+        foreach (string columnName in columnNames)
+        {
+            if (!row.Table.Columns.Contains(columnName) || row[columnName] == DBNull.Value)
+                continue;
+
+            string value = row[columnName]?.ToString()?.Trim() ?? string.Empty;
+            if (value.Length > 0)
+                return value;
+        }
+
+        return string.Empty;
     }
 }
 

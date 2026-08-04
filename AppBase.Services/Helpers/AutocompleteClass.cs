@@ -527,8 +527,7 @@ public partial class AutocompleteClass : IAutocompleteClass
                 List<string> aliases = tableAliasEntry.Value;
 
                 string[] cols = Array.Empty<string>();
-                if (_connectionSessions.TryGetValue(connectionName, out IGeneralDb value) && value is not null
-                && !value.GetInitSchemaInProgress)
+                if (_connectionSessions.TryGetValue(connectionName, out IGeneralDb value) && value is not null)
                 {
                     var gd = value;
                     int firstDot = databaseTable.FirstDot();

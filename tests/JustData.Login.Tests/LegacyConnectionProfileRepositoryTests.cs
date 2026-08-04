@@ -61,12 +61,29 @@ public sealed class LegacyConnectionProfileRepositoryTests : IDisposable
     [Fact]
     public async Task Database_catalog_adapter_preserves_the_legacy_non_provider_behavior()
     {
-        var catalog = new LegacyDatabaseCatalogService(5);
+        string? capturedServer = null;
+        string? capturedPort = null;
+        var catalog = new LegacyDatabaseCatalogService(
+            5,
+            (timeout, server, user, port, password, database) =>
+            {
+                capturedServer = server;
+                capturedPort = port;
+                return ["SAMPLE", "WAREHOUSE"];
+            });
 
-        var db2 = await catalog.GetDatabasesAsync(new JustData.Application.Login.ConnectionProfile { Driver = "DB2" });
+        var db2 = await catalog.GetDatabasesAsync(new JustData.Application.Login.ConnectionProfile
+        {
+            Driver = "DB2",
+            Server = "db2.local:50001",
+            UserName = "db2user",
+            Password = "secret"
+        });
         var unknown = await catalog.GetDatabasesAsync(new JustData.Application.Login.ConnectionProfile { Driver = "Other" });
 
-        Assert.Equal(["DB2 support not included"], db2);
+        Assert.Equal(["SAMPLE", "WAREHOUSE"], db2);
+        Assert.Equal("db2.local", capturedServer);
+        Assert.Equal("50001", capturedPort);
         Assert.Empty(unknown);
     }
 

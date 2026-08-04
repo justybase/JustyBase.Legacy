@@ -131,11 +131,14 @@ public sealed class DatabaseExplorerViewModel : ObservableObject, IDisposable
             try
             {
                 var children = await _schemaRepository.GetChildrenAsync(node.Model, token).ConfigureAwait(false);
-                if (children.Count == 0 && node.Kind is SchemaNodeKind.Connection or SchemaNodeKind.Database or SchemaNodeKind.Schema)
+                if (children.Count == 0 && node.Kind is SchemaNodeKind.Connection
+                    or SchemaNodeKind.Database
+                    or SchemaNodeKind.Schema
+                    or SchemaNodeKind.ObjectGroup)
                 {
-                    // Providers such as Netezza create their session before their
-                    // object catalog is downloaded. Expanding an empty level is the
-                    // user's explicit request to make that catalog available.
+                    // Providers such as Netezza and DB2 create their session before
+                    // their object catalog is downloaded. Expanding an empty level
+                    // is the user's explicit request to make that catalog available.
                     await _uiDispatcher.InvokeOnUiAsync(
                         () => Status = "Refreshing schema…",
                         token);
@@ -181,9 +184,14 @@ public sealed class DatabaseExplorerViewModel : ObservableObject, IDisposable
         ThrowIfDisposed();
         await RunOperationAsync(async token =>
         {
+            string? searchConnection = SelectedNode?.Path.Connection ?? ConnectionName;
+            string? searchDatabase = SelectedNode?.Path.Database;
+            string? searchSchema = SelectedNode?.Path.Schema;
             var result = string.IsNullOrWhiteSpace(Filter)
                 ? new SchemaSearchResult([])
-                : await _schemaRepository.SearchAsync(new(Filter, ConnectionName, IncludeColumns: true, MaxResults: 1_000), token).ConfigureAwait(false);
+                : await _schemaRepository.SearchAsync(
+                    new(Filter, searchConnection, searchDatabase, searchSchema, IncludeColumns: true, MaxResults: 1_000),
+                    token).ConfigureAwait(false);
             await OnUiAsync(() =>
             {
                 SearchResults.Clear();

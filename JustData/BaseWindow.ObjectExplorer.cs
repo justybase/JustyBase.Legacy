@@ -33,7 +33,6 @@ using JustyBaseLegacy.UI.Helpers;
 using JustyBaseLegacy.Services;
 using JustyBaseLegacy.UI.Controls;
 using JustyBaseLegacy.UI.DbForms;
-using JustyBaseLegacy.UI.Extensions;
 using JustyBaseLegacy.UI.Models;
 using JustyBaseLegacy.UI.Schema;
 using JustyBaseLegacy.UI.Forms;
@@ -1069,21 +1068,21 @@ _generalDbService.DriverName(SelectedConnectionName) == "DB2"
 
                 string connectionName = SelectedConnectionName;
 
+                if (!_connectionSessions.TryGetValue(connectionName, out var thisDb))
+                    return;
+
                 string schemaKey = schema;
-                if (!string.IsNullOrWhiteSpace(db))
+                if (!string.IsNullOrWhiteSpace(db)
+                    && thisDb.DatabaseType != DatabaseTypeEnum.DB2)
                 {
                     schemaKey = db + "_" + schema;
                 }
 
-                if (_connectionSessions.TryGetValue(connectionName, out var thisDb) &&
-                    thisDb.objectInSchema.TryGetValue(schemaKey, out var thisSchema) &&
+                if (thisDb.objectInSchema.TryGetValue(schemaKey, out var thisSchema) &&
                     thisSchema.TryGetValue(table, out var obj)) // table or view exists
                 {
                     if (_mvvmDatabaseExplorerControl is not null)
                     {
-                        // The legacy implementation navigates by indexing TreeNode
-                        // levels. The MVVM adapter must load those levels lazily and
-                        // select the same object without depending on hidden controls.
                         RevealDatabaseExplorer();
                         _ = _mvvmDatabaseExplorerControl.SelectObjectAsync(
                             connectionName,
@@ -1093,87 +1092,6 @@ _generalDbService.DriverName(SelectedConnectionName) == "DB2"
                             LegacySchemaTypeMapper.Map(obj));
                         return;
                     }
-
-                    string tableOrView;
-                    if (objectType != null)
-                    {
-                        tableOrView = objectType;
-                    }
-                    else
-                    {
-                        switch (obj)
-                        {
-                            case TypeInDatabase.table:
-                                tableOrView = "Tables";
-                                break;
-                            case TypeInDatabase.view:
-                                tableOrView = "Views";
-                                break;
-                            case TypeInDatabase.synonym:
-                                tableOrView = "Synonyms";
-                                break;
-                            case TypeInDatabase.procedure:
-                                tableOrView = "Procedures";
-                                break;
-                            case TypeInDatabase.db2alias:
-                                tableOrView = "Aliases";
-                                break;
-                            default:
-                                _loggerLoud.MessageBox_Show(this, "The operation failed.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                                return;
-                        }
-                    }
-
-                    TreeNode nd;
-                    if (!string.IsNullOrWhiteSpace(db))
-                    {
-                        nd = _mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Nodes[0]?.Nodes[db]?.Nodes[schema.Replace("\"", "")];
-                    }
-                    else
-                    {
-                        nd = _mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Nodes[0]?.Nodes[0]?.Nodes[schema.Replace("\"", "")];
-                    }
-
-
-                    if (nd == null)
-                        return;
-
-                    if (_mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.IsExpanded == false)
-                    {
-                        _mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Expand();
-                    }
-                    if (_mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Nodes[0]?.IsExpanded == false)
-                    {
-                        _mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Nodes[0]?.Expand();
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(db) && _mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Nodes[0]?.Nodes[db]?.IsExpanded == false)
-                    {
-                        _mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Nodes[0]?.Nodes[db]?.Expand();
-                    }
-                    else if (_mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Nodes[0]?.Nodes[0]?.IsExpanded == false)
-                    {
-                        _mvvmDatabaseExplorerControl?.DatabaseTreeView.Nodes[connectionName]?.Nodes[0]?.Nodes[0]?.Expand();
-                    }
-
-                    if (!nd.IsExpanded)
-                    {
-                        nd.Expand();
-                    }
-
-                    if (!nd.Nodes[tableOrView].IsExpanded)
-                    {
-                        nd.Nodes[tableOrView].Expand();
-                    }
-                    string txtToSelect = schema.Replace("\"", "") + "." + table;
-
-                    if (!string.IsNullOrWhiteSpace(db))
-                    {
-                        txtToSelect = db + "." + txtToSelect;
-                    }
-
-                    _mvvmDatabaseExplorerControl?.DatabaseTreeView.SelectedNode = nd.Nodes[tableOrView].Nodes[txtToSelect];
-                    _mvvmDatabaseExplorerControl?.DatabaseTreeView.Focus();
                 }
             }
         }

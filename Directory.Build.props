@@ -15,6 +15,9 @@
     <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
     <Platforms Condition="'$(Platforms)' == ''">x64</Platforms>
     <PlatformTarget Condition="'$(PlatformTarget)' == ''">x64</PlatformTarget>
+    <!-- DB2 is part of the default desktop distribution. It remains possible
+         to opt out explicitly with -p:IncludeDB2=false for reduced builds. -->
+    <IncludeDB2 Condition="'$(IncludeDB2)' == ''">true</IncludeDB2>
 
     <!--
       Local sibling checkout (##justybase/JustyBase.NetezzaSql):

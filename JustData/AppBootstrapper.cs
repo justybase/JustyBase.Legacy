@@ -199,7 +199,6 @@ internal sealed class AppBootstrapper
                 : SystemColorMode.Classic);
 
         using LoginForm loginForm = _loginFormFactory.Create();
-        loginForm.SuppressBlurOverlay = true;
         loginForm.DocumentationScreenshotPath = outputPath;
         loginForm.FormClosed += (_, _) => Application.ExitThread();
         loginForm.Show();
