@@ -1,6 +1,7 @@
 using AppBase.Common.Configuration;
 using AppBase.Common.Models;
 using DatabaseDataGridView.WinForms.Interfaces;
+using JustyBase.ImportExport.Import;
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
@@ -13,7 +14,7 @@ public interface IImportExportTasks : IExportMakes
     int SkipRows { get; set; }
     Dictionary<string, (string path, Dictionary<int, string> headersDic, int RowsCount)> TabsTablesColumns { get; set; }
     string[] SheetNames { get; set; }
-    void ChooseTypes(Dictionary<int, Dictionary<AppBase.Common.DatabaseColumnType, int[]>> typesCount, string[] headers);
+    void ChooseTypes(ImportTypeAnalyzer analyzer, string[] headers);
     void DBReaderStreamPipeServer(DbDataReader rdr, string serverName, Action<int> act, int progressSize = 10000);
     void DisposeFile();
     long ExportCSVReader(Encoding enc, IDataReader rdr, string csvPath, string colSep = ";", bool useSytemNewline = true, string? NewLine = null, Action<long>? action = null, bool ms = true, bool header = true);

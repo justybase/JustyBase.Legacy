@@ -37,6 +37,7 @@ using JustData.ViewModels.Git;
 using JustyBaseLegacy.UI.Fim;
 using JustyBaseLegacy.UI.Git;
 using JustyBaseLegacy.UI.Configuration;
+using JustyBase.Core.Database;
 using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Diagnostics;
@@ -264,6 +265,7 @@ public static class Program
         services.AddSingleton<SqlExecutionRiskGate>();
         services.AddSingleton<AppBase.Data.Completion.NetezzaSqlCompletionServices>();
         services.AddSingleton<AppBase.Data.Completion.LegacySqlAuthoringServices>();
+        services.AddSingleton<ISqlDbWordListProvider, AppBase.Data.Completion.LegacyDbWordListProvider>();
 
         services.AddScoped<ITabManager, DockSuiteTabManager>();
         services.AddScoped<EditorCatalogProjection>();

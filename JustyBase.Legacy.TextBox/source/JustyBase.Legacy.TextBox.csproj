@@ -18,6 +18,12 @@
 	<ItemGroup>
 		<None Include="..\README.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
+	<ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' == 'true'">
+		<ProjectReference Include="$(JustyBaseLocalCoreProject)" />
+	</ItemGroup>
+	<ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' != 'true'">
+		<PackageReference Include="JustyBase.Core" />
+	</ItemGroup>
 	<PropertyGroup>
 		<SignAssembly>true</SignAssembly>
 	</PropertyGroup>

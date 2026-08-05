@@ -8,6 +8,7 @@ using AppBase.Data.Core.Models;
 using FastColoredTextBoxNS;
 using FastColoredTextBoxNS.Helpers;
 using JustData.Application.Sql;
+using JustyBase.Netezza.Completion;
 using JustyBase.NetezzaSqlParser.Authoring;
 using JustyBase.NetezzaSqlParser.Completion;
 using JustyBase.NetezzaSqlParser.Dialects;
@@ -282,7 +283,7 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
             yield return item;
 
         bool needsLegacyFallback = _dialect == SqlDialect.Netezza
-            && (LegacyCompletionPolicy.ShouldRunLegacyPath(engineItems, sql)
+            && (SqlCompletionMergePolicy.ShouldRunLegacyPath(engineItems, sql)
                 || (text.Contains('.') && mappedEngineItems.Count == 0));
 
         if (needsLegacyFallback)

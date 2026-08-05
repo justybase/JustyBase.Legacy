@@ -4,6 +4,7 @@ using AppBase.Common;
 using AppBase.Common.Interfaces;
 using JustData.Application.Editor;
 using JustData.Application.Sql;
+using JustyBase.ImportExport.Export;
 using System.Data;
 using System.Data.Common;
 using System.Runtime.CompilerServices;
@@ -267,10 +268,10 @@ public sealed class GeneralSqlExecutionEngine : ISqlExecutionEngine, IStatementL
                 await ExportCsvAsync(
                     tasks,
                     reader,
-                    ResolveEncoding(_settings?.Config.EncondingName),
+                    ExportEncodingResolver.Resolve(_settings?.Config.EncondingName),
                     request.OutputPath,
                     separator,
-                    ResolveNewLine(newLineSetting),
+                    ExportEncodingResolver.ResolveNewLine(newLineSetting),
                     progress: null,
                     cancellationToken: cancellationToken).ConfigureAwait(false);
             }
@@ -493,18 +494,6 @@ public sealed class GeneralSqlExecutionEngine : ISqlExecutionEngine, IStatementL
             ? outputPath + resultSetIndex
             : outputPath[..^extension.Length] + resultSetIndex + extension;
     }
-
-    private static Encoding ResolveEncoding(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name) || name.Equals("utf-8", StringComparison.OrdinalIgnoreCase))
-            return Encoding.UTF8;
-
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-        return int.TryParse(name, out int page) ? Encoding.GetEncoding(page) : Encoding.GetEncoding(name);
-    }
-
-    private static string ResolveNewLine(string? value) =>
-        string.IsNullOrEmpty(value) ? Environment.NewLine : value.Replace("\\r", "\r").Replace("\\n", "\n");
 }
 
 /// <summary>

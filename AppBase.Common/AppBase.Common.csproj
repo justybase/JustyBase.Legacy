@@ -15,6 +15,14 @@
     <ProjectReference Include="..\JustyBase.Legacy.TextBox\source\JustyBase.Legacy.TextBox.csproj" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' == 'true'">
+    <ProjectReference Include="$(JustyBaseLocalImportExportProject)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' != 'true'">
+    <PackageReference Include="JustyBase.ImportExport" />
+  </ItemGroup>
+
   <PropertyGroup>
     <DisableRuntimeMarshalling>true</DisableRuntimeMarshalling>
 	<IncludeOracle Condition="'$(IncludeOracle)' == ''">false</IncludeOracle>

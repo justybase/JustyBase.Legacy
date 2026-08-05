@@ -9,7 +9,7 @@ using AppBase.Data.Core.Models;
 using FastColoredTextBoxNS.Helpers;
 using JustData.Application.Sql;
 using JustyBase.NetezzaSqlParser.Authoring;
-using SqlTypingPerfProbe = FastColoredTextBoxNS.Helpers.SqlTypingPerfProbe;
+using SqlTypingPerfProbe = JustyBase.Core.Diagnostics.SqlTypingPerfProbe;
 using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;

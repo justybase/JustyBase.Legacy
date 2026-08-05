@@ -3,9 +3,9 @@ using AppBase.Common;
 using DatabaseDataGridView.WinForms;
 using JustData.Application.ImportExport;
 using JustData.Application.Sql;
-using SpreadSheetTasks;
 using System.Data;
-using System.Text;
+using SpreadSheetTasks;
+using ExportEncodingResolver = JustyBase.ImportExport.Export.ExportEncodingResolver;
 
 namespace JustyBaseLegacy.UI.ImportExport;
 
@@ -56,9 +56,9 @@ public sealed class WinFormsResultExportUseCase : IResultExportUseCase
             {
                 using IDataReader reader = new ReaderFromList(grid.CurrentDataTable, grid.RowsList);
                 await Task.Run(() => _tasks.ExportCSVReader(
-                    ResolveEncoding(_settings.Config.EncondingName), reader, request.OutputPath,
+                    ExportEncodingResolver.Resolve(_settings.Config.EncondingName), reader, request.OutputPath,
                     _settings.Config.SepInExportedCsv[0].ToString(), false,
-                    ResolveNewLine(_settings.Config.SepRowsInExportedCsv),
+                    ExportEncodingResolver.ResolveNewLine(_settings.Config.SepRowsInExportedCsv),
                     count => { cancellationToken.ThrowIfCancellationRequested(); rows = count; }, request.IncludeHeaders), cancellationToken);
             }
             else
@@ -85,13 +85,4 @@ public sealed class WinFormsResultExportUseCase : IResultExportUseCase
         }
         yield return terminal;
     }
-
-    private static Encoding ResolveEncoding(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name) || name.Equals("utf-8", StringComparison.OrdinalIgnoreCase)) return Encoding.UTF8;
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-        return int.TryParse(name, out int page) ? Encoding.GetEncoding(page) : Encoding.GetEncoding(name);
-    }
-
-    private static string ResolveNewLine(string? value) => string.IsNullOrEmpty(value) ? Environment.NewLine : value.Replace("\\r", "\r").Replace("\\n", "\n");
 }

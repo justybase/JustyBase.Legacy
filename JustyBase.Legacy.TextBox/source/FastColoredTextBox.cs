@@ -21,6 +21,7 @@
 // #define Styles32
 
 using FastColoredTextBoxNS.Helpers;
+using JustyBase.Core.Diagnostics;
 using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
@@ -6352,6 +6353,9 @@ namespace FastColoredTextBoxNS
             #endif
             // #region agent perf
             SqlTypingPerfProbe.Instance.EnsureInitialized();
+            // The probe is Core-owned and cannot touch SqlTypingPerfLocal; re-sync
+            // so every FCTB control (not only host-edited tabs) activates local timing.
+            SqlTypingPerfLocal.Enabled = SqlTypingPerfProbe.Instance.Enabled;
             int perfChars = TextLength;
             int perfLines = LinesCount;
             int perfChanged = args.ChangedRange?.Length ?? -1;

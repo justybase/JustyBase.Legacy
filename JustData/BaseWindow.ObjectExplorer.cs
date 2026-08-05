@@ -19,7 +19,7 @@ using DatabaseDataGridView.WinForms;
 using DatabaseDataGridView.WinForms.Coloring;
 using FastColoredTextBoxNS;
 using JustyBase.NetezzaSqlParser.Authoring;
-using SqlTypingPerfProbe = FastColoredTextBoxNS.Helpers.SqlTypingPerfProbe;
+using SqlTypingPerfProbe = JustyBase.Core.Diagnostics.SqlTypingPerfProbe;
 using FastColoredTextBoxNS.Helpers;
 using JustDataAdditionalForms;
 using JustData.Application.Schema;

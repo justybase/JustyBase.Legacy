@@ -26,7 +26,7 @@ using JustDataAdditionalForms;
 using JustyBase.NetezzaDriver;
 using System.Drawing;
 using JustyBase.NetezzaSqlParser.Authoring;
-using SqlTypingPerfProbe = FastColoredTextBoxNS.Helpers.SqlTypingPerfProbe;
+using SqlTypingPerfProbe = JustyBase.Core.Diagnostics.SqlTypingPerfProbe;
 using JustyBase.NetezzaSqlParser.Linter;
 using JustyBaseLegacy.UI.Helpers;
 using JustyBaseLegacy.Services;

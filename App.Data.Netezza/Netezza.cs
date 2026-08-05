@@ -6,6 +6,7 @@ using AppBase.Data.Core;
 using AppBase.Data.Core.Enums;
 using AppBase.Data.Core.Interfaces;
 using AppBase.Data.Core.Models;
+using JustyBase.ImportExport.Import;
 using JustyBase.NetezzaDriver;
 using JustyBase.NetezzaCatalogSql;
 using JustyBase.NetezzaDdl;
@@ -653,7 +654,7 @@ public sealed class Netezza : GeneralDb, INetezza
         throw new NotImplementedException();
     }
 
-    private DatabaseColumnType GetTypedValue(string[] headers, Dictionary<int, Dictionary<DatabaseColumnType, int[]>> typesCount, string[] row, int j, bool doTrim = true, bool isBoolean = false)
+    private DatabaseColumnType GetTypedValue(string[] headers, ImportTypeAnalyzer analyzer, string[] row, int j, bool doTrim = true, bool isBoolean = false)
     {
         DatabaseColumnType nz;
         string val;
@@ -661,47 +662,14 @@ public sealed class Netezza : GeneralDb, INetezza
         {
             nz = DatabaseColumnType.boolean;
             val = row[j];
+            analyzer.AddCell(j, ImportColumnKind.Boolean);
         }
         else
         {
             val = _generalDbService.PrepareValue(out nz, row[j], typeAdn: false, textQualifier: "", doTrim: doTrim);
+            analyzer.AddValue(j, row[j], columnName: headers[j]);
         }
 
-
-        if (nz == DatabaseColumnType.integer && row[j].Trim().Length == 11 && headers[j].Contains("PESEL", StringComparison.OrdinalIgnoreCase))
-        {
-            nz = DatabaseColumnType.nvarchar;
-            val = row[j];
-        }
-        if (!typesCount.ContainsKey(j))
-        {
-            typesCount[j] = [];
-        }
-        if (!typesCount[j].ContainsKey(nz))
-        {
-            typesCount[j][nz] = new int[3];
-        }
-        if (nz == DatabaseColumnType.numeric)
-        {
-            int dotPossition = val.IndexOf('.');
-            if (dotPossition == -1)
-            {
-                dotPossition = val.Length;
-            }
-
-            if (typesCount[j][nz][1] < dotPossition + _generalDbService.MinimumNumericPrecision)
-            {
-                typesCount[j][nz][1] = dotPossition + _generalDbService.MinimumNumericPrecision;
-            }
-            typesCount[j][nz][2] = _generalDbService.MinimumNumericPrecision;
-        }
-
-        if ((nz == DatabaseColumnType.nvarchar || nz == DatabaseColumnType.integer) && typesCount[j][nz][1] < val.Length)
-        {
-            typesCount[j][nz][1] = val.Length > 0 ? val.Length : 1;
-        }
-
-        typesCount[j][nz][0]++;
         row[j] = val;
         return nz;
     }
@@ -725,7 +693,7 @@ public sealed class Netezza : GeneralDb, INetezza
             string randName = StringExtension.RandomName("IMPORTED_");
             string nl = Environment.NewLine;
 
-            Dictionary<int, Dictionary<DatabaseColumnType, int[]>> typesCount = new Dictionary<int, Dictionary<DatabaseColumnType, int[]>>();
+            ImportTypeAnalyzer analyzer = null;
             int actInd = -1;
             int cellNum = 0;
             int dataNum = 0;
@@ -805,11 +773,11 @@ public sealed class Netezza : GeneralDb, INetezza
                             row[colNum] = val;
                             if (typeTxt is not null && typeTxt == "Boolean")
                             {
-                                GetTypedValue(headers, typesCount, row, colNum, doTrim: false, true);
+                                GetTypedValue(headers, analyzer, row, colNum, doTrim: false, true);
                             }
                             else
                             {
-                                GetTypedValue(headers, typesCount, row, colNum, doTrim: false);
+                                GetTypedValue(headers, analyzer, row, colNum, doTrim: false);
                             }
 
                             colNum++;
@@ -844,6 +812,7 @@ public sealed class Netezza : GeneralDb, INetezza
                     {
                         headers = lines[0].Trim().Split(sep).Select(arg => arg.NormalizeName(_databaseRuntimeContext.Config.KeyWordsListForColoring1).Trim()).ToArray();
                         StringExtension.RemoveDuplicates(headers);
+                        analyzer = new ImportTypeAnalyzer(headers.Length);
                     }
 
                     if (rowNum % 5000 == 0 || rowNum == lines.Length - 1)
@@ -854,7 +823,7 @@ public sealed class Netezza : GeneralDb, INetezza
             }
 
             f.SetProgressBarValue(100);
-            _importExportTasks.ChooseTypes(typesCount, headers);
+            _importExportTasks.ChooseTypes(analyzer, headers);
 
             string serverName = $"pipe_sql_{Random.Shared.Next(0, 9999)}";
             f?.AddRow($"starting LinesPipeServer");
@@ -954,7 +923,7 @@ public sealed class Netezza : GeneralDb, INetezza
                 }
 
                 StringExtension.RemoveDuplicates(headers);
-                Dictionary<int, Dictionary<DatabaseColumnType, int[]>> typesCount = new Dictionary<int, Dictionary<DatabaseColumnType, int[]>>();
+                var analyzer = new ImportTypeAnalyzer(headers.Length);
 
                 lines[0] = String.Join(sep, headers.Select(arg => arg.NormalizeName(_databaseRuntimeContext.Config.KeyWordsListForColoring1).Trim()));
                 DatabaseColumnType nz;
@@ -981,7 +950,7 @@ public sealed class Netezza : GeneralDb, INetezza
 
                     for (int j = 0; j < v1.Length; j++)
                     {
-                        nz = GetTypedValue(headers, typesCount, v1, j, doTrim: true);
+                        nz = GetTypedValue(headers, analyzer, v1, j, doTrim: true);
                     }
                     lines[i] = String.Join(sep, v1);
 
@@ -994,7 +963,7 @@ public sealed class Netezza : GeneralDb, INetezza
                 f.SetProgressBarValue(100);
 
 
-                _importExportTasks.ChooseTypes(typesCount, headers);
+                _importExportTasks.ChooseTypes(analyzer, headers);
                 //ImportTasks.RepairDateTimestampMix(typesCount, lines);
 
                 string serverName = $"pipe_sql_{random.Next(0, 9999)}";

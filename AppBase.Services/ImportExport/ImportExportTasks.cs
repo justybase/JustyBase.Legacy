@@ -216,26 +216,6 @@ public sealed partial class ImportExportTasks : IImportExportTasks
         }
     }
 
-    private void UpdateTypeStatistics(Dictionary<int, Dictionary<DatabaseColumnType, int[]>> typesCount,
-        int columnIndex, DatabaseColumnType columnType, int length)
-    {
-        if (!typesCount.ContainsKey(columnIndex))
-        {
-            typesCount[columnIndex] = new Dictionary<DatabaseColumnType, int[]>();
-        }
-        if (!typesCount[columnIndex].ContainsKey(columnType))
-        {
-            typesCount[columnIndex][columnType] = new int[3];
-        }
-
-        typesCount[columnIndex][columnType][0]++; // count
-        if (typesCount[columnIndex][columnType][1] < length)
-        {
-            typesCount[columnIndex][columnType][1] = length; // max length
-        }
-        typesCount[columnIndex][columnType][2] = _minimumNumericPrecision; // precision
-    }
-
     #endregion
 
     #region Named Pipe Server Helpers
@@ -414,7 +394,7 @@ public sealed partial class ImportExportTasks : IImportExportTasks
                 string[] headers = new string[colNum];
                 TabsTablesColumns[_fileToImport.ActualSheetName] = ($"{externalCsvPath}_{_fileToImport.ActualSheetName}", headersDic, rowNum);
 
-                Dictionary<int, Dictionary<DatabaseColumnType, int[]>> typesCount = new Dictionary<int, Dictionary<DatabaseColumnType, int[]>>();
+                var analyzer = new ImportTypeAnalyzer(colNum);
 
                 bool firstTime = true;
                 char escape = '\\';
@@ -468,10 +448,23 @@ public sealed partial class ImportExportTasks : IImportExportTasks
                             }
                         }
 
-                        ProcessDataValue(ref nativeVal, localBuffer, ref position, firstTime, headers, i, columnDelim, escape, out DatabaseColumnType nz, out int len);
+                        int tokenStart = position;
+                        bool isHeaderCell = firstTime;
+                        ProcessDataValue(ref nativeVal, localBuffer, ref position, firstTime, headers, i, columnDelim, escape, out _, out _);
+
+                        if (!isHeaderCell)
+                        {
+                            if (nativeVal.type == ExcelDataType.Boolean)
+                            {
+                                analyzer.AddCell(i, ImportColumnKind.Boolean);
+                            }
+                            else if (position > tokenStart)
+                            {
+                                analyzer.AddValue(i, localBuffer.AsSpan(tokenStart, position - tokenStart), columnName: headers[i]);
+                            }
+                        }
 
                         WriteDelimiterAndNewline(localBuffer, ref position, columnDelim, i, colNum);
-                        UpdateTypeStatistics(typesCount, i, nz, len);
                     }
 
                     FlushBufferIfNeeded(sw, localBuffer, ref position);
@@ -488,7 +481,7 @@ public sealed partial class ImportExportTasks : IImportExportTasks
                 localBuffer = null;
 
                 f?.SetProgressBarValue(100);
-                ChooseTypes(typesCount, headers);
+                ChooseTypes(analyzer, headers);
                 for (int i = 0; i < _fileToImport.FieldCount; i++)
                 {
                     headersDic[i] = headers[i];
@@ -711,151 +704,26 @@ public sealed partial class ImportExportTasks : IImportExportTasks
         return headers;
     }
 
-    public void ChooseTypes(Dictionary<int, Dictionary<DatabaseColumnType, int[]>> typesCount, string[] headers)
+    public void ChooseTypes(ImportTypeAnalyzer analyzer, string[] headers)
     {
-        for (int i = 0; i < headers.Length; i++)
+        int defaultNvarcharLength = _applicationSettingsContext.Config.DefaultNvarcharLength;
+        var chosen = analyzer.Choose(columnNames: headers, defaultNvarcharLength: defaultNvarcharLength);
+
+        for (int i = 0; i < headers.Length && i < chosen.Count; i++)
         {
-            if (headers[i].EndsWith("_#TEXT"))
-            {
-                headers[i] += $" NVARCHAR({_applicationSettingsContext.Config.DefaultNvarcharLength})";
-                continue;
-            }
-            else if (headers[i].EndsWith("_#NUMERIC"))
-            {
-                headers[i] += " NUMERIC(20,8)";
-                continue;
-            }
-            else if (headers[i].EndsWith("_#INTEGER"))
-            {
-                headers[i] += " INTEGER";
-                continue;
-            }
-            else if (headers[i].EndsWith("_#DATE"))
-            {
-                headers[i] += " DATE";
-                continue;
-            }
-            else if (headers[i].EndsWith("_#TIMESTAMP"))
-            {
-                headers[i] += " TIMESTAMP";
-                continue;
-            }
-
-            if (!typesCount.ContainsKey(i))
-            {
-                typesCount[i] = new Dictionary<DatabaseColumnType, int[]>();
-                typesCount[i][DatabaseColumnType.nvarchar] = new int[3];
-                typesCount[i][DatabaseColumnType.nvarchar][0] = 1;
-                typesCount[i][DatabaseColumnType.nvarchar][1] = _applicationSettingsContext.Config.DefaultNvarcharLength;
-            }
-
-            if (!typesCount.ContainsKey(i))
-            {
-                headers[i] += $" NVARCHAR({_applicationSettingsContext.Config.DefaultNvarcharLength})";
-                continue;
-            }
-
-            var bestChoiceTemp = typesCount[i].Where(arg => arg.Key != DatabaseColumnType.noinfo);
-
-            if (bestChoiceTemp == null)
-            {
-                headers[i] += $" NVARCHAR({_applicationSettingsContext.Config.DefaultNvarcharLength})";
-                continue;
-            }
-
-            // most popular type is Winner
-            var bestChoice = bestChoiceTemp.OrderByDescending(arg => (arg.Value)[0]).FirstOrDefault();
-            bool containNumeric = typesCount[i].ContainsKey(DatabaseColumnType.numeric);
-            bool containNvarchar = typesCount[i].ContainsKey(DatabaseColumnType.nvarchar);
-            bool containInteger = typesCount[i].ContainsKey(DatabaseColumnType.integer);
-            bool containTimestamp = typesCount[i].ContainsKey(DatabaseColumnType.timestamp);
-
-            if (containNvarchar)
-            {
-                int p = typesCount[i][DatabaseColumnType.nvarchar][1];
-                int l = 0;
-                if (containNumeric)
-                {
-                    l = typesCount[i][DatabaseColumnType.numeric][1];
-                    if (l > p)
-                    {
-                        p = l;
-                    }
-                }
-                if (containInteger)
-                {
-                    l = typesCount[i][DatabaseColumnType.integer][1];
-                    if (l > p)
-                    {
-                        p = l;
-                    }
-                }
-                if ((typesCount[i].ContainsKey(DatabaseColumnType.timestamp) || typesCount[i].ContainsKey(DatabaseColumnType.date)) && p < 50)
-                {
-                    p = 50;
-                }
-                headers[i] += $" NVARCHAR({(p == 1 ? 1 : p + 5)})";
-            }
-            else if (containNumeric && containTimestamp)
-            {
-                headers[i] += $" NVARCHAR({_applicationSettingsContext.Config.DefaultNvarcharLength})";
-            }
-            else if (containNumeric)
-            {
-                int a = typesCount[i][DatabaseColumnType.numeric][1];
-                int b = typesCount[i][DatabaseColumnType.numeric][2];
-                if (containInteger && typesCount[i][DatabaseColumnType.integer][1] + b > a)
-                {
-                    a = typesCount[i][DatabaseColumnType.integer][1] + b; // in column : 1,2,5.1,10 then 
-                }
-                if (a < b + 5)
-                {
-                    a = b + 5;
-                }
-                if (a < 10)
-                {
-                    a = 10;
-                }
-                if (containInteger && a < b + 16)
-                {
-                    a = b + 16;
-                }
-
-                headers[i] += $" NUMERIC({(a > 38 ? 38 : a)},{(b > 10 ? 10 : b)})";
-            }
-            else if (containTimestamp && containInteger)
-            {
-                headers[i] += $" NVARCHAR(50)";
-            }
-            else
-            {
-                switch (bestChoice.Key)
-                {
-                    case DatabaseColumnType.integer:
-                        headers[i] += " BIGINT";
-                        break;
-                    case DatabaseColumnType.nvarchar:
-                        headers[i] += $" NVARCHAR({bestChoice.Value[1]})";
-                        break;
-                    case DatabaseColumnType.numeric:
-                        headers[i] += $" NUMERIC({bestChoice.Value[1]},{bestChoice.Value[2]})";
-                        break;
-                    case DatabaseColumnType.date:
-                        headers[i] += " DATE";
-                        break;
-                    case DatabaseColumnType.timestamp:
-                        headers[i] += " TIMESTAMP";
-                        break;
-                    case DatabaseColumnType.boolean:
-                        headers[i] += " BOOL";
-                        break;
-                    default:
-                        headers[i] += $" NVARCHAR({_applicationSettingsContext.Config.DefaultNvarcharLength})";
-                        break;
-                }
-            }
+            headers[i] += FormatChosenType(chosen[i], defaultNvarcharLength);
         }
     }
+
+    private static string FormatChosenType(DetectedImportColumnType type, int defaultNvarcharLength) => type.Kind switch
+    {
+        ImportColumnKind.Integer => " BIGINT",
+        ImportColumnKind.Numeric => $" NUMERIC({type.LengthOrPrecision},{type.Scale})",
+        ImportColumnKind.Date => " DATE",
+        ImportColumnKind.TimeStamp => " TIMESTAMP",
+        ImportColumnKind.Boolean => " BOOL",
+        _ => $" NVARCHAR({(type.LengthOrPrecision > 0 ? type.LengthOrPrecision : defaultNvarcharLength)})"
+    };
 
     public void MakeSilentXlsxExport(string ConnectionString, string sql, string filePath, Action<int> f = null, Action onCompress = null, ConnectionTypes connType = ConnectionTypes.odbc)
     {
