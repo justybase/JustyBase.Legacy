@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using JustyBase.NetezzaDdl;
 
 namespace JustyBaseLegacy.UI.DbForms
 {
@@ -40,25 +41,27 @@ namespace JustyBaseLegacy.UI.DbForms
         {
             string REMOTESOURCE = "DOTNET";
 
-            GetCode = @$"
+            string usingClause = NetezzaImportSql.BuildUsingClause(new NetezzaImportUsingOptions
+            {
+                IncludeHeader = cbHeader.Checked,
+                Delimiter = tbDelim.Text,
+                DecimalDelim = cbDecimalDelim.Text,
+                DateStyle = cbDateStyle.Text,
+                BoolStyle = cbBoolStyle.Text,
+                Compress = cbCompress.Text == "True",
+                CrInString = cbCrInString.Text == "True",
+                AllowControlCharacters = cbCtrlChars.Text == "True",
+                EncodingName = cbEnconding.Text,
+                EscapeChar = "\\",
+                RemoteSource = REMOTESOURCE,
+                LogDirectory = $"{_configDirectory}\\data"
+            });
+
+            GetCode = $@"
 INSERT INTO {DbName}.{tableName}
 SELECT * FROM 
 EXTERNAL '{tbPath.Text}'
-USING
-({(cbHeader.Checked ? @"
-    IncludeHeader" : "")}
-    DELIMITER '{tbDelim.Text}'
-    DecimalDelim '{cbDecimalDelim.Text}'
-    DATESTYLE '{cbDateStyle.Text}'
-    BOOLSTYLE '{cbBoolStyle.Text}'
-    COMPRESS '{cbCompress.Text}'
-    CRINSTRING '{cbCrInString.Text}'
-    CTRLCHARS '{cbCtrlChars.Text}'
-    ENCODING '{cbEnconding.Text}'
-    ESCAPECHAR '\'
-    REMOTESOURCE '{REMOTESOURCE}'
-    LOGDIR '{_configDirectory}\data'
-);";
+{usingClause};";
         }
 
         private void linkLabel1_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)

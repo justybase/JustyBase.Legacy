@@ -843,21 +843,22 @@ public sealed class Netezza : GeneralDb, INetezza
 
             f.AddRow($"creating {randName}");
             cmd.ExecuteNonQuery();
-            cmd.CommandText = NetezzaImportSql.InsertFromExternalPipe(randName, serverName, headers);
-            string sep2 = (sep == '\t' ? "\\t" : sep.ToString());
-
-            cmd.CommandText += @$"USING(
-                    REMOTESOURCE 'DOTNET'
-                    DELIMITER '{sep2}'
-                    SKIPROWS 1
-                    NULLVALUE ''
-                    ENCODING 'utf-8'
-                    ESCAPECHAR '{escapechar}'
-                    --QUOTEDVALUE 'DOUBLE' 
-                    TIMESTYLE '24HOUR'
-                    MAXERRORS {config.ExternalMAXERRORS}
-                    LOGDIR '{configDirecotry}\\data\\'
-                );";
+            cmd.CommandText = NetezzaImportEngine.BuildInsertSql(
+                randName,
+                serverName,
+                headers,
+                new NetezzaImportUsingOptions
+                {
+                    RemoteSource = "DOTNET",
+                    Delimiter = (sep == '\t' ? "\\t" : sep.ToString()),
+                    SkipRows = 1,
+                    NullValue = "",
+                    EncodingName = "utf-8",
+                    EscapeChar = escapechar.ToString(),
+                    TimeStyle = "24HOUR",
+                    MaxErrors = config.ExternalMAXERRORS,
+                    LogDirectory = $"{configDirecotry}\\data\\"
+                });
             f?.AddRow($"inserting into {randName} started");
 
             cmd.ExecuteNonQuery();
@@ -985,21 +986,23 @@ public sealed class Netezza : GeneralDb, INetezza
 
                 string REMOTESOURCE = "DOTNET";
 
-                cmd.CommandText = NetezzaImportSql.InsertFromExternalPipe(randName, serverName, headers);
-                string sep2 = (sep == '\t' ? "\\t" : sep.ToString());
-                cmd.CommandText += @$"USING(
-                    REMOTESOURCE '{REMOTESOURCE}'
-                    DELIMITER '{sep2}'
-                    SKIPROWS 1
-                    NULLVALUE ''
-                    ENCODING 'utf-8'
-                    ESCAPECHAR '{escapechar}'
-                    QUOTEDVALUE 'DOUBLE' 
-                    TIMESTYLE '24HOUR'
-                    MAXERRORS {config.ExternalMAXERRORS}
-                    LOGDIR '{configDirecotry}\\data\\'
-                );";
-
+                cmd.CommandText = NetezzaImportEngine.BuildInsertSql(
+                    randName,
+                    serverName,
+                    headers,
+                    new NetezzaImportUsingOptions
+                    {
+                        RemoteSource = REMOTESOURCE,
+                        Delimiter = (sep == '\t' ? "\\t" : sep.ToString()),
+                        SkipRows = 1,
+                        NullValue = "",
+                        EncodingName = "utf-8",
+                        EscapeChar = escapechar.ToString(),
+                        QuotedValue = "DOUBLE",
+                        TimeStyle = "24HOUR",
+                        MaxErrors = config.ExternalMAXERRORS,
+                        LogDirectory = $"{configDirecotry}\\data\\"
+                    });
 
                 f.AddRow($"inserting into {randName} started");
                 cmd.ExecuteNonQuery();
@@ -1279,23 +1282,19 @@ public sealed class Netezza : GeneralDb, INetezza
 
         string REMOTESOURCE = "DOTNET";
 
-
-        cmd.CommandText += @$"
-USING(
-                REMOTESOURCE '{REMOTESOURCE}'
-                DELIMITER '{sepInExternal}'
-                RecordDelim '\n'
-                SKIPROWS 1
-                NULLVALUE ''
-                ENCODING 'utf-8'
-                ESCAPECHAR '\'
-                --QUOTEDVALUE 'DOUBLE' 
-                --TIMESTYLE '24HOUR'
-                CTRLCHARS TRUE
-                LFINSTRING TRUE
-                MAXERRORS {_databaseRuntimeContext.Config.ExternalMAXERRORS}
-                LOGDIR '{_databaseRuntimeContext.ConfigDirectory}\\data\\'
-                );";
+        cmd.CommandText += NetezzaImportSql.BuildUsingClause(new NetezzaImportUsingOptions
+        {
+            RemoteSource = REMOTESOURCE,
+            Delimiter = sepInExternal.ToString(),
+            SkipRows = 1,
+            NullValue = "",
+            EncodingName = "utf-8",
+            EscapeChar = "\\",
+            AllowControlCharacters = true,
+            LfInString = true,
+            MaxErrors = _databaseRuntimeContext.Config.ExternalMAXERRORS,
+            LogDirectory = $"{_databaseRuntimeContext.ConfigDirectory}\\data\\"
+        }) + ";";
         cmd.ExecuteNonQuery();
         dbConnection.Close();
     }

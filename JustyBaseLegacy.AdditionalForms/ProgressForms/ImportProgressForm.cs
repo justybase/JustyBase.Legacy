@@ -1,4 +1,5 @@
 using AppBase.Common;
+using JustyBase.ImportExport.Import;
 using System.Text;
 
 namespace JustyBaseLegacy.UI;
@@ -215,7 +216,7 @@ public partial class ImportProgressForm : Form, IImportProgressForm
             }
 
             string fromTable = string.IsNullOrWhiteSpace(qualifiedTableName) ? randName : qualifiedTableName;
-            string selectSql = BuildAliasedColumnSelect(fromTable, headers);
+            string selectSql = ImportSelectSqlBuilder.BuildAliasedColumnSelect(fromTable, headers);
 
             this.btSelect.Enabled = true;
             this.btRename.Enabled = true;
@@ -231,56 +232,6 @@ public partial class ImportProgressForm : Form, IImportProgressForm
                 this.fctb.Text += $"{Environment.NewLine}DROP TABLE {fromTable};";
             }
         }));
-    }
-
-    internal static string BuildAliasedColumnSelect(string tableReference, string[] headerDefinitions, string alias = "T")
-    {
-        string[] columns = headerDefinitions
-            .Select(ExtractColumnNameFromHeaderDefinition)
-            .Where(column => !string.IsNullOrWhiteSpace(column))
-            .ToArray();
-
-        if (columns.Length == 0)
-        {
-            return $"SELECT * FROM {tableReference} {alias} LIMIT 100";
-        }
-
-        var sb = new StringBuilder();
-        sb.AppendLine("SELECT");
-        sb.AppendLine($"{alias}.{QuoteSelectIdentifier(columns[0])}");
-        for (int i = 1; i < columns.Length; i++)
-        {
-            sb.AppendLine($", {alias}.{QuoteSelectIdentifier(columns[i])}");
-        }
-
-        sb.AppendLine("FROM");
-        sb.AppendLine($"{tableReference} {alias}");
-        sb.AppendLine("LIMIT 100");
-        return sb.ToString().TrimEnd();
-    }
-
-    private static string QuoteSelectIdentifier(string identifier) =>
-        StringExtension.QuoteNameIfNeeded(identifier);
-
-    internal static string ExtractColumnNameFromHeaderDefinition(string headerDefinition)
-    {
-        if (string.IsNullOrWhiteSpace(headerDefinition))
-        {
-            return string.Empty;
-        }
-
-        headerDefinition = headerDefinition.Trim();
-        if (headerDefinition.StartsWith('"'))
-        {
-            int endQuote = headerDefinition.IndexOf('"', 1);
-            if (endQuote > 1)
-            {
-                return headerDefinition.Substring(1, endQuote - 1);
-            }
-        }
-
-        int space = headerDefinition.IndexOf(' ');
-        return space <= 0 ? headerDefinition : headerDefinition[..space];
     }
 
     public string TextToClipboard { get; set; }

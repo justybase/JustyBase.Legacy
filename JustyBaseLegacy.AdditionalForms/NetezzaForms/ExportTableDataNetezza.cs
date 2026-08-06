@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using JustyBase.NetezzaDdl;
 
 namespace JustyBaseLegacy.UI.DbForms
 {
@@ -37,25 +38,26 @@ namespace JustyBaseLegacy.UI.DbForms
         {
             string REMOTESOURCE = "DOTNET";
 
-            GetCode = @$"
+            string usingClause = NetezzaImportSql.BuildUsingClause(new NetezzaImportUsingOptions
+            {
+                IncludeHeader = cbHeader.Checked,
+                Delimiter = tbDelim.Text,
+                DecimalDelim = cbDecimalDelim.Text,
+                DateStyle = cbDateStyle.Text,
+                BoolStyle = cbBoolStyle.Text,
+                Compress = cbCompress.Text == "True",
+                CrInString = cbCrInString.Text == "True",
+                AllowControlCharacters = cbCtrlChars.Text == "True",
+                EncodingName = cbEnconding.Text,
+                EscapeChar = "\\",
+                RemoteSource = REMOTESOURCE
+            });
+
+            GetCode = $@"
 CREATE EXTERNAL TABLE '{tbPath.Text}'
-USING
-({(cbHeader.Checked ? @"
-    IncludeHeader" : "")}
-    DELIMITER '{tbDelim.Text}'
-    DecimalDelim '{cbDecimalDelim.Text}'
-    DATESTYLE '{cbDateStyle.Text}'
-    BOOLSTYLE '{cbBoolStyle.Text}'
-    COMPRESS '{cbCompress.Text}'
-    CRINSTRING '{cbCrInString.Text}'
-    CTRLCHARS '{cbCtrlChars.Text}'
-    ENCODING '{cbEnconding.Text}'
-    ESCAPECHAR '\'
-    REMOTESOURCE '{REMOTESOURCE}'
-)
+{usingClause}
 AS 
 SELECT * FROM {DbName}.{tableName};";
-
         }
 
         private void btOk_Click(object sender, EventArgs e)

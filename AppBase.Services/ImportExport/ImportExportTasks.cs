@@ -233,20 +233,23 @@ public sealed partial class ImportExportTasks : IImportExportTasks
     {
         char sepInExternal = _applicationSettingsContext.Config.SepInExternal[0];
 
-        return NetezzaImportSql.InsertFromExternalPipe(tableName, serverName, headers) +
-               @$"USING(
-                REMOTESOURCE '{remoteSource}'
-                DELIMITER '{sepInExternal}'
-                RecordDelim '\n'
-                SKIPROWS 1
-                NULLVALUE ''
-                ENCODING 'utf-8'
-                ESCAPECHAR '\'
-                CTRLCHARS TRUE
-                LFINSTRING TRUE
-                MAXERRORS {_applicationSettingsContext.Config.ExternalMAXERRORS}
-                LOGDIR '{_applicationSettingsContext.ConfigDirectory}\\data\\'
-                );";
+        return NetezzaImportEngine.BuildInsertSql(
+            tableName,
+            serverName,
+            headers,
+            new NetezzaImportUsingOptions
+            {
+                RemoteSource = remoteSource,
+                Delimiter = sepInExternal.ToString(),
+                SkipRows = 1,
+                NullValue = "",
+                EncodingName = "utf-8",
+                EscapeChar = "\\",
+                AllowControlCharacters = true,
+                LfInString = true,
+                MaxErrors = _applicationSettingsContext.Config.ExternalMAXERRORS,
+                LogDirectory = $"{_applicationSettingsContext.ConfigDirectory}\\data\\"
+            });
     }
 
     #endregion
@@ -920,20 +923,23 @@ public sealed partial class ImportExportTasks : IImportExportTasks
 
         string REMOTESOURCE = dbConnection is NzConnection ? "dotnet" : "odbc";
 
-        string insertCommand = NetezzaImportSql.InsertFromExternalPipe(randName, serverName, headers)
-         + @$"USING(
-                REMOTESOURCE '{REMOTESOURCE}'
-                DELIMITER '{sepInExternal}'
-                SKIPROWS 1
-                NULLVALUE ''
-                ENCODING 'utf-8'
-                ESCAPECHAR '\'
-                TIMESTYLE '24HOUR'
-                CRinString True
-                RecordDelim '\n'
-                MAXERRORS {config.ExternalMAXERRORS}
-                LOGDIR '{configDirecotry}\\data\\'
-                );";
+        string insertCommand = NetezzaImportEngine.BuildInsertSql(
+            randName,
+            serverName,
+            headers,
+            new NetezzaImportUsingOptions
+            {
+                RemoteSource = REMOTESOURCE,
+                Delimiter = sepInExternal.ToString(),
+                SkipRows = 1,
+                NullValue = "",
+                EncodingName = "utf-8",
+                EscapeChar = "\\",
+                TimeStyle = "24HOUR",
+                CrInString = true,
+                MaxErrors = config.ExternalMAXERRORS,
+                LogDirectory = $"{configDirecotry}\\data\\"
+            });
 
         form?.AddRow(@$"inserting into {randName} started");
         cmd.CommandText = insertCommand;
