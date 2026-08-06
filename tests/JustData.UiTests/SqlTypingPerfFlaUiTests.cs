@@ -35,15 +35,18 @@ public sealed class SqlTypingPerfFlaUiTests
         Directory.CreateDirectory(perfDir);
         DateTime startedUtc = DateTime.UtcNow;
 
+        string bigSqlPath = BigSqlFixture.ResolveBigSqlPath();
+
         string? logPath;
         long wallMs;
         long[] interKeyMs = new long[KeyCount];
         string typedTail;
 
         using (UiSession session = UiTestHelpers.LaunchAndLogin(
+                   openSqlFilePath: bigSqlPath,
                    environment: new Dictionary<string, string> { [PerfEnv] = "1" }))
         {
-            UiTestHelpers.FlaUiStep("logged in");
+            UiTestHelpers.FlaUiStep($"logged in, opened {bigSqlPath}");
             Thread.Sleep(2_000);
 
             Window main = UiTestHelpers.WaitFor(

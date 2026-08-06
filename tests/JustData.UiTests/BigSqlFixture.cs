@@ -3,12 +3,28 @@ using System.Text;
 namespace JustData.UiTests;
 
 /// <summary>
-/// Builds a ~245 KB / ~9k-line SQL fixture that mimics BIG.SQL for typing perf reproduction.
+/// Resolves the real BIG.SQL fixture (production file shipped with the test output)
+/// and falls back to the generated ~245 KB fixture when the file is not present.
 /// </summary>
 internal static class BigSqlFixture
 {
     public const int TargetBytes = 245_000;
     public const int TargetLines = 9_186;
+
+    /// <summary>
+    /// Prefers the checked-in production fixture (<c>Fixtures/BIG.SQL</c> in the test output);
+    /// falls back to the generated content so the typing-perf scenario always has a big document.
+    /// </summary>
+    public static string ResolveBigSqlPath()
+    {
+        string fixture = Path.Combine(AppContext.BaseDirectory, "Fixtures", "BIG.SQL");
+        if (File.Exists(fixture) && new FileInfo(fixture).Length >= 100_000)
+        {
+            return fixture;
+        }
+
+        return CreateOrReuse();
+    }
 
     public static string CreateOrReuse(string? directory = null)
     {

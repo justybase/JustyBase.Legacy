@@ -28,6 +28,10 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="Fixtures\BIG.SQL" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- These are manual/benchmark artifacts, not part of the default functional UI suite. -->
   <ItemGroup>
     <Compile Remove="AotWorkflowSmokeTests.cs" />
