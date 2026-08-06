@@ -111,9 +111,10 @@ public static class LegacyDdlSchemaAdapter
                 tableInfo.TABLE_NAME,
                 tableInfo.TABLE_SCHEMA,
                 databaseName,
-                tableInfo.TABLE_KIND == TypeInDatabase.view,
-                columns,
-                string.IsNullOrEmpty(tableInfo.TABLE_DESC) ? null : tableInfo.TABLE_DESC);
+                Kind: tableInfo.TABLE_KIND == TypeInDatabase.view ? NetezzaObjectKind.View : NetezzaObjectKind.Table,
+                IsView: tableInfo.TABLE_KIND == TypeInDatabase.view,
+                Columns: columns,
+                Description: string.IsNullOrEmpty(tableInfo.TABLE_DESC) ? null : tableInfo.TABLE_DESC);
         }
 
         int columnCount = columnsByIndex.Count;
@@ -122,9 +123,10 @@ public static class LegacyDdlSchemaAdapter
                 tableInfo.TABLE_NAME,
                 tableInfo.TABLE_SCHEMA,
                 databaseName,
-                tableInfo.TABLE_KIND == TypeInDatabase.view,
-                columns,
-                string.IsNullOrEmpty(tableInfo.TABLE_DESC) ? null : tableInfo.TABLE_DESC);
+                Kind: tableInfo.TABLE_KIND == TypeInDatabase.view ? NetezzaObjectKind.View : NetezzaObjectKind.Table,
+                IsView: tableInfo.TABLE_KIND == TypeInDatabase.view,
+                Columns: columns,
+                Description: string.IsNullOrEmpty(tableInfo.TABLE_DESC) ? null : tableInfo.TABLE_DESC);
 
         int available = Math.Min(tableInfo.COLUMN_COUNT, columnCount - tableInfo.FIRST_COLUMN_ID);
         for (int i = 0; i < available; i++)
@@ -138,13 +140,14 @@ public static class LegacyDdlSchemaAdapter
                 column.COLDEFAULT));
         }
 
-        return new NetezzaSchemaTable(
-            tableInfo.TABLE_NAME,
-            tableInfo.TABLE_SCHEMA,
-            databaseName,
-            tableInfo.TABLE_KIND == TypeInDatabase.view,
-            columns,
-            string.IsNullOrEmpty(tableInfo.TABLE_DESC) ? null : tableInfo.TABLE_DESC);
+            return new NetezzaSchemaTable(
+                tableInfo.TABLE_NAME,
+                tableInfo.TABLE_SCHEMA,
+                databaseName,
+                Kind: tableInfo.TABLE_KIND == TypeInDatabase.view ? NetezzaObjectKind.View : NetezzaObjectKind.Table,
+                IsView: tableInfo.TABLE_KIND == TypeInDatabase.view,
+                Columns: columns,
+                Description: string.IsNullOrEmpty(tableInfo.TABLE_DESC) ? null : tableInfo.TABLE_DESC);
     }
 
     private static List<string> BuildOrderedColumnNames(

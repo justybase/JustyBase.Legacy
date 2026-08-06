@@ -85,9 +85,10 @@ public static class LegacySchemaSync
                         tableName,
                         tableInfo.TABLE_SCHEMA,
                         databaseName,
-                        tableInfo.TABLE_KIND == TypeInDatabase.view,
-                        BuildColumns(tableInfo, columnsByIndex),
-                        string.IsNullOrEmpty(tableInfo.TABLE_DESC) ? null : tableInfo.TABLE_DESC));
+                        Kind: tableInfo.TABLE_KIND == TypeInDatabase.view ? NetezzaObjectKind.View : NetezzaObjectKind.Table,
+                        IsView: tableInfo.TABLE_KIND == TypeInDatabase.view,
+                        Columns: BuildColumns(tableInfo, columnsByIndex),
+                        Description: string.IsNullOrEmpty(tableInfo.TABLE_DESC) ? null : tableInfo.TABLE_DESC));
                 }
             }
         }

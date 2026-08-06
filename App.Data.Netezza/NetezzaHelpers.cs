@@ -1,4 +1,4 @@
-﻿using AppBase.Common;
+using AppBase.Common;
 using AppBase.Common.Enums;
 using AppBase.Common.Interfaces;
 using AppBase.Data.Core.Core;
@@ -128,15 +128,16 @@ public static class NetezzaHelpers
         AppBase.Common.Interfaces.IDatabaseRuntimeContext baseWindowHelpers,
         IConnectionSessionRegistry connectionSessions,
         INetezzaSchemaTableCatalog schemaTables,
-        string preferedUserName,
-        string connectionName)
+        string? preferedUserName,
+        string connectionName,
+        JustyBase.Netezza.Schema.NetezzaSchemaCache? schemaCache = null)
     {
         ArgumentNullException.ThrowIfNull(connectionSessions);
         ArgumentNullException.ThrowIfNull(schemaTables);
 
         if (!connectionSessions.TryGetValue(connectionName, out var gdb)
             || gdb is not INetezza nz
-            || !nz.BasesTablesList.TryGetValue(connectionName, out var basesTabels))
+            || nz.GetConnection() is not { } connection)
         {
             return false;
         }
@@ -146,147 +147,129 @@ public static class NetezzaHelpers
         INetezzaSchemaTableCatalogWriter catalogWriter = schemaTables as INetezzaSchemaTableCatalogWriter
             ?? throw new InvalidOperationException("Schema initialization requires the table catalog write port.");
 
-        IOrderedEnumerable<NetezzaBasesTables> orderedBaseTables = null;
-
-        preferedUserName ??= Random.Shared.GetString("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", 32);
-
-        if (baseWindowHelpers.Config.DontShowOwner)
-        {
-            orderedBaseTables = basesTabels.OrderBy(a => a.DATABASE_ID).
-                ThenBy(a => a.TABLE_NAME).
-                ThenBy(a => a.OWNER_NAME);
-        }
-        else if (baseWindowHelpers.Config.SortMethod == 0)
-        {
-            string userName = preferedUserName.ToLower();
-            orderedBaseTables = basesTabels.
-                OrderBy(a => a.DATABASE_ID).
-                ThenBy(a => !a.OWNER_NAME.Equals(userName, StringComparison.OrdinalIgnoreCase)).
-                ThenBy(a => a.OWNER_NAME).ThenBy(a => a.TABLE_NAME);
-        }
-        else if (baseWindowHelpers.Config.SortMethod == 1)
-        {
-            string userName = preferedUserName.ToLower();
-            orderedBaseTables = basesTabels.
-                OrderBy(a => a.DATABASE_ID).
-                ThenBy(a => a.OWNER_NAME).
-                ThenBy(a => a.TABLE_NAME);
-        }
-        else
-        {
-            orderedBaseTables = basesTabels.
-                OrderBy(a => a.DATABASE_ID).
-                ThenBy(a => a.TABLE_NAME).
-                ThenBy(a => a.OWNER_NAME);
-        }
-        var currentDatabaseTables = new Dictionary<int, NetezzaTableInfo>();
-
-        foreach (var row in orderedBaseTables)
-        {
-            int tableId = row.TABLE_ID;
-            int databaseId = row.DATABASE_ID;
-            string tableName = row.TABLE_NAME;
-            string tableOwner = row.OWNER_NAME;
-            string tableSchema = row.SCHEMA_NAME;
-            string tableObjectOwner = row.OBJECT_OWNER_NAME;
-            var tableKind = row.OBJECT_TYPE switch
-            {
-                "TABLE" => TypeInDatabase.table,
-                "VIEW" => TypeInDatabase.view,
-                "PROCEDURE" => TypeInDatabase.procedure,
-                "FUNCTION" => TypeInDatabase.function,
-                "SEQUENCE" => TypeInDatabase.sequence,
-                "SYNONYM" => TypeInDatabase.synonym,
-                "EXTERNAL TABLE" => TypeInDatabase.thisExternal,
-                "AGGREGATE" => TypeInDatabase.thisAggregate,
-                _ => TypeInDatabase.table,
-            };
-
-            if (baseWindowHelpers.BaseTableConnections.TryGetValue(connectionName, out var value) && value.TryGetValue(databaseId, out var dbTablesSet))
-            {
-                string databaseName = baseWindowHelpers.DatabaseDictionary.TryGetValue(connectionName, out var dbDict0)
-                    && dbDict0.TryGetValue(databaseId, out var dbInfo0)
-                    ? dbInfo0.DatabaseName
-                    : string.Empty;
-
-                string tableDesc = null;
-                if (baseWindowHelpers.DatabaseTableDescriptions.TryGetValue(connectionName, out var res0))
-                {
-                    if (res0.TryGetValue(databaseName, out var res1))
+        IReadOnlyList<(string Database, JustyBase.Netezza.Models.NetezzaSchemaSnapshot Snapshot)> snapshots =
+            JustyBase.Netezza.Schema.NetezzaSchemaLoader.LoadAllAsync(
+                    connection,
+                    new JustyBase.Netezza.Schema.NetezzaCatalogLoadOptions
                     {
-                        res1.TryGetValue(tableId, out tableDesc);
+                        LazyColumnThreshold = int.MaxValue,
+                        LoadProcedures = false,
+                    })
+                .GetAwaiter()
+                .GetResult();
+
+        var currentDatabaseTables = new Dictionary<int, NetezzaTableInfo>();
+        var columnRows = new List<NetezzaColumnInfoRow>();
+        var schemaLookup = new Dictionary<string, Dictionary<string, (string owner, int tableId)>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (databaseName, snapshot) in snapshots)
+        {
+            if (string.IsNullOrEmpty(databaseName))
+            {
+                continue;
+            }
+
+            schemaCache?.Put(connectionName, databaseName, snapshot);
+
+            int databaseId = -1;
+            if (baseWindowHelpers.DatabaseDictionary.TryGetValue(connectionName, out var dbDict0))
+            {
+                foreach (var (id, info) in dbDict0)
+                {
+                    if (string.Equals(info.DatabaseName, databaseName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        databaseId = id;
+                        break;
                     }
                 }
+            }
+
+            if (databaseId < 0)
+            {
+                continue;
+            }
+
+            var tableLookup = new Dictionary<string, (string owner, int tableId)>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var table in snapshot.Tables)
+            {
+                int tableId = table.CatalogId;
+                var tableKind = table.TextType switch
+                {
+                    "TABLE" => TypeInDatabase.table,
+                    "VIEW" => TypeInDatabase.view,
+                    "PROCEDURE" => TypeInDatabase.procedure,
+                    "FUNCTION" => TypeInDatabase.function,
+                    "SEQUENCE" => TypeInDatabase.sequence,
+                    "SYNONYM" => TypeInDatabase.synonym,
+                    "EXTERNAL TABLE" => TypeInDatabase.thisExternal,
+                    "AGGREGATE" => TypeInDatabase.thisAggregate,
+                    _ => TypeInDatabase.table,
+                };
 
                 currentDatabaseTables[tableId] = new NetezzaTableInfo()
                 {
                     DATABASE_ID = databaseId,
-                    TABLE_NAME = tableName,
-                    TABLE_DESC = tableDesc,
-                    TABLE_OWNER = tableOwner,
-                    TABLE_SCHEMA = tableSchema,
-                    TABLE_OBJECT_OWNER = tableObjectOwner,
+                    TABLE_NAME = table.Name,
+                    TABLE_DESC = table.Description ?? string.Empty,
+                    TABLE_OWNER = table.Owner ?? string.Empty,
+                    TABLE_SCHEMA = table.Schema ?? string.Empty,
+                    TABLE_OBJECT_OWNER = table.Owner ?? string.Empty,
                     TABLE_KIND = tableKind,
                     FIRST_COLUMN_ID = -1,
                     COLUMN_COUNT = 0
                 };
                 runtimeWriter.AddBaseTable(connectionName, databaseId, tableId);
+                tableLookup[table.Name] = (table.Owner ?? string.Empty, tableId);
+            }
+
+            schemaLookup[databaseName] = tableLookup;
+        }
+
+        int columnId = 0;
+        foreach (var (_, snapshot) in snapshots)
+        {
+            foreach (var table in snapshot.Tables.OrderBy(t => t.CatalogId))
+            {
+                if (!currentDatabaseTables.TryGetValue(table.CatalogId, out var tableInfo)
+                    || table.Columns is not { Count: > 0 } columns)
+                {
+                    continue;
+                }
+
+                tableInfo.FIRST_COLUMN_ID = columnId;
+                tableInfo.COLUMN_COUNT = columns.Count;
+
+                foreach (var column in columns)
+                {
+                    columnRows.Add(new NetezzaColumnInfoRow()
+                    {
+                        COLUMN_NUMBER = (ushort)(columnRows.Count + 1),
+                        TABLE_ID = table.CatalogId,
+                        DATABASE_ID = tableInfo.DATABASE_ID,
+                        COLUMN_NAME = column.Name,
+                        COLUMN_DESCRIPTION = column.Description,
+                        DATA_TYPE = column.DataType ?? string.Empty,
+                        IS_NULLABLE = column.Nullable,
+                        COLDEFAULT = column.DefaultValue,
+                    });
+                }
+
+                columnId += columns.Count;
             }
         }
-        orderedBaseTables = null;
 
         catalogWriter.ReplaceConnection(connectionName, currentDatabaseTables);
 
-        int columnId = 0;
+        runtimeWriter.SetColumnTable(connectionName, columnRows);
 
-        List<NetezzaColumnInfoRow> tableColumns = nz.ColumnList;
-        foreach (var row in nz.ColumnList)
-        {
-            if (currentDatabaseTables.TryGetValue(row.TABLE_ID, out var thisValue))
-            {
-                if (thisValue.FIRST_COLUMN_ID == -1)
-                {
-                    thisValue.FIRST_COLUMN_ID = columnId;
-                }
-                thisValue.COLUMN_COUNT++;
-                columnId++;
-            }
-        }
-
-        runtimeWriter.SetColumnTable(connectionName, tableColumns);
-
-        var schemaLookup = new Dictionary<string, Dictionary<string, (string owner, int tableId)>>(StringComparer.OrdinalIgnoreCase);
-        if (baseWindowHelpers.DatabaseDictionary.TryGetValue(connectionName, out var dbDict1))
-        {
-            foreach (var database in dbDict1)
-            {
-                schemaLookup[database.Value.DatabaseName] = new Dictionary<string, (string owner, int tableId)>(StringComparer.OrdinalIgnoreCase);
-                if (baseWindowHelpers.BaseTableConnections.TryGetValue(connectionName, out var btConn)
-                    && btConn.TryGetValue(database.Key, out var dbTablesSet1))
-                {
-                    foreach (int baseTable in dbTablesSet1)
-                    {
-                        if (currentDatabaseTables.TryGetValue(baseTable, out var table))
-                        {
-                            schemaLookup[database.Value.DatabaseName][table.TABLE_NAME] = (table.TABLE_OWNER, baseTable);
-                        }
-                    }
-                }
-            }
-        }
         runtimeWriter.SetSchemaLookup(connectionName, schemaLookup);
 
         var owners = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
-        if (baseWindowHelpers.DatabaseDictionary.TryGetValue(connectionName, out var dbDict2))
+        foreach (var (databaseName, tableLookup) in schemaLookup)
         {
-            foreach (var item in dbDict2)
-            {
-                if (schemaLookup.TryGetValue(item.Value.DatabaseName, out var schemaEntry))
-                {
-                    var ownersDictionary = schemaEntry.Select(arg => arg.Value.owner).Distinct().ToDictionary(x => x, x => x);
-                    owners[item.Value.DatabaseName] = ownersDictionary;
-                }
-            }
+            var ownersDictionary = tableLookup.Values.Select(arg => arg.owner).Distinct().ToDictionary(x => x, x => x);
+            owners[databaseName] = ownersDictionary;
         }
         runtimeWriter.SetOwners(connectionName, owners);
         return true;

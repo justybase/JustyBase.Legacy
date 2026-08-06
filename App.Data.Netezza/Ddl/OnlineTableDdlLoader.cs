@@ -83,8 +83,8 @@ public static class OnlineTableDdlLoader
             schema,
             databaseName,
             IsView: false,
-            columns,
-            string.IsNullOrEmpty(tableComment) ? null : tableComment);
+            Columns: columns,
+            Description: string.IsNullOrEmpty(tableComment) ? null : tableComment);
 
         return NetezzaDdlInputFactory.BuildTable(
             table,
