@@ -898,24 +898,33 @@ namespace JustyBaseLegacy.UI
             // ── Check if DockSuite layout file exists (authoritative session restore) ──
             bool hasDockLayout = File.Exists(Path.Combine(_applicationSettingsContext.ConfigDirectory, "dockLayout.xml"));
 
-            // When a layout exists, skip the startup-file logic;
-            // the layout load block farther down will reopen the previous session.
-            if (!hasDockLayout)
+            // Layout restore (like the bundle restore below) is gated by the
+            // "Restore previous tabs state" preference so the toggle disables
+            // session restore no matter which mechanism would serve it.
+            bool shouldRestoreLayout = _applicationSettingsContext.Config.SimpleStartupRestore && hasDockLayout;
+
+            // This block runs whenever a previous session will NOT be restored
+            // (no layout, or the user disabled restore). When a layout exists
+            // but restore is disabled, skip the bundle and start fresh from the
+            // configured startup files.
+            if (!shouldRestoreLayout)
             {
                 bool encryptedStartupExists = File.Exists(_applicationSettingsContext.ConfigDirectory + @"\simpleStartup.manysql.enc");
                 bool plainStartupExists = File.Exists(_applicationSettingsContext.ConfigDirectory + @"\simpleStartup.manysql");
-                if (StartupArguments.ShouldRestoreStartupFiles(
-                    _applicationSettingsContext.Config.SimpleStartupRestore,
-                    encryptedStartupExists,
-                    plainStartupExists)
+                if (!hasDockLayout
+                    && StartupArguments.ShouldRestoreStartupFiles(
+                        _applicationSettingsContext.Config.SimpleStartupRestore,
+                        encryptedStartupExists,
+                        plainStartupExists)
                     && encryptedStartupExists)
                 {
                     _ = OpenManySQLhAsync(_applicationSettingsContext.ConfigDirectory + @"\simpleStartup.manysql");
                 }
-                else if (StartupArguments.ShouldRestoreStartupFiles(
-                    _applicationSettingsContext.Config.SimpleStartupRestore,
-                    encryptedStartupExists,
-                    plainStartupExists)
+                else if (!hasDockLayout
+                    && StartupArguments.ShouldRestoreStartupFiles(
+                        _applicationSettingsContext.Config.SimpleStartupRestore,
+                        encryptedStartupExists,
+                        plainStartupExists)
                     && plainStartupExists)
                 {
                     _ = OpenManySQLhAsync(_applicationSettingsContext.ConfigDirectory + @"\simpleStartup.manysql");
@@ -990,7 +999,7 @@ namespace JustyBaseLegacy.UI
             }
 
             // ── Restore DockPanel layout from previous session ──
-            if (_tabManager is DockSuiteTabManager dsm)
+            if (shouldRestoreLayout && _tabManager is DockSuiteTabManager dsm)
             {
                 string layoutPath = Path.Combine(_applicationSettingsContext.ConfigDirectory, "dockLayout.xml");
                 _ = RestoreDockLayoutAsync(dsm, layoutPath);
@@ -1059,8 +1068,31 @@ namespace JustyBaseLegacy.UI
                         return dockSuiteTabManager.GetToolWindow(title);
                     }
 
+                    if (persistString.StartsWith("unsaved://", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string title = persistString["unsaved://".Length..];
+                        ManySqlContent? content = startupBundle?.SqlContentList
+                            .FirstOrDefault(item => string.Equals(item.Title, title, StringComparison.OrdinalIgnoreCase));
+                        if (content is null)
+                            return null;
+
+                        ManySqlDocumentState? unsavedState = FindManySqlDocumentState(startupBundle, title);
+                        int beforeCount = EditorTabPages.Count;
+                        AddMainTabCore(
+                            null,
+                            title,
+                            content.Text,
+                            unsavedState?.ConnectionName,
+                            unsavedState?.DatabaseName);
+                        for (int index = beforeCount; index < EditorTabPages.Count; index++)
+                        {
+                            if (string.Equals(EditorTabPages[index].Text, title, StringComparison.OrdinalIgnoreCase))
+                                return dockSuiteTabManager.GetDockContentForTab(EditorTabPages[index]);
+                        }
+                        return null;
+                    }
+
                     if (string.IsNullOrEmpty(persistString)
-                        || persistString.StartsWith("unsaved://", StringComparison.OrdinalIgnoreCase)
                         || !loadedDocuments.TryGetValue(persistString, out string? documentText))
                     {
                         return null;
@@ -1607,7 +1639,17 @@ namespace JustyBaseLegacy.UI
             if (!string.IsNullOrWhiteSpace(catalogDatabase))
                 return catalogDatabase;
 
-            return _generalDbService.DBname(connectionName) ?? string.Empty;
+            // A saved dock tab may reference a connection that was deleted since the last
+            // session — degrade to empty instead of throwing KeyNotFoundException during
+            // layout restore.
+            try
+            {
+                return _generalDbService.DBname(connectionName) ?? string.Empty;
+            }
+            catch (KeyNotFoundException)
+            {
+                return string.Empty;
+            }
         }
 
         private void OnEditorDocumentReloaded(EditorDocumentViewModel document)
@@ -2082,12 +2124,84 @@ namespace JustyBaseLegacy.UI
 
             if (isNetezza)
             {
-                var authoringMenu = new ContextMenuStrip();
-                authoringMenu.Items.Add("Go to Definition\tF12", null, (_, _) => FctbGoToDefinition(editor));
-                authoringMenu.Items.Add("Find References\tShift+F12", null, (_, _) => FctbShowReferences(editor));
-                authoringMenu.Items.Add("Rename Symbol\tF2", null, (_, _) => FctbRenameSymbol(editor));
-                editor.ContextMenuStrip = authoringMenu;
+                // The authoring commands complement, not replace, the full
+                // document menu (cmMain) that the tab page provides. cmMain is
+                // shared by every SQL tab, so it is cloned per editor and the
+                // clones re-dispatch clicks to the original items.
+                editor.ContextMenuStrip = BuildAuthoringContextMenu(editor);
             }
+        }
+
+        private ContextMenuStrip BuildAuthoringContextMenu(FastColoredTextBox editor)
+        {
+            var menu = new ContextMenuStrip { Renderer = _colorTheme.GetRenderer() };
+            menu.Items.Add("Go to Definition\tF12", null, (_, _) => FctbGoToDefinition(editor));
+            menu.Items.Add("Find References\tShift+F12", null, (_, _) => FctbShowReferences(editor));
+            menu.Items.Add("Rename Symbol\tF2", null, (_, _) => FctbRenameSymbol(editor));
+            menu.Items.Add(new ToolStripSeparator());
+
+            foreach (ToolStripItem item in cmMain.Items)
+            {
+                menu.Items.Add(CloneDocumentMenuItem(item));
+            }
+
+            ApplyContextMenuTheme(menu);
+            return menu;
+        }
+
+        private ToolStripItem CloneDocumentMenuItem(ToolStripItem source)
+        {
+            switch (source)
+            {
+                case CustomToolStripSeparator:
+                    return new CustomToolStripSeparator(
+                        _applicationSettingsContext.Config.UseSpecialColoring,
+                        Color.FromArgb(_applicationSettingsContext.Config.StripFore[0], _applicationSettingsContext.Config.StripFore[1], _applicationSettingsContext.Config.StripFore[2]),
+                        Color.FromArgb(_applicationSettingsContext.Config.StripBack[0], _applicationSettingsContext.Config.StripBack[1], _applicationSettingsContext.Config.StripBack[2]));
+                case ToolStripMenuItem menuItem:
+                    var clone = new ToolStripMenuItem(menuItem.Text, menuItem.Image)
+                    {
+                        ToolTipText = menuItem.ToolTipText,
+                        Checked = menuItem.Checked,
+                        CheckOnClick = menuItem.CheckOnClick,
+                        Enabled = menuItem.Enabled,
+                        ShortcutKeyDisplayString = menuItem.ShortcutKeyDisplayString
+                    };
+                    foreach (ToolStripItem child in menuItem.DropDownItems)
+                    {
+                        clone.DropDownItems.Add(CloneDocumentMenuItem(child));
+                    }
+                    if (clone.DropDownItems.Count == 0)
+                    {
+                        clone.Click += (_, _) =>
+                        {
+                            menuItem.PerformClick();
+                            clone.Checked = menuItem.Checked;
+                        };
+                    }
+                    return clone;
+                default:
+                    return new ToolStripMenuItem(source.Text, source.Image);
+            }
+        }
+
+        private void ApplyContextMenuTheme(ContextMenuStrip menu)
+        {
+            menu.Renderer = _colorTheme.GetRenderer();
+            void ApplyTo(ToolStripItemCollection items)
+            {
+                foreach (ToolStripItem item in items)
+                {
+                    item.BackColor = _colorTheme.MainBack;
+                    item.ForeColor = _colorTheme.MainFore;
+                    if (item is ToolStripMenuItem subMenu)
+                    {
+                        ApplyTo(subMenu.DropDownItems);
+                    }
+                }
+            }
+
+            ApplyTo(menu.Items);
         }
 
         /// <summary>

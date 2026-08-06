@@ -168,6 +168,7 @@ internal sealed class AppBootstrapper
         mainWindow.FormClosed += (_, args) =>
             Program.LogStartup($"Main window closed with reason {args.CloseReason}");
         Program.LogStartup($"Starting main message loop; disposed: {mainWindow.IsDisposed}");
+        Program.MessageLoopStarted = true;
         Application.Run(mainWindow);
         Program.LogStartup("Main message loop completed");
         return 0;

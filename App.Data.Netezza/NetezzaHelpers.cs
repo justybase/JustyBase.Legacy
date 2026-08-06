@@ -129,6 +129,28 @@ public static class NetezzaHelpers
             return false;
         }
 
+        using (connection)
+        {
+            return InitializeConnectionSchemaDataCore(
+                baseWindowHelpers,
+                nz,
+                connection,
+                schemaTables,
+                preferedUserName,
+                connectionName,
+                schemaCache);
+        }
+    }
+
+    private static bool InitializeConnectionSchemaDataCore(
+        AppBase.Common.Interfaces.IDatabaseRuntimeContext baseWindowHelpers,
+        INetezza nz,
+        DbConnection connection,
+        INetezzaSchemaTableCatalog schemaTables,
+        string? preferedUserName,
+        string connectionName,
+        JustyBase.Netezza.Schema.NetezzaSchemaCache? schemaCache)
+    {
         IDatabaseRuntimeCatalogWriter runtimeWriter = baseWindowHelpers as IDatabaseRuntimeCatalogWriter
             ?? throw new InvalidOperationException("Schema initialization requires the catalog write port.");
         INetezzaSchemaTableCatalogWriter catalogWriter = schemaTables as INetezzaSchemaTableCatalogWriter
@@ -145,17 +167,42 @@ public static class NetezzaHelpers
                 .GetAwaiter()
                 .GetResult();
 
+        // OBJIDs are unique per database, but the legacy catalog dictionaries are
+        // connection-scoped and keyed by OBJID only. Loading every database into one
+        // dictionary silently corrupted colliding entries (last database won and the
+        // tree/DDL/autocomplete resolved the wrong table). Never overwrite an entry:
+        // the default database is processed first and wins, so the primary connection
+        // surface stays fully correct; colliding objects in other databases are simply
+        // absent instead of pointing at the wrong table.
+        string? defaultDatabase = (nz as IGeneralDb)?.DefaultDatabaseName;
+        if (string.IsNullOrWhiteSpace(defaultDatabase))
+        {
+            defaultDatabase = connection.Database;
+        }
+        if (string.IsNullOrWhiteSpace(defaultDatabase))
+        {
+            defaultDatabase = null;
+        }
+        (string Database, JustyBase.Netezza.Models.NetezzaSchemaSnapshot Snapshot)[] orderedSnapshots = snapshots
+            .Where(pair => !string.IsNullOrWhiteSpace(pair.Database))
+            .OrderByDescending(pair => string.Equals(pair.Database, defaultDatabase, StringComparison.OrdinalIgnoreCase))
+            .ThenBy(pair => pair.Database, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (orderedSnapshots.Length == 0)
+        {
+            // No usable catalog (failed database-list query). Keep the previously
+            // populated dictionaries instead of wiping the whole schema silently.
+            return false;
+        }
+
         var currentDatabaseTables = new Dictionary<int, NetezzaTableInfo>();
         var columnRows = new List<NetezzaColumnInfoRow>();
         var schemaLookup = new Dictionary<string, Dictionary<string, (string owner, int tableId)>>(StringComparer.OrdinalIgnoreCase);
+        var databaseIdByName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var (databaseName, snapshot) in snapshots)
+        foreach (var (databaseName, snapshot) in orderedSnapshots)
         {
-            if (string.IsNullOrEmpty(databaseName))
-            {
-                continue;
-            }
-
             schemaCache?.Put(connectionName, databaseName, snapshot);
 
             int databaseId = -1;
@@ -176,11 +223,19 @@ public static class NetezzaHelpers
                 continue;
             }
 
+            databaseIdByName[databaseName] = databaseId;
+
             var tableLookup = new Dictionary<string, (string owner, int tableId)>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var table in snapshot.Tables)
+            foreach (var table in OrderTables(snapshot.Tables, baseWindowHelpers.Config, preferedUserName))
             {
                 int tableId = table.CatalogId;
+                if (currentDatabaseTables.ContainsKey(tableId))
+                {
+                    // OBJID collision with a database processed earlier (default wins).
+                    continue;
+                }
+
                 var tableKind = table.TextType switch
                 {
                     "TABLE" => TypeInDatabase.table,
@@ -194,10 +249,17 @@ public static class NetezzaHelpers
                     _ => TypeInDatabase.table,
                 };
 
+                // The modern catalog SQL returns the full signature for procedures and
+                // functions (e.g. GET_P1(INTEGER, VARCHAR(20))); the legacy tree and
+                // completion use plain callable names.
+                string tableName = table.TextType is "PROCEDURE" or "FUNCTION"
+                    ? StripSignature(table.Name)
+                    : table.Name;
+
                 currentDatabaseTables[tableId] = new NetezzaTableInfo()
                 {
                     DATABASE_ID = databaseId,
-                    TABLE_NAME = table.Name,
+                    TABLE_NAME = tableName,
                     TABLE_DESC = table.Description ?? string.Empty,
                     TABLE_OWNER = table.Owner ?? string.Empty,
                     TABLE_SCHEMA = table.Schema ?? string.Empty,
@@ -207,20 +269,29 @@ public static class NetezzaHelpers
                     COLUMN_COUNT = 0
                 };
                 runtimeWriter.AddBaseTable(connectionName, databaseId, tableId);
-                tableLookup[table.Name] = (table.Owner ?? string.Empty, tableId);
+                tableLookup[tableName] = (table.Owner ?? string.Empty, tableId);
             }
 
             schemaLookup[databaseName] = tableLookup;
         }
 
         int columnId = 0;
-        var distOrgByKey = LoadDistributionSequences(connection, snapshots);
+        var distOrgByKey = LoadDistributionSequences(connection, orderedSnapshots, databaseIdByName);
 
-        foreach (var (_, snapshot) in snapshots)
+        foreach (var (databaseName, snapshot) in orderedSnapshots)
         {
+            if (!databaseIdByName.TryGetValue(databaseName, out int databaseId))
+            {
+                continue;
+            }
+
             foreach (var table in snapshot.Tables.OrderBy(t => t.CatalogId))
             {
+                // Only the winning (first) entry for an OBJID receives columns — a
+                // colliding table in another database must not inherit the winner's
+                // columns, nor write rows keyed by an id that resolves to another table.
                 if (!currentDatabaseTables.TryGetValue(table.CatalogId, out var tableInfo)
+                    || tableInfo.DATABASE_ID != databaseId
                     || table.Columns is not { Count: > 0 } columns)
                 {
                     continue;
@@ -231,7 +302,7 @@ public static class NetezzaHelpers
 
                 foreach (var column in columns)
                 {
-                    var distOrg = distOrgByKey.TryGetValue((table.CatalogId, column.Name), out var seqs)
+                    var distOrg = distOrgByKey.TryGetValue((databaseId, table.CatalogId, column.Name), out var seqs)
                         ? seqs
                         : (Dist: (sbyte?)null, Org: (sbyte?)null);
 
@@ -239,7 +310,7 @@ public static class NetezzaHelpers
                     {
                         COLUMN_NUMBER = (ushort)(columnRows.Count + 1),
                         TABLE_ID = table.CatalogId,
-                        DATABASE_ID = tableInfo.DATABASE_ID,
+                        DATABASE_ID = databaseId,
                         COLUMN_NAME = column.Name,
                         COLUMN_DESCRIPTION = column.Description,
                         DATA_TYPE = column.DataType ?? string.Empty,
@@ -271,18 +342,50 @@ public static class NetezzaHelpers
     }
 
     /// <summary>
-    /// Loads DISTSEQNO/ORGSEQNO for every column of the given databases (modern shared SQL)
-    /// so Legacy DDL generation can emit DISTRIBUTE ON / ORGANIZE ON clauses.
+    /// Restores the legacy SortMethod / DontShowOwner ordering that the modern catalog
+    /// SQL no longer provides (ORDER BY SCHEMA, OBJTYPE, OBJNAME).
     /// </summary>
-    private static Dictionary<(int TableId, string ColumnName), (sbyte? Dist, sbyte? Org)> LoadDistributionSequences(
-        DbConnection connection,
-        IReadOnlyList<(string Database, JustyBase.Netezza.Models.NetezzaSchemaSnapshot Snapshot)> snapshots)
+    private static IEnumerable<JustyBase.Netezza.Models.NetezzaSchemaTable> OrderTables(
+        IEnumerable<JustyBase.Netezza.Models.NetezzaSchemaTable> tables,
+        AppBase.Common.Configuration.IApplicationConfig config,
+        string? preferedUserName)
     {
-        var result = new Dictionary<(int, string), (sbyte?, sbyte?)>();
+        string userName = (preferedUserName ?? string.Empty).ToLower();
+        return config switch
+        {
+            { DontShowOwner: true } => tables.OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(t => t.Owner, StringComparer.OrdinalIgnoreCase),
+            { SortMethod: 0 } => tables.OrderBy(t => !string.Equals(t.Owner, userName, StringComparison.OrdinalIgnoreCase))
+                .ThenBy(t => t.Owner, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase),
+            { SortMethod: 1 } => tables.OrderBy(t => t.Owner, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase),
+            _ => tables.OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(t => t.Owner, StringComparer.OrdinalIgnoreCase)
+        };
+    }
+
+    private static string StripSignature(string name)
+    {
+        int paren = name.IndexOf('(');
+        return paren > 0 ? name[..paren].Trim() : name;
+    }
+
+    /// <summary>
+    /// Loads DISTSEQNO/ORGSEQNO for every column of the given databases (modern shared SQL)
+    /// so Legacy DDL generation can emit DISTRIBUTE ON / ORGANIZE ON clauses. Keyed by
+    /// (database, table, column) because OBJIDs are only unique within a database.
+    /// </summary>
+    private static Dictionary<(int DatabaseId, int TableId, string ColumnName), (sbyte? Dist, sbyte? Org)> LoadDistributionSequences(
+        DbConnection connection,
+        IReadOnlyList<(string Database, JustyBase.Netezza.Models.NetezzaSchemaSnapshot Snapshot)> snapshots,
+        IReadOnlyDictionary<string, int> databaseIdByName)
+    {
+        var result = new Dictionary<(int, int, string), (sbyte?, sbyte?)>();
 
         foreach (var (databaseName, _) in snapshots)
         {
-            if (string.IsNullOrEmpty(databaseName))
+            if (!databaseIdByName.TryGetValue(databaseName, out int databaseId))
             {
                 continue;
             }
@@ -303,7 +406,7 @@ public static class NetezzaHelpers
 
                     sbyte? dist = reader.IsDBNull(2) ? null : Convert.ToSByte(reader.GetValue(2));
                     sbyte? org = reader.IsDBNull(3) ? null : Convert.ToSByte(reader.GetValue(3));
-                    result[(tableId, columnName)] = (dist, org);
+                    result[(databaseId, tableId, columnName)] = (dist, org);
                 }
             }
             catch (Exception exception)

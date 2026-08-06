@@ -179,6 +179,29 @@ public sealed class EditorWorkspaceViewModelTests
     }
 
     [Fact]
+    public async Task Many_sql_save_then_load_round_trips_loose_sql_content()
+    {
+        var files = new FakeEditorFileService();
+        var bundle = new FakeBundleService();
+
+        using (EditorWorkspaceViewModel writer = Create(files, bundle).Workspace)
+        {
+            writer.NewDocument("scratch", "SELECT loose");
+            await writer.SaveManySqlAsync("session.manysql");
+        }
+
+        using (EditorWorkspaceViewModel reader = Create(files, bundle).Workspace)
+        {
+            await reader.OpenManySqlAsync("session.manysql");
+
+            EditorDocumentViewModel restored = Assert.Single(reader.Documents);
+            Assert.Equal("scratch", restored.Title);
+            Assert.Equal("SELECT loose", restored.Text);
+            Assert.Null(restored.FilePath);
+        }
+    }
+
+    [Fact]
     public async Task Saving_many_sql_uses_the_supplied_view_order_for_tabs_and_selection()
     {
         string path = Path.Combine(Path.GetTempPath(), "bundle-view-order.sql");
@@ -308,7 +331,8 @@ public sealed class EditorWorkspaceViewModelTests
         public string? SavedPath { get; private set; }
         public ManySqlBundle? Saved { get; private set; }
 
-        public Task<ManySqlBundle> LoadAsync(string path, CancellationToken cancellationToken = default) => Task.FromResult(Loaded);
+        public Task<ManySqlBundle> LoadAsync(string path, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Saved ?? Loaded);
 
         public Task SaveAsync(string path, ManySqlBundle bundle, CancellationToken cancellationToken = default)
         {

@@ -253,7 +253,6 @@ public sealed class Netezza : GeneralDb, INetezza
         Action showInUiExtra = null)
     {
         _netezzaHelperService.SqliteInProgress = true;
-        bool returnValue = true;
         try
         {
             bool res = true;
@@ -363,8 +362,8 @@ public sealed class Netezza : GeneralDb, INetezza
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            returnValue = false;
+            throw new InvalidOperationException(
+                $"Failed to download Netezza schema for connection '{connectionName}'.", ex);
         }
         finally
         {
@@ -373,7 +372,7 @@ public sealed class Netezza : GeneralDb, INetezza
 
 
 
-        return returnValue;
+        return true;
     }
 
     public async Task<bool> DownloadOneDb(string connectionName, string databaseName)

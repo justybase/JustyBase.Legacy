@@ -59,6 +59,9 @@ public static class Program
 
     internal static readonly string StartupLogPath = Path.Combine(LogDirectory, "startup.log");
 
+    /// <summary>Set once <see cref="AppBootstrapper"/> starts the main message loop.</summary>
+    internal static bool MessageLoopStarted;
+
     private static void LogToFile(string path, string message)
     {
         try
@@ -111,9 +114,15 @@ public static class Program
             Environment.ExitCode = 1;
             try
             {
+                // Once the main message loop has started the app was running — an exception
+                // escaping it (e.g. a DockPanelSuite splitter-drag NRE) is a runtime crash,
+                // not a startup failure. Report it accurately for easier diagnosis.
+                bool runtimeCrash = MessageLoopStarted;
                 MessageBox.Show(
-                    $"JustyBaseLegacy could not start. Details were saved to:{Environment.NewLine}{ErrorLogPath}",
-                    "JustyBaseLegacy startup error",
+                    runtimeCrash
+                        ? $"JustyBaseLegacy encountered a runtime error and is shutting down. Details were saved to:{Environment.NewLine}{ErrorLogPath}"
+                        : $"JustyBaseLegacy could not start. Details were saved to:{Environment.NewLine}{ErrorLogPath}",
+                    runtimeCrash ? "JustyBaseLegacy runtime error" : "JustyBaseLegacy startup error",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
             }

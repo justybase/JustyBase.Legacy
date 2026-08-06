@@ -96,7 +96,10 @@ public sealed class NetezzaHelpersSchemaMappingTests
         Assert.True(ok);
         Assert.NotNull(replaced);
         Assert.Equal(3, replaced!.Count);
-        Assert.Equal([1, 2, 3], addedBaseTables);
+        // SortMethod 0 (default): current user's objects first, then owner, then name.
+        // All owners tie here, so the insertion order follows TABLE_NAME:
+        // CUSTOMERS(1), GET_P1(3), V_ACTIVE(2).
+        Assert.Equal([1, 3, 2], addedBaseTables);
 
         var customers = replaced[1];
         Assert.Equal("CUSTOMERS", customers.TABLE_NAME);
@@ -141,6 +144,70 @@ public sealed class NetezzaHelpersSchemaMappingTests
 
         Assert.NotNull(owners);
         Assert.Equal(new Dictionary<string, string> { ["owner1"] = "owner1" }, owners!["SALES"]);
+    }
+
+    [Fact]
+    public void InitializeConnectionSchemaData_CollidingObjectIds_DefaultDatabaseWins()
+    {
+        // Netezza OBJIDs are unique per database only. Two databases sharing OBJID 1 must
+        // not overwrite each other in the connection-scoped dictionary — the default
+        // database wins, colliding objects elsewhere are absent instead of wrong.
+        var runtime = Substitute.For<IDatabaseRuntimeContext, IDatabaseRuntimeCatalogWriter>();
+        runtime.DatabaseDictionary.Returns(new Dictionary<string, Dictionary<int, DatabaseInfo>>
+        {
+            ["CONN1"] = new()
+            {
+                [1] = new DatabaseInfo(1, "SALES", "owner1", "PUBLIC"),
+                [2] = new DatabaseInfo(2, "ARCHIVE", "owner1", "PUBLIC"),
+            },
+        });
+
+        var columnTable = new List<NetezzaColumnInfoRow>();
+        var runtimeWriter = (IDatabaseRuntimeCatalogWriter)runtime;
+        runtimeWriter.When(x => x.SetColumnTable("CONN1", Arg.Any<List<NetezzaColumnInfoRow>>()))
+            .Do(x => columnTable = x.Arg<List<NetezzaColumnInfoRow>>());
+
+        var schemaCatalog = Substitute.For<INetezzaSchemaTableCatalog, INetezzaSchemaTableCatalogWriter>();
+        Dictionary<int, NetezzaTableInfo>? replaced = null;
+        ((INetezzaSchemaTableCatalogWriter)schemaCatalog)
+            .When(x => x.ReplaceConnection("CONN1", Arg.Any<Dictionary<int, NetezzaTableInfo>>()))
+            .Do(x => replaced = x.Arg<Dictionary<int, NetezzaTableInfo>>());
+
+        using var connection = new FakeCatalogConnection(
+            databaseRows:
+            [
+                Db(1, 10, "SALES", "owner1", "PUBLIC"),
+                Db(2, 20, "ARCHIVE", "owner1", "PUBLIC"),
+            ],
+            objectRows: [Obj(1, "CUSTOMERS", null, "PUBLIC", "TABLE", "owner1")],
+            columnRows:
+            [
+                Col(1, "ID", null, "INTEGER", true),
+                Col(1, "NAME", null, "VARCHAR(20)", false),
+            ],
+            distOrgRows: [[1, "ID", (sbyte)1, null]]);
+
+        var nz = Substitute.For<IGeneralDb, INetezza>();
+        ((INetezza)nz).GetConnection().Returns(connection);
+        ((IGeneralDb)nz).DefaultDatabaseName.Returns("SALES");
+
+        var registry = Substitute.For<IConnectionSessionRegistry>();
+        registry.TryGetValue("CONN1", out Arg.Any<IGeneralDb>())
+            .Returns(call =>
+            {
+                call[1] = nz;
+                return true;
+            });
+
+        bool ok = NetezzaHelpers.InitializeConnectionSchemaData(runtime, registry, schemaCatalog, null, "CONN1");
+
+        Assert.True(ok);
+        Assert.NotNull(replaced);
+        Assert.Single(replaced!); // OBJID 1 appears once — no silent overwrite
+        Assert.Equal(1, replaced![1].DATABASE_ID); // default database (SALES) won
+        Assert.Equal(2, replaced[1].COLUMN_COUNT); // columns attached exactly once
+        Assert.Equal(2, columnTable.Count); // no duplicated column rows
+        Assert.All(columnTable, row => Assert.Equal(1, row.DATABASE_ID));
     }
 
     [Fact]

@@ -148,7 +148,7 @@ namespace JustyBaseLegacy.UI
                     catch (Exception ex)
                     {
                         schemaDownloadSucceeded = false;
-                        _loggerLoud.LogError("Error while downloading Netezza schema for {ConnectionName}", ex);
+                        _loggerLoud.LogError($"Error while downloading Netezza schema for '{selConnName}'", ex);
                     }
              
                     if (!schemaDownloadSucceeded)
@@ -548,7 +548,14 @@ namespace JustyBaseLegacy.UI
                             _completionRuntimeContext.ClearDatabaseOwners(connName);
 
                             string userName = _applicationSession.CurrentLogin?.Profile.UserName ?? string.Empty;
-                            NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, _connectionSessions, _schemaTables, userName, connName);
+                            // Full catalog download (all databases + columns) must not run
+                            // on the UI thread — it can take seconds/minutes.
+                            await Task.Run(() => NetezzaHelpers.InitializeConnectionSchemaData(
+                                _databaseRuntimeContext,
+                                _connectionSessions,
+                                _schemaTables,
+                                userName,
+                                connName));
                             await _schemaRefreshCoordinator.NotifyRefreshedAsync(connName);
                             _completionRuntimeContext.SchemaRefreshed = true;
                             _netezzaSqlCompletionServices.InvalidateSchema();
@@ -610,7 +617,14 @@ namespace JustyBaseLegacy.UI
                 _completionRuntimeContext.ClearSchemaLookup(connectionName);
                 _completionRuntimeContext.ClearDatabaseOwners(connectionName);
                 string userName = _applicationSession.CurrentLogin?.Profile.UserName ?? string.Empty;
-                NetezzaHelpers.InitializeConnectionSchemaData(_databaseRuntimeContext, _connectionSessions, _schemaTables, userName, connectionName);
+                // Full catalog download (all databases + columns) must not run
+                // on the UI thread — it can take seconds/minutes.
+                await Task.Run(() => NetezzaHelpers.InitializeConnectionSchemaData(
+                    _databaseRuntimeContext,
+                    _connectionSessions,
+                    _schemaTables,
+                    userName,
+                    connectionName));
                 await _schemaRefreshCoordinator.NotifyRefreshedAsync(connectionName);
                 _completionRuntimeContext.SchemaRefreshed = true;
                 _netezzaSqlCompletionServices.InvalidateSchema();

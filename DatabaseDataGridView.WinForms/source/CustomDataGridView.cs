@@ -35,6 +35,7 @@ namespace DatabaseDataGridView.WinForms
                 _statsDebounceTimer.Stop();
                 _statsDebounceTimer.Dispose();
             };
+            _statsDebounceTimer.Tick += DataGridView1_SelectionStatsTick;
             toolTip1.SetToolTip(btOpenInExcel, "open as excel file");
             toolTip1.SetToolTip(btCopyAsExcel, "copy as excel file");
             toolTip1.SetToolTip(btCopyAsText, "copy table to clipboard");
@@ -3708,6 +3709,8 @@ dataGridView1.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
         public event Action<string>? WriteStats;
 
         private const int MaxSelectionStatsCells = 20_000;
+        private const int MaxWholeGridStatsCells = 25_000_000;
+        private int _wholeGridStatsVersion;
 
         private readonly System.Windows.Forms.Timer _statsDebounceTimer = new()
         {
@@ -3751,10 +3754,76 @@ dataGridView1.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
             _statsDebounceTimer.Stop();
             if (selectedCellCount > MaxSelectionStatsCells)
             {
-                WriteStats?.Invoke($"selected: {selectedCellCount.ToString("N0")}");
+                if (selectedCellCount == dataGridView1.ColumnCount * dataGridView1.RowCount
+                    && selectedCellCount < MaxWholeGridStatsCells)
+                {
+                    // Whole-grid selection: aggregate the sum in the background (old
+                    // behavior) so large result sets stay responsive.
+                    ScheduleWholeGridStats(selectedCellCount);
+                }
+                else
+                {
+                    WriteStats?.Invoke($"selected: {selectedCellCount.ToString("N0")}");
+                }
                 return;
             }
             _statsDebounceTimer.Start();
+        }
+
+        private void ScheduleWholeGridStats(int selectedCellCount)
+        {
+            int version = ++_wholeGridStatsVersion;
+            DataTable table = CurrentDataTable;
+            // The grid is virtual and serves cells from WorkingRowsList, not from
+            // the schema-only CurrentDataTable (which has no rows). Capture the row
+            // list before the background run so a later filter can't shift it under us.
+            List<object[]> rows = WorkingRowsList;
+            Task.Run(() =>
+            {
+                decimal sum = 0;
+                for (int columnIndex = 0; columnIndex < table.Columns.Count; columnIndex++)
+                {
+                    if (!AggregatePossible(table, columnIndex))
+                    {
+                        continue;
+                    }
+
+                    for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+                    {
+                        object? value = rows[rowIndex][columnIndex];
+                        if (value is null || value is DBNull || value is not IConvertible convertible)
+                        {
+                            continue;
+                        }
+
+                        try
+                        {
+                            sum += convertible.ToDecimal(CultureInfo.InvariantCulture);
+                        }
+                        catch (OverflowException)
+                        {
+                            // A double beyond the decimal range (~7.9e28) cannot be
+                            // summed as decimal; skip the cell instead of faulting.
+                        }
+                        catch (InvalidCastException)
+                        {
+                        }
+                    }
+                }
+
+                return sum;
+            }).ContinueWith(task =>
+            {
+                if (IsDisposed
+                    || dataGridView1.IsDisposed
+                    || _wholeGridStatsVersion != version
+                    || task.IsFaulted)
+                {
+                    return;
+                }
+
+                WriteStats?.Invoke($"all cells: {selectedCellCount.ToString("N0")}, sum {task.Result.ToString("N3", CultureInfo.CurrentCulture)}");
+            }, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
         private void DataGridView1_SelectionStatsTick(object? sender, EventArgs e)
@@ -3777,7 +3846,7 @@ dataGridView1.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
                 return;
             }
 
-            var cellValues = new List<(object? Value, TypeCode TypeCode)>(selectedCellCount);
+            var cellValues = new List<object?>(selectedCellCount);
             foreach (var item in dataGridView1.SelectedCells)
             {
                 if (item is not DataGridViewCell cell)
@@ -3785,20 +3854,12 @@ dataGridView1.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
                     continue;
                 }
 
-                var value = cell.Value;
-                cellValues.Add((value, GetColumnTypeCode(cell.ColumnIndex)));
+                cellValues.Add(cell.Value);
             }
 
+            // Infer the numeric type from each cell's runtime value (the grid columns are
+            // all object-typed), so Sum/Min/Max/Count match the old behavior.
             WriteStats?.Invoke(FormatSelectionStats(CellStatsCalculator.Calculate(cellValues)));
-        }
-
-        private TypeCode GetColumnTypeCode(int columnIndex)
-        {
-            if (columnIndex >= 0 && columnIndex < CurrentDataTable.Columns.Count)
-            {
-                return Type.GetTypeCode(CurrentDataTable.Columns[columnIndex].DataType);
-            }
-            return TypeCode.Object;
         }
 
         private static string FormatSelectionStats(CellStats stats)
