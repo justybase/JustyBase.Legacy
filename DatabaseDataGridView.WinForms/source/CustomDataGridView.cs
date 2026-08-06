@@ -11,6 +11,7 @@ using System.Text.RegularExpressions;
 using DatabaseDataGridView.WinForms.Coloring;
 using DatabaseDataGridView.WinForms.Interfaces;
 using DatabaseDataGridView.WinForms.Extensions;
+using JustyBase.Core.Grid;
 
 
 namespace DatabaseDataGridView.WinForms
@@ -29,6 +30,11 @@ namespace DatabaseDataGridView.WinForms
             _importExportTasks = (IExportMakes)importExportTasks;
             _uiHelperService = uiHelperService;
             InitializeComponent();
+            Disposed += (_, _) =>
+            {
+                _statsDebounceTimer.Stop();
+                _statsDebounceTimer.Dispose();
+            };
             toolTip1.SetToolTip(btOpenInExcel, "open as excel file");
             toolTip1.SetToolTip(btCopyAsExcel, "copy as excel file");
             toolTip1.SetToolTip(btCopyAsText, "copy table to clipboard");
@@ -3701,7 +3707,14 @@ dataGridView1.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
 
         public event Action<string>? WriteStats;
 
-        private async void DataGridView1_SelectionChanged(object? sender, EventArgs e)
+        private const int MaxSelectionStatsCells = 20_000;
+
+        private readonly System.Windows.Forms.Timer _statsDebounceTimer = new()
+        {
+            Interval = 80,
+        };
+
+        private void DataGridView1_SelectionChanged(object? sender, EventArgs e)
         {
             Int32 selectedCellCount = dataGridView1.GetCellCount(DataGridViewElementStates.Selected);
 
@@ -3714,119 +3727,8 @@ dataGridView1.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
                 dataGridView1.ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithoutHeaderText;
             }
 
-            if (selectedCellCount <= 20_000)
-            {
-                Decimal sum = 0;
-                Decimal min = -1;
-                Decimal max = -1;
-                long countNotNull = 0;
-                decimal h1 = default;
-                Dictionary<Object, bool> dc = new Dictionary<Object, bool>();
+            ScheduleSelectionStatsUpdate(selectedCellCount);
 
-                foreach (var item2 in dataGridView1.SelectedCells)
-                {
-                    if (item2 is not DataGridViewCell item)
-                    {
-                        continue;
-                    }
-                    var val1 = item.Value;
-                    if (val1 is null || val1 == DBNull.Value || !(item2 is DataGridViewTextBoxCell))
-                    {
-                        continue;
-                    }
-
-                    Type t = val1.GetType();
-
-                    if (t == typeof(decimal) || t == typeof(Double) || t == typeof(Int32) || t == typeof(long))
-                    {
-                        h1 = Convert.ToDecimal(val1);
-                        sum += h1;
-                        if (min == -1 || h1 < min)
-                        {
-                            min = h1;
-                        }
-                        if (max == -1 || h1 > max)
-                        {
-                            max = h1;
-                        }
-                    }
-
-                    if (val1 is not DBNull && val1 is not null && !dc.ContainsKey(val1))
-                    {
-                        dc[val1] = true;
-                    }
-                    if (val1 is not DBNull && val1 is not null)
-                    {
-                        countNotNull++;
-                    }
-                }
-                //mtbStats.Text = $"count: {countNotNull.ToString("N0")} ,distinct count {dc.Keys.Count.ToString("N0")}, sum: {Math.Round(sum, 2).ToString("N2")}, min: {Math.Round(min, 2).ToString("N2")}, max: {Math.Round(max, 2).ToString("N2")}";
-
-                decimal avg = 0;
-                if (countNotNull > 0)
-                {
-                    avg = sum / countNotNull;
-                }
-
-                WriteStats?.Invoke($"count: {countNotNull.ToString("N0")} ,distinct count {dc.Keys.Count.ToString("N0")}, sum: {Math.Round(sum, 2).ToString("N2")}, min: {Math.Round(min, 2).ToString("N2")}, max: {Math.Round(max, 2).ToString("N2")}, avg: {Math.Round(avg, 2).ToString("N2")}");
-            }
-            else if (selectedCellCount == dataGridView1.ColumnCount * dataGridView1.RowCount && selectedCellCount < 25_000_000)
-            {
-                decimal sum1 = 0;
-                decimal sum2 = 0;
-                Task t1 = Task.Run(() =>
-                {
-                    DataTable dt = CurrentDataTable;
-                    for (int i = 0; i < dt.Columns.Count / 2; i++)
-                    {
-                        if (AggregatePossible(dt, i))
-                        {
-                            for (int j = 0; j < dt.Rows.Count; j++)
-                            {
-                                var x = dt.Rows[j][i];
-                                if (x is not null && x is not DBNull)
-                                {
-                                    sum1 += Convert.ToDecimal(x);
-                                }
-                            }
-                        }
-                    }
-                });
-
-                Task t2 = Task.Run(() =>
-                {
-                    DataTable dt = CurrentDataTable;
-                    for (int i = dt.Columns.Count / 2; i < dt.Columns.Count; i++)
-                    {
-                        if (AggregatePossible(dt, i))
-                        {
-                            for (int j = 0; j < dt.Rows.Count; j++)
-                            {
-                                var x = dt.Rows[j][i];
-                                if (x is not null && x is not DBNull)
-                                {
-                                    sum2 += Convert.ToDecimal(x);
-                                }
-                            }
-                        }
-                    }
-                });
-
-                await t1;
-                await t2;
-
-                Invoke(()=>
-                {
-                    //mtbStats.Text = $"all cells: {selectedCellCount.ToString("N0")}, sum {(sum1 + sum2).ToString("N3")}";
-                    WriteStats?.Invoke($"all cells: {selectedCellCount.ToString("N0")}, sum {(sum1 + sum2).ToString("N3")}");
-                });
-
-            }
-            else
-            {
-                WriteStats?.Invoke($"selected: {selectedCellCount.ToString("N0")}");
-                //mtbStats.Text = $"selected: {selectedCellCount.ToString("N0")}";
-            }
             //https://github.com/KrzysztofDusko/Just-Data/issues/166
             if (selectedCellCount == 1)
             {
@@ -3840,9 +3742,72 @@ dataGridView1.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
                     {
                         dataGridView1.FirstDisplayedScrollingColumnIndex = colNum;
                     }
-
                 }
             }
+        }
+
+        private void ScheduleSelectionStatsUpdate(int selectedCellCount)
+        {
+            _statsDebounceTimer.Stop();
+            if (selectedCellCount > MaxSelectionStatsCells)
+            {
+                WriteStats?.Invoke($"selected: {selectedCellCount.ToString("N0")}");
+                return;
+            }
+            _statsDebounceTimer.Start();
+        }
+
+        private void DataGridView1_SelectionStatsTick(object? sender, EventArgs e)
+        {
+            _statsDebounceTimer.Stop();
+            if (IsDisposed || dataGridView1.IsDisposed)
+            {
+                return;
+            }
+
+            int selectedCellCount = dataGridView1.GetCellCount(DataGridViewElementStates.Selected);
+            if (selectedCellCount == 0)
+            {
+                WriteStats?.Invoke("Selected 0 cells | Sum 0.000 | Count 0 | Distinct 0 | Min - | Max -");
+                return;
+            }
+            if (selectedCellCount > MaxSelectionStatsCells)
+            {
+                WriteStats?.Invoke($"selected: {selectedCellCount.ToString("N0")}");
+                return;
+            }
+
+            var cellValues = new List<(object? Value, TypeCode TypeCode)>(selectedCellCount);
+            foreach (var item in dataGridView1.SelectedCells)
+            {
+                if (item is not DataGridViewCell cell)
+                {
+                    continue;
+                }
+
+                var value = cell.Value;
+                cellValues.Add((value, GetColumnTypeCode(cell.ColumnIndex)));
+            }
+
+            WriteStats?.Invoke(FormatSelectionStats(CellStatsCalculator.Calculate(cellValues)));
+        }
+
+        private TypeCode GetColumnTypeCode(int columnIndex)
+        {
+            if (columnIndex >= 0 && columnIndex < CurrentDataTable.Columns.Count)
+            {
+                return Type.GetTypeCode(CurrentDataTable.Columns[columnIndex].DataType);
+            }
+            return TypeCode.Object;
+        }
+
+        private static string FormatSelectionStats(CellStats stats)
+        {
+            string minText = stats.Minimum.HasValue ? stats.Minimum.Value.ToString("N3", CultureInfo.CurrentCulture) : "-";
+            string maxText = stats.Maximum.HasValue ? stats.Maximum.Value.ToString("N3", CultureInfo.CurrentCulture) : "-";
+            string sumText = (stats.Sum ?? 0m).ToString("N3", CultureInfo.CurrentCulture);
+            int notNullCount = stats.Count - stats.NullCount;
+            return $"Selected {stats.Count.ToString("N0")} cells | Sum {sumText} | Count {notNullCount.ToString("N0")} | Distinct {stats.DistinctCount.ToString("N0")} | Min {minText} | Max {maxText}";
         }
 
         private void DataGridView1_CellToolTipTextNeeded(object? sender, DataGridViewCellToolTipTextNeededEventArgs e)
