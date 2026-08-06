@@ -13,6 +13,7 @@ internal sealed class FakeCatalogConnection : DbConnection
 {
     private readonly IReadOnlyList<object?[]> _objectRows;
     private readonly IReadOnlyList<object?[]> _columnRows;
+    private readonly IReadOnlyList<object?[]> _distOrgRows;
     private readonly IReadOnlyList<object?[]> _databaseRows;
     private readonly IReadOnlyList<object?[]> _procedureRows;
     private readonly string? _failMarker;
@@ -23,12 +24,14 @@ internal sealed class FakeCatalogConnection : DbConnection
         IEnumerable<object?[]>? columnRows = null,
         IEnumerable<object?[]>? databaseRows = null,
         IEnumerable<object?[]>? procedureRows = null,
+        IEnumerable<object?[]>? distOrgRows = null,
         string? failMarker = null)
     {
         _objectRows = objectRows?.ToList() ?? [];
         _columnRows = columnRows?.ToList() ?? [];
         _databaseRows = databaseRows?.ToList() ?? [];
         _procedureRows = procedureRows?.ToList() ?? [];
+        _distOrgRows = distOrgRows?.ToList() ?? [];
         _failMarker = failMarker;
     }
 
@@ -66,7 +69,11 @@ internal sealed class FakeCatalogConnection : DbConnection
         }
 
         IReadOnlyList<object?[]>? rows = null;
-        if (commandText.Contains("_V_RELATION_COLUMN", StringComparison.OrdinalIgnoreCase))
+        if (commandText.Contains("_V_TABLE_DIST_MAP", StringComparison.OrdinalIgnoreCase))
+        {
+            rows = _distOrgRows;
+        }
+        else if (commandText.Contains("_V_RELATION_COLUMN", StringComparison.OrdinalIgnoreCase))
         {
             rows = _columnRows;
         }

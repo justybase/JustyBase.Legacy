@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 
 using AppBase.Common.Interfaces;
 
@@ -12,16 +12,10 @@ public interface INetezzaHelperService
     /// <summary>True while a Netezza schema/SQLite cache refresh is in progress.</summary>
     bool SqliteInProgress { get; set; }
 
-    string DatabaseTablesSql(string dbName, bool ownerMode = true, bool noDescMode = false);
     string GetDescSql(string dbName);
     string NzProcReturnFix(string procReturns);
-    string OBJECT_COLUMNS_NZ_SQL_OF_DB(string dbName);
-    string OneTableSqlOwner(string tablename);
-    string OneTableSqlSchema(string tablename, bool schemaOn);
     void OnSchemaProblemNetezzaAskForRestart(IDatabaseRuntimeContext databaseRuntimeContext, ILogger logger, string connectionName, Action action);
-    string SearchInNetezzaSchema(string dbName, string txtToSearch);
     string ExternalSql(string database);
-    string GetFulidesSql(string databaseName, int databaseId);
     string ProcSql(string database);
     string SynonymSql(string database);
     string ViewSql(string database);

@@ -1,4 +1,4 @@
-﻿using AppBase.Common;
+using AppBase.Common;
 using AppBase.Common.Enums;
 using AppBase.Data;
 using AppBase.Data.Core.Core;
@@ -44,7 +44,6 @@ public sealed class NetezzaHelperService : INetezzaHelperService
     public const string SESSION = NetezzaHelpers.SESSION;
     public const string VIEW_CODE = NetezzaHelpers.VIEW_CODE;
     public const string CurrentDataSql = NetezzaHelpers.CurrentDataSql;
-    public const string TABLE_KEYS_NZ_SQL = NetezzaHelpers.TABLE_KEYS_NZ_SQL;
     public const string SEARCH_VIEW_SQL = NetezzaHelpers.SEARCH_VIEW_SQL;
     public const string SEARCH_PROCEDURE_SQL = NetezzaHelpers.SEARCH_PROCEDURE_SQL;
     public readonly string USER_GROUPS = NetezzaHelpers.USER_GROUPS;
@@ -54,23 +53,12 @@ public sealed class NetezzaHelperService : INetezzaHelperService
     public string ServerVersion { get; set; } = "";
     public bool SqliteInProgress { get; set; }
 
-    public string DatabaseTablesSql(string dbName, bool ownerMode = true, bool noDescMode = false)
-        => NetezzaHelpers.DatabaseTablesSql(dbName, ownerMode, noDescMode);
-
     public string GetDescSql(string dbName) => NetezzaHelpers.GetDescSql(dbName);
     public string NzProcReturnFix(string procReturns) => NetezzaHelpers.NzProcReturnFix(procReturns);
-    public string OBJECT_COLUMNS_NZ_SQL_OF_DB(string dbName) => NetezzaHelpers.OBJECT_COLUMNS_NZ_SQL_OF_DB(dbName);
-    public string OneTableSqlOwner(string tablename) => NetezzaHelpers.OneTableSqlOwner(tablename);
-    public string OneTableSqlSchema(string tablename, bool schemaOn) => NetezzaHelpers.OneTableSqlSchema(tablename, schemaOn);
-
     public void OnSchemaProblemNetezzaAskForRestart(AppBase.Common.Interfaces.IDatabaseRuntimeContext databaseRuntimeContext, ILogger logger, string connectionName, Action action)
         => NetezzaHelpers.OnSchemaProblemNetezzaAskForRestart(databaseRuntimeContext, logger, connectionName, action);
 
-    public string SearchInNetezzaSchema(string dbName, string txtToSearch)
-        => NetezzaHelpers.SearchInNetezzaSchema(dbName, txtToSearch);
-
     public string ExternalSql(string database) => NetezzaHelpers.ExternalSql(database);
-    public string GetFulidesSql(string databaseName, int databaseId) => NetezzaHelpers.GetFulidesSql(databaseName, databaseId);
     public string ProcSql(string database) => NetezzaHelpers.ProcSql(database);
     public string SynonymSql(string database) => NetezzaHelpers.SynonymSql(database);
     public string ViewSql(string database) => NetezzaHelpers.ViewSql(database);

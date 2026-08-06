@@ -28,8 +28,6 @@ public static class NetezzaHelpers
 
     public const string CurrentDataSql = NetezzaCatalogSql.DataAktSql;
 
-    public const string TABLE_KEYS_NZ_SQL = NetezzaCatalogSql.LegacyTableKeysSql;
-
     public const string SEARCH_VIEW_SQL = NetezzaSystemSql.SearchViewsTemplate;
 
     public const string SEARCH_PROCEDURE_SQL = NetezzaSystemSql.SearchProceduresTemplate;
@@ -38,23 +36,17 @@ public static class NetezzaHelpers
 
     static string msg = "";
 
-    public static string DatabaseTablesSql(string dbName, bool ownerMode = true, bool noDescMode = false)
-        => NetezzaCatalogSql.GetLegacyBazyTabeleSql(dbName, ownerMode, noDescMode);
-
     public static string GetDescSql(string dbName)
         => NetezzaCatalogSql.GetDescSql(dbName);
 
+    public static string KeysSql(string database)
+        => NetezzaCatalogSql.GetLegacyKeysSql(database);
+
+    public static string DistributionColumnsSql(string database)
+        => NetezzaCatalogSql.GetLegacyDistributionColumnsSql(database);
+
     public static string NzProcReturnFix(string procReturns)
         => NetezzaProcTypes.FixProcedureReturnType(procReturns);
-
-    public static string OBJECT_COLUMNS_NZ_SQL_OF_DB(string dbName)
-        => NetezzaCatalogSql.GetLegacyObjectColumnsSql(dbName);
-
-    public static string OneTableSqlOwner(string tablename)
-        => NetezzaCatalogSql.GetLegacyOneTableSqlOwner(tablename);
-
-    public static string OneTableSqlSchema(string tablename, bool schemaOn)
-        => NetezzaCatalogSql.GetLegacyOneTableSqlSchema(tablename, schemaOn);
 
     public static void OnSchemaProblemNetezzaAskForRestart(AppBase.Common.Interfaces.IDatabaseRuntimeContext baseWindowHelpers, ILogger logger, string connectionName, Action action)
     {
@@ -102,14 +94,9 @@ public static class NetezzaHelpers
         return res;
     }
 
-    public static string SearchInNetezzaSchema(string dbName, string txtToSearch)
-        => NetezzaCatalogSql.GetLegacySearchInSchemaSql(dbName, txtToSearch);
-
     public static string ExternalSql(string database)
         => NetezzaCatalogSql.GetLegacyExternalSql(database);
 
-    public static string GetFulidesSql(string databaseName, int databaseId)
-        => NetezzaCatalogSql.GetLegacyFulidesSql(databaseName, databaseId);
     private static void NETConnection_Notice(object o, NzNoticeEventArgs message)
     {
         msg = message.Message;
@@ -227,6 +214,8 @@ public static class NetezzaHelpers
         }
 
         int columnId = 0;
+        var distOrgByKey = LoadDistributionSequences(connection, snapshots);
+
         foreach (var (_, snapshot) in snapshots)
         {
             foreach (var table in snapshot.Tables.OrderBy(t => t.CatalogId))
@@ -242,6 +231,10 @@ public static class NetezzaHelpers
 
                 foreach (var column in columns)
                 {
+                    var distOrg = distOrgByKey.TryGetValue((table.CatalogId, column.Name), out var seqs)
+                        ? seqs
+                        : (Dist: (sbyte?)null, Org: (sbyte?)null);
+
                     columnRows.Add(new NetezzaColumnInfoRow()
                     {
                         COLUMN_NUMBER = (ushort)(columnRows.Count + 1),
@@ -251,6 +244,8 @@ public static class NetezzaHelpers
                         COLUMN_DESCRIPTION = column.Description,
                         DATA_TYPE = column.DataType ?? string.Empty,
                         IS_NULLABLE = column.Nullable,
+                        DISTSEQNO = distOrg.Dist,
+                        ORGSEQNO = distOrg.Org,
                         COLDEFAULT = column.DefaultValue,
                     });
                 }
@@ -273,6 +268,51 @@ public static class NetezzaHelpers
         }
         runtimeWriter.SetOwners(connectionName, owners);
         return true;
+    }
+
+    /// <summary>
+    /// Loads DISTSEQNO/ORGSEQNO for every column of the given databases (modern shared SQL)
+    /// so Legacy DDL generation can emit DISTRIBUTE ON / ORGANIZE ON clauses.
+    /// </summary>
+    private static Dictionary<(int TableId, string ColumnName), (sbyte? Dist, sbyte? Org)> LoadDistributionSequences(
+        DbConnection connection,
+        IReadOnlyList<(string Database, JustyBase.Netezza.Models.NetezzaSchemaSnapshot Snapshot)> snapshots)
+    {
+        var result = new Dictionary<(int, string), (sbyte?, sbyte?)>();
+
+        foreach (var (databaseName, _) in snapshots)
+        {
+            if (string.IsNullOrEmpty(databaseName))
+            {
+                continue;
+            }
+
+            try
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = JustyBase.NetezzaCatalogSql.NetezzaCatalogSql.GetLegacyDistributionColumnsSql(databaseName);
+                using var reader = command.ExecuteReader();
+                while (reader.Read())
+                {
+                    int tableId = reader.IsDBNull(0) ? 0 : Convert.ToInt32(reader.GetValue(0));
+                    string columnName = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+                    if (tableId == 0 || string.IsNullOrEmpty(columnName))
+                    {
+                        continue;
+                    }
+
+                    sbyte? dist = reader.IsDBNull(2) ? null : Convert.ToSByte(reader.GetValue(2));
+                    sbyte? org = reader.IsDBNull(3) ? null : Convert.ToSByte(reader.GetValue(3));
+                    result[(tableId, columnName)] = (dist, org);
+                }
+            }
+            catch (Exception exception)
+            {
+                System.Diagnostics.Trace.WriteLine($"Distribution sequence load failed for {databaseName}: {exception.GetType().Name}");
+            }
+        }
+
+        return result;
     }
 
 }

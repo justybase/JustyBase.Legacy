@@ -1,4 +1,4 @@
-﻿using AppBase.Common;
+using AppBase.Common;
 using AppBase.Common.Configuration;
 using AppBase.Common.Enums;
 using AppBase.Common.Interfaces;
@@ -112,68 +112,12 @@ public sealed class Netezza : GeneralDb, INetezza
         return list;
     }
 
-    public (List<string> owner, List<string> name, List<string> desc, List<int> id) GetFulides(string dbName, int idObj)
-    {
-        List<string> owner = new List<string>();
-        List<string> name = new List<string>();
-        List<string> desc = new List<string>();
-        List<int> id = new List<int>();
-
-        List<string> list = new List<string>();
-        try
-        {
-            using (var conn = GetConnection() as NzConnection)
-            {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = NetezzaHelpers.GetFulidesSql(dbName, idObj);
-                    cmd.CommandTimeout = 30;
-                    using var rdr = cmd.ExecuteReader();
-                    while (rdr.Read())
-                    {
-                        string? tmpOwner = null;
-                        if (!rdr.IsDBNull(0))
-                        {
-                            tmpOwner = rdr.GetString(0);
-                        }
-                        string? tmpName = null;
-                        if (!rdr.IsDBNull(1))
-                        {
-                            tmpName = rdr.GetString(1);
-                        }
-                        string? tmpDesc = null;
-                        if (!rdr.IsDBNull(2))
-                        {
-                            tmpDesc = rdr.GetString(2);
-                        }
-                        owner.Add(tmpOwner);
-                        name.Add(tmpName);
-                        desc.Add(tmpDesc);
-                        id.Add(rdr.GetInt32(3));
-                    }
-                }
-            }
-        }
-        catch (Exception)
-        {
-            throw;
-        }
-        return (owner, name, desc, id);
-    }
-
     public Dictionary<int, List<(string keyName, char keyType, Int16 columnPosition, string columnName, int? refTableId, string? refColumnName, string? UPDT_TYPE, string? DEL_TYPE)>> keysInTables
     { get; init; } = new();
-
-    public List<NetezzaColumnInfoRow> ColumnList { get; init; } = new();
-
-    public Dictionary<string, List<NetezzaBasesTables>> BasesTablesList { get; init; } = new();
 
     public void ResetLists()
     {
         keysInTables.Clear();
-        ColumnList.Clear();
-        BasesTablesList.Clear();
     }
 
 
@@ -205,7 +149,7 @@ public sealed class Netezza : GeneralDb, INetezza
 
             //KEYS_IN_TABLES
             var cmdKeysNZ = connTemp.CreateCommand();
-            cmdKeysNZ.CommandText = NetezzaHelpers.TABLE_KEYS_NZ_SQL;
+            cmdKeysNZ.CommandText = JustyBase.NetezzaCatalogSql.NetezzaCatalogSql.GetLegacyKeysSql(database);
             using var rdKeys = cmdKeysNZ.ExecuteReader();
 
             var res1 = keysInTables;
@@ -274,59 +218,6 @@ public sealed class Netezza : GeneralDb, INetezza
             }
 
 
-            DbCommand cmdColumnsNZ = connTemp.CreateCommand();
-            cmdColumnsNZ.CommandText = NetezzaHelpers.OBJECT_COLUMNS_NZ_SQL_OF_DB(database);
-
-            using var rdColumns = cmdColumnsNZ.ExecuteReader();
-
-            lock (ColumnList)
-            {
-                //ColumnList[database] = new List<NetezzaColumnInfoRow>();
-                while (rdColumns.Read())
-                {
-                    string colName = rdColumns.GetString(3);
-                    if (_generalDbService.ReservedWords.Contains(colName) || !colName.IsGoodName())
-                    {
-                        colName = StringExtension.QuoteNameIfNeeded(colName);
-                    }
-
-                    var COLUMN_NUMBER = (UInt16)rdColumns.GetInt16(0);
-                    var TABLE_ID = rdColumns.GetInt32(1);
-                    var DATABASE_ID = rdColumns.GetInt32(2);
-                    var COLUMN_NAME = colName;
-                    string? COLUMN_DESCRIPTION = null;
-                    if (!rdColumns.IsDBNull(4))
-                        COLUMN_DESCRIPTION = rdColumns.GetString(4);
-
-                    var DATA_TYPE = rdColumns.GetString(5);
-                    var IS_NULLABLE = rdColumns.GetBoolean(6);
-                    var DISTSEQNO = rdColumns.GetValue(7) as sbyte?;
-                    var ORGSEQNO = rdColumns.GetValue(8) as sbyte?;
-
-                    string COLDEFAULT = null;
-                    if (!rdColumns.IsDBNull(9))
-                        COLDEFAULT = rdColumns.GetString(9);
-
-                    if (string.IsNullOrEmpty(COLDEFAULT))
-                    {
-                        COLDEFAULT = null;
-                    }
-
-                    ColumnList.Add(new NetezzaColumnInfoRow()
-                    {
-                        COLUMN_NUMBER = COLUMN_NUMBER,
-                        TABLE_ID = TABLE_ID,
-                        DATABASE_ID = DATABASE_ID,
-                        COLUMN_NAME = COLUMN_NAME,
-                        COLUMN_DESCRIPTION = COLUMN_DESCRIPTION,
-                        DATA_TYPE = DATA_TYPE,
-                        IS_NULLABLE = IS_NULLABLE,
-                        DISTSEQNO = DISTSEQNO,
-                        ORGSEQNO = ORGSEQNO,
-                        COLDEFAULT = COLDEFAULT
-                    });
-                }
-            }
 
 
 
@@ -341,12 +232,11 @@ public sealed class Netezza : GeneralDb, INetezza
     }
     public Dictionary<int, string> DatabaseIdToName { get; set; } = [];
 
-    public HashSet<string> system_names_set = [];
     public async Task<bool> DownloadSchemaNetezza(string connectionName, NetezzaRefreshMode netezzaRefresh, List<string> dbsToRefresh, bool loadSources = false,
         Action showInUiExtra = null)
     {
         // Serialize schema downloads on this provider instance — overlapping refreshes
-        // mutate shared ColumnList / DatabaseIdToName / caches and throw
+        // mutate shared DatabaseIdToName / caches and throw
         // "Collection was modified; enumeration operation may not execute."
         await _schemaDownloadGate.WaitAsync().ConfigureAwait(false);
         try
@@ -382,12 +272,6 @@ public sealed class Netezza : GeneralDb, INetezza
                 {
                     _netezzaHelperService.ServerVersion = netezzaConnection.ServerVersion;
                     defaultDatabase = netezzaConnection.Database;
-
-                    if (!BasesTablesList.ContainsKey(connectionName))
-                    {
-                        BasesTablesList[connectionName] = new List<NetezzaBasesTables>();
-                    }
-                    var actualBasesTablesList = BasesTablesList[connectionName];
 
                     //BAZY
                     string databasesQuery = NetezzaHelpers.DATABASES;
@@ -436,68 +320,7 @@ public sealed class Netezza : GeneralDb, INetezza
 
                     rd1.Close();
 
-                    string databaseTablesQuery = "";
-                    bool ownerMode = !NetezzaHelpers.SchemasOn(netezzaConnection);
 
-                    databaseTablesQuery = NetezzaHelpers.DatabaseTablesSql(defaultDatabase, ownerMode: ownerMode, noDescMode: true);
-
-                    cm1 = netezzaConnection.CreateCommand();
-                    cm1.CommandText = databaseTablesQuery;
-                    rd1 = cm1.ExecuteReader();
-
-                    system_names_set.Clear();
-                    do
-                    {
-                        while (rd1.Read())
-                        {
-                            int tableId = rd1.GetInt32(0);
-                            int databaseId = rd1.GetInt32(1);
-                            string tableName = rd1.GetString(2);
-                            string tableSchema = null;
-                            if (!rd1.IsDBNull(4))
-                            {
-                                tableSchema = rd1.GetString(4);
-                            }
-                            string tableObjectOwner = null;
-                            if (!rd1.IsDBNull(5))
-                            {
-                                tableObjectOwner = rd1.GetString(5);
-                            }
-
-                            string kind = rd1.GetString(6);
-                            if (databaseId == 0)
-                            {
-                                databaseId = 1;
-                                system_names_set.Add(tableName);
-                            }
-                            if (!tableName.IsGoodName())
-                            {
-                                tableName = StringExtension.QuoteNameIfNeeded(tableName);
-                            }
-                           
-                            if (string.IsNullOrEmpty(tableSchema))
-                                tableSchema = "ADMIN";
-                            if (string.IsNullOrEmpty(tableObjectOwner))
-                                tableObjectOwner = "ADMIN";
-
-                            string treeKey = ownerMode ? tableObjectOwner : tableSchema;
-                            tableSchema = StringExtension.QuoteNameIfNeeded(tableSchema);
-                            tableObjectOwner = StringExtension.QuoteNameIfNeeded(tableObjectOwner);
-                            treeKey = StringExtension.QuoteNameIfNeeded(treeKey);
-
-                            actualBasesTablesList.Add(new NetezzaBasesTables()
-                            {
-                                TABLE_ID = tableId,
-                                DATABASE_ID = databaseId,
-                                TABLE_NAME = tableName,
-                                OWNER_NAME = treeKey,
-                                SCHEMA_NAME = tableSchema,
-                                OBJECT_OWNER_NAME = tableObjectOwner,
-                                OBJECT_TYPE = kind
-                            });
-
-                        }
-                    } while (rd1.NextResult());
 
                 }
             });
@@ -513,7 +336,6 @@ public sealed class Netezza : GeneralDb, INetezza
                 NetezzaRefreshMode.partial => new List<string> { defaultDatabase },
                 _ => bases
             };
-            ColumnList.Clear();
             showInUiExtra?.Invoke();
 
             await Task.Run(() =>

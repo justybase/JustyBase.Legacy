@@ -72,6 +72,11 @@ public sealed class NetezzaHelpersSchemaMappingTests
                 Col(1, "ID", null, "INTEGER", true),
                 Col(1, "NAME", "nm", "VARCHAR(20)", false, "''"),
                 Col(2, "C1", null, "TIMESTAMP", false),
+            ],
+            distOrgRows:
+            [
+                [1, "ID", (sbyte)1, null],
+                [1, "NAME", (sbyte)2, (sbyte)1],
             ]);
 
         var nz = Substitute.For<IGeneralDb, INetezza>();
@@ -118,11 +123,16 @@ public sealed class NetezzaHelpersSchemaMappingTests
         Assert.Equal("INTEGER", columnTable[0].DATA_TYPE);
         Assert.Equal(1, columnTable[0].TABLE_ID);
         Assert.Equal(1, columnTable[0].DATABASE_ID);
+        Assert.Equal((sbyte)1, columnTable[0].DISTSEQNO);
+        Assert.Null(columnTable[0].ORGSEQNO);
         Assert.Equal("nm", columnTable[1].COLUMN_DESCRIPTION);
         Assert.Equal("''", columnTable[1].COLDEFAULT);
         Assert.True(columnTable[1].IS_NULLABLE);
+        Assert.Equal((sbyte)2, columnTable[1].DISTSEQNO);
+        Assert.Equal((sbyte)1, columnTable[1].ORGSEQNO);
         Assert.Equal("C1", columnTable[2].COLUMN_NAME);
         Assert.Equal(2, columnTable[2].TABLE_ID);
+        Assert.Null(columnTable[2].DISTSEQNO);
 
         Assert.NotNull(schemaLookup);
         Assert.True(schemaLookup!["SALES"].ContainsKey("CUSTOMERS"));
