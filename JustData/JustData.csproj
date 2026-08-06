@@ -24,7 +24,7 @@
 		<IncludeOracle Condition="'$(IncludeOracle)' == ''">false</IncludeOracle>
 		<IncludeMsSql Condition="'$(IncludeMsSql)' == ''">false</IncludeMsSql>
 		<IncludePostgres Condition="'$(IncludePostgres)' == ''">false</IncludePostgres>
-		<SelfContained Condition="'$(SelfContained)' == ''">true</SelfContained>
+		<SelfContained Condition="'$(SelfContained)' == '' and '$(IsPublishing)' == 'true'">true</SelfContained>
 	</PropertyGroup>
 	<PropertyGroup>
 		<PublishAot>false</PublishAot>
