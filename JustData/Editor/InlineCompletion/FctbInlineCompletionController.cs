@@ -186,9 +186,11 @@ public sealed class FctbInlineCompletionController : IDisposable
             return;
         }
 
+        // Navigation (mouse click, arrow keys, Home/End) must never start a completion.
+        // Only clear a stale ghost text when the caret left its anchor; typing is handled
+        // by OnTextChanged, and selection changes by OnCompletionSelectionChanged.
         if (HasGhostText && _ghostOffset != _editor.SelectionStart)
             ClearGhostText();
-        Schedule();
     }
 
     private void OnPreviewKeyDown(object? sender, PreviewKeyDownEventArgs e)
