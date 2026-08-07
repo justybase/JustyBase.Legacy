@@ -1,5 +1,5 @@
-using JustyBase.Ai.Fim.Abstractions;
-using JustyBase.Ai.Fim.Prompting;
+using JustyBase.Ai.Embedded.Abstractions;
+using JustyBase.Ai.Embedded.Prompting;
 
 namespace JustyBaseLegacy.UI.Fim;
 
@@ -10,6 +10,7 @@ public sealed class FimInlineCompletionBridge
 {
     private readonly ICompletionProvider _provider;
     private readonly Func<FimPromptBudget> _getBudget;
+    private readonly SemaphoreSlim _startGate = new(1, 1);
 
     public FimInlineCompletionBridge(
         ICompletionProvider provider,
@@ -23,12 +24,43 @@ public sealed class FimInlineCompletionBridge
 
     public Func<bool> IsEnabled { get; }
 
-    /// <summary>Best-effort background preload: loads model into memory if present (no download).</summary>
-    public Task<bool> TryPreloadAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Best-effort background preload: starts the llama-server only when the model is
+    /// already on disk (never triggers a download from the editor hot path).
+    /// </summary>
+    public async Task<bool> TryPreloadAsync(CancellationToken cancellationToken = default)
     {
-        if (_provider is JustyBase.Ai.Fim.LlamaSharp.LlamaSharpCompletionProvider llama)
-            return llama.TryPreloadAsync(cancellationToken);
-        return Task.FromResult(false);
+        if (_provider.IsReady)
+        {
+            return true;
+        }
+
+        if (!_provider.IsAvailable)
+        {
+            return false;
+        }
+
+        try
+        {
+            await _startGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                if (!_provider.IsReady)
+                {
+                    await _provider.EnsureReadyAsync(progress: null, CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                _startGate.Release();
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return _provider.IsReady;
     }
 
     public async Task<string?> CompleteAsync(InlineCompletionContext context, CancellationToken cancellationToken)
@@ -48,6 +80,43 @@ public sealed class FimInlineCompletionBridge
                 budget.SuffixPercentage);
             if (string.IsNullOrWhiteSpace(prefix) && string.IsNullOrWhiteSpace(suffix))
                 return null;
+
+            // Start the server on demand when the model is on disk but the backend is not
+            // running (app restart, crash, or a fresh install where Prepare was skipped).
+            // A single gate serializes concurrent keystrokes during a slow start; a failed
+            // start surfaces as "no completion" instead of throwing on every keystroke.
+            if (!_provider.IsReady)
+            {
+                if (!_provider.IsAvailable)
+                {
+                    return null;
+                }
+
+                try
+                {
+                    await _startGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+                    try
+                    {
+                        if (!_provider.IsReady)
+                        {
+                            await _provider.EnsureReadyAsync(progress: null, CancellationToken.None).ConfigureAwait(false);
+                        }
+                    }
+                    finally
+                    {
+                        _startGate.Release();
+                    }
+                }
+                catch
+                {
+                    return null;
+                }
+
+                if (!_provider.IsReady)
+                {
+                    return null;
+                }
+            }
 
             var maxTokens = FimContextExtractor.ClampMaxTokens(budget.MaxGenerationTokens);
             var suggestion = await _provider.CompleteAsync(

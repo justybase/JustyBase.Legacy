@@ -1,243 +1,100 @@
-using AppBase.Common.Configuration;
 using AppBase.Common.Interfaces;
-using JustData.Application.Git;
-using JustyBase.Ai.Fim.Abstractions;
-using JustyBase.Ai.Fim.Benchmark;
-using JustyBase.Ai.Fim.Download;
-using JustyBase.Ai.Fim.LlamaSharp;
-using JustyBase.Ai.Fim.Prompting;
+using JustyBase.Ai.Embedded.Abstractions;
+using JustyBase.Ai.Embedded.Download;
+using JustyBase.Ai.Embedded.Prompting;
+using JustyBase.Ai.Embedded.Server;
+using JustyBase.Ai.Embedded.Settings;
+using JustyBase.Ai.Git;
+using JustyBase.Core.Git;
 using Microsoft.Extensions.DependencyInjection;
-using System.Diagnostics;
 
 namespace JustyBaseLegacy.UI.Fim;
 
+/// <summary>
+/// Registers the embedded FIM completion pipeline for the WinForms host. The model
+/// runtime is the shared llama.cpp llama-server (same binary/subprocess layer as the
+/// embedded AI chat backend); the FCTB editor glue stays host-side.
+/// </summary>
 public static class FimServiceCollectionExtensions
 {
+    public const string FimStoreKey = "fim";
+
     public static IServiceCollection AddEmbeddedFimCompletion(this IServiceCollection collection)
     {
-        collection.AddSingleton<IFimModelCatalog, FimModelCatalog>();
-        collection.AddSingleton<IFimModelStore>(sp =>
+        // Shared FIM settings port.
+        collection.AddSingleton<IFimSettingsStore, LegacyFimSettingsStore>();
+
+        // GGUF catalog + store (shared llama-server model layer).
+        collection.AddSingleton<FimModelCatalog>();
+        collection.AddKeyedSingleton<IModelStore>(FimStoreKey, (sp, _) =>
         {
-            var catalog = sp.GetRequiredService<IFimModelCatalog>();
-            var config = sp.GetRequiredService<IApplicationSettingsContext>().Config;
-            return new HuggingFaceFimModelStore(catalog, () => config.EmbeddedFimModelId);
+            var catalog = sp.GetRequiredService<FimModelCatalog>();
+            var settings = sp.GetRequiredService<IFimSettingsStore>();
+            return new HuggingFaceModelStore(catalog, () => settings.Settings.FimModelId);
         });
-        collection.AddSingleton<IFimPromptBuilder>(sp =>
-        {
-            var catalog = sp.GetRequiredService<IFimModelCatalog>();
-            var config = sp.GetRequiredService<IApplicationSettingsContext>().Config;
-            return new CatalogFimPromptBuilder(catalog, () => config.EmbeddedFimModelId);
-        });
+
+        // llama-server binary + subprocess manager (shared with the AI chat backend).
         collection.AddSingleton(sp =>
         {
-            var store = sp.GetRequiredService<IFimModelStore>();
-            var config = sp.GetRequiredService<IApplicationSettingsContext>().Config;
-            LlamaSharpModelHost.ConfigureNativeBackend(config.EmbeddedFimPreferVulkan);
-            return new LlamaSharpModelHost(
-                store,
-                getGpuLayerCount: () => ResolveGpuLayers(config));
+            var settings = sp.GetRequiredService<IFimSettingsStore>();
+            return new LlamaServerBinaryManager(() => settings.Settings.FimPreferVulkan);
         });
-        collection.AddSingleton<LlamaSharpCompletionProvider>(sp =>
+        collection.AddSingleton<LlamaServerManager>();
+
+        // FIM provider (llama.cpp native FIM templates).
+        collection.AddSingleton<ICompletionProvider>(sp =>
         {
-            var host = sp.GetRequiredService<LlamaSharpModelHost>();
-            var builder = sp.GetRequiredService<IFimPromptBuilder>();
-            return new LlamaSharpCompletionProvider(host, builder);
+            var manager = sp.GetRequiredService<LlamaServerManager>();
+            var store = sp.GetRequiredKeyedService<IModelStore>(FimStoreKey);
+            var settings = sp.GetRequiredService<IFimSettingsStore>();
+            return new LlamaServerFimProvider(
+                manager,
+                store,
+                getGpuLayers: () => ResolveGpuLayers(settings.Settings),
+                getContextSize: () => (uint)Math.Clamp(
+                    settings.Settings.FimCtxSize > 0 ? settings.Settings.FimCtxSize : 4096, 512, 131_072));
         });
-        collection.AddSingleton<ICompletionProvider>(sp => sp.GetRequiredService<LlamaSharpCompletionProvider>());
+
+        // Editor bridge (FCTB host).
         collection.AddSingleton(sp =>
         {
             var provider = sp.GetRequiredService<ICompletionProvider>();
-            var config = sp.GetRequiredService<IApplicationSettingsContext>().Config;
+            var settings = sp.GetRequiredService<IFimSettingsStore>();
             return new FimInlineCompletionBridge(
                 provider,
-                () => config.EnableEmbeddedFimAi,
+                () => settings.Settings.EnableFimAi,
                 () => new FimPromptBudget(
-                    config.EmbeddedFimMaxPromptTokens,
-                    config.EmbeddedFimPrefixPercentage,
-                    config.EmbeddedFimSuffixPercentage,
-                    config.EmbeddedFimMaxTokens));
+                    settings.Settings.FimMaxPromptTokens,
+                    settings.Settings.FimPrefixPercentage,
+                    settings.Settings.FimSuffixPercentage,
+                    settings.Settings.FimMaxTokens));
         });
-        collection.AddSingleton<IFimModelBootstrapService, FimModelBootstrapService>();
-        collection.AddSingleton<IGitCommitMessageAiService, EmbeddedFimGitCommitMessageAiService>();
+
+        // Model bootstrap (download / delete / reload / speed test over the server).
+        collection.AddSingleton<IFimModelBootstrapService>(sp =>
+        {
+            var provider = sp.GetRequiredService<ICompletionProvider>();
+            var store = sp.GetRequiredKeyedService<IModelStore>(FimStoreKey);
+            var manager = sp.GetRequiredService<LlamaServerManager>();
+            return new LlamaServerFimBootstrapService(provider, store, manager);
+        });
+
+        // FCTB editor host + shared llama-server git commit message AI.
         collection.AddSingleton<FimEditorHost>();
+        collection.AddSingleton<IGitCommitMessageAiService, LlamaServerGitCommitMessageAiService>();
+
         return collection;
     }
 
-    private static int ResolveGpuLayers(IApplicationConfig config)
+    private static int ResolveGpuLayers(FimSettings settings)
     {
-        if (!config.EmbeddedFimPreferVulkan)
+        if (!settings.FimPreferVulkan)
             return 0;
 
-        var layers = config.EmbeddedFimGpuLayers;
+        var layers = settings.FimGpuLayers;
         if (layers < 0)
             return 99;
 
         return Math.Clamp(layers, 0, 999);
-    }
-}
-
-public interface IFimModelBootstrapService
-{
-    string ModelsDirectory { get; }
-    bool IsSelectedModelPresent { get; }
-    string SelectedModelLocalPath { get; }
-    string SelectedModelDiskStatus { get; }
-    string EnsureModelsDirectory();
-    Task EnsureReadyAsync(IProgress<FimModelProgress>? progress = null, CancellationToken cancellationToken = default);
-    Task DeleteSelectedModelAsync(CancellationToken cancellationToken = default);
-    Task ReloadModelAsync(CancellationToken cancellationToken = default);
-    Task<FimBenchmarkComparisonReport> RunSpeedBenchmarkAsync(
-        int maxTokens,
-        int maxPromptTokens,
-        double prefixPercentage,
-        double suffixPercentage,
-        int debounceMs,
-        int configuredGpuLayers,
-        IProgress<FimModelProgress>? progress = null,
-        CancellationToken cancellationToken = default);
-}
-
-public sealed class FimModelBootstrapService : IFimModelBootstrapService
-{
-    private readonly LlamaSharpCompletionProvider _provider;
-    private readonly IFimModelStore _store;
-    private readonly LlamaSharpModelHost _host;
-    private int _busy;
-
-    public FimModelBootstrapService(
-        LlamaSharpCompletionProvider provider,
-        IFimModelStore store,
-        LlamaSharpModelHost host)
-    {
-        _provider = provider;
-        _store = store;
-        _host = host;
-    }
-
-    public string ModelsDirectory => _store.ModelsDirectory;
-    public bool IsSelectedModelPresent => _store.IsModelPresent;
-    public string SelectedModelLocalPath => _store.LocalModelPath;
-    public string EnsureModelsDirectory() => _store.EnsureModelsDirectory();
-
-    public string SelectedModelDiskStatus
-    {
-        get
-        {
-            var model = _store.CurrentModel;
-            if (!_store.IsModelPresent)
-                return $"{model.DisplayName}: not downloaded.";
-
-            try
-            {
-                var mb = new FileInfo(_store.LocalModelPath).Length / (1024d * 1024d);
-                var layers = _host.IsLoaded ? _host.LoadedGpuLayerCount : _host.EffectiveGpuLayerCount;
-                return $"{model.DisplayName}: on disk ({mb:0.#} MB), gpu_layers={layers}.";
-            }
-#pragma warning disable CA1031
-            catch
-#pragma warning restore CA1031
-            {
-                return $"{model.DisplayName}: on disk.";
-            }
-        }
-    }
-
-    public async Task EnsureReadyAsync(IProgress<FimModelProgress>? progress = null, CancellationToken cancellationToken = default)
-    {
-        if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
-            throw new InvalidOperationException("A FIM model download/load is already in progress.");
-
-        try
-        {
-            await EnsureReadyCoreAsync(progress, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            Interlocked.Exchange(ref _busy, 0);
-        }
-    }
-
-    public async Task DeleteSelectedModelAsync(CancellationToken cancellationToken = default)
-    {
-        if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
-            throw new InvalidOperationException("A FIM model download/load is already in progress.");
-
-        try
-        {
-            await _host.UnloadAsync(cancellationToken).ConfigureAwait(false);
-            if (!_store.TryDeleteCurrentModel())
-                throw new InvalidOperationException("No local model file to delete for the selected model.");
-        }
-        finally
-        {
-            Interlocked.Exchange(ref _busy, 0);
-        }
-    }
-
-    public async Task ReloadModelAsync(CancellationToken cancellationToken = default)
-    {
-        if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
-            throw new InvalidOperationException("A FIM model download/load is already in progress.");
-
-        try
-        {
-            await _host.UnloadAsync(cancellationToken).ConfigureAwait(false);
-            if (_store.IsModelPresent)
-                await EnsureReadyCoreAsync(progress: null, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            Interlocked.Exchange(ref _busy, 0);
-        }
-    }
-
-    public async Task<FimBenchmarkComparisonReport> RunSpeedBenchmarkAsync(
-        int maxTokens,
-        int maxPromptTokens,
-        double prefixPercentage,
-        double suffixPercentage,
-        int debounceMs,
-        int configuredGpuLayers,
-        IProgress<FimModelProgress>? progress = null,
-        CancellationToken cancellationToken = default)
-    {
-        if (!_store.IsModelPresent)
-            throw new InvalidOperationException("Download / prepare the selected model before running the speed test.");
-
-        if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
-            throw new InvalidOperationException("A FIM model download/load is already in progress.");
-
-        try
-        {
-            return await FimSpeedBenchmark.RunComparisonAsync(
-                _provider,
-                _host,
-                _store.CurrentModel.DisplayName,
-                maxPromptTokens,
-                prefixPercentage,
-                suffixPercentage,
-                maxTokens,
-                debounceMs,
-                configuredGpuLayers,
-                progress,
-                cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            Interlocked.Exchange(ref _busy, 0);
-        }
-    }
-
-    private async Task EnsureReadyCoreAsync(IProgress<FimModelProgress>? progress, CancellationToken cancellationToken)
-    {
-        _store.EnsureModelsDirectory();
-        var model = _store.CurrentModel;
-        IProgress<FimModelProgress> combined = new Progress<FimModelProgress>(p =>
-        {
-            Debug.WriteLine($"[FIM:{model.Id}] {p.Message}");
-            progress?.Report(p);
-        });
-
-        await _provider.EnsureReadyAsync(combined, cancellationToken).ConfigureAwait(false);
     }
 }

@@ -22,7 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\JustData.Application\JustData.Application.csproj" />
     <ProjectReference Include="..\..\JustData.ViewModels\JustData.ViewModels.csproj" />
-    <ProjectReference Include="..\..\JustyBase.Ai.Fim\JustyBase.Ai.Fim.csproj" />
+
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

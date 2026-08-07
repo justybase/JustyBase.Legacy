@@ -1,8 +1,9 @@
 using AppBase.Common.Interfaces;
 using AppBase.Common.Configuration;
-using JustyBase.Ai.Fim.Abstractions;
-using JustyBase.Ai.Fim.Download;
-using JustyBase.Ai.Fim.Prompting;
+using JustyBase.Ai.Embedded.Abstractions;
+using JustyBase.Ai.Embedded.Download;
+using JustyBase.Ai.Embedded.Prompting;
+using JustyBase.Ai.Embedded.Server;
 using JustyBaseLegacy.UI.Fim;
 using JustyBaseLegacy.UI.Configuration;
 
@@ -12,7 +13,7 @@ namespace JustyBaseLegacy.UI.Controls;
 public sealed class EmbeddedFimPreferencesPanel : UserControl
 {
     private readonly IApplicationSettingsContext _settings;
-    private readonly IFimModelCatalog _catalog;
+    private readonly IModelCatalog _catalog;
     private readonly IFimModelBootstrapService _bootstrap;
     private readonly CheckBox _chkEnable = new();
     private readonly ComboBox _cmbPreset = new();
@@ -21,6 +22,7 @@ public sealed class EmbeddedFimPreferencesPanel : UserControl
     private readonly NumericUpDown _nudMaxTokens = new();
     private readonly NumericUpDown _nudPromptTokens = new();
     private readonly NumericUpDown _nudGpuLayers = new();
+    private readonly NumericUpDown _nudCtxSize = new();
     private readonly CheckBox _chkVulkan = new();
     private readonly Button _btnDownload = new();
     private readonly Button _btnDelete = new();
@@ -30,7 +32,7 @@ public sealed class EmbeddedFimPreferencesPanel : UserControl
 
     public EmbeddedFimPreferencesPanel(
         IApplicationSettingsContext settings,
-        IFimModelCatalog catalog,
+        IModelCatalog catalog,
         IFimModelBootstrapService bootstrap)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
@@ -96,6 +98,11 @@ public sealed class EmbeddedFimPreferencesPanel : UserControl
         _nudGpuLayers.Maximum = 999;
         AddRow("GPU layers", _nudGpuLayers);
 
+        _nudCtxSize.Minimum = 512;
+        _nudCtxSize.Maximum = 131072;
+        _nudCtxSize.Increment = 512;
+        AddRow("Context size (tokens)", _nudCtxSize);
+
         var actions = new FlowLayoutPanel { AutoSize = true, WrapContents = true };
         _btnDownload.Text = "Download / prepare";
         _btnDownload.AutoSize = true;
@@ -151,7 +158,8 @@ public sealed class EmbeddedFimPreferencesPanel : UserControl
             _nudMaxTokens.Value = Math.Clamp(c.EmbeddedFimMaxTokens, 20, 200);
             _nudPromptTokens.Value = Math.Clamp(c.EmbeddedFimMaxPromptTokens, 256, 8192);
             _nudGpuLayers.Value = Math.Clamp(c.EmbeddedFimGpuLayers, 0, 999);
-            _chkVulkan.Checked = c.EmbeddedFimPreferVulkan;
+            _nudCtxSize.Value = Math.Clamp(c.EmbeddedFimCtxSize, 512, 131072);
+            _chkVulkan.Checked = c.LlamaServerPreferVulkan;
             _lblStatus.Text = _bootstrap.SelectedModelDiskStatus + Environment.NewLine + "Models: " + _bootstrap.ModelsDirectory;
         }
         finally
@@ -173,7 +181,8 @@ public sealed class EmbeddedFimPreferencesPanel : UserControl
         c.EmbeddedFimMaxTokens = (int)_nudMaxTokens.Value;
         c.EmbeddedFimMaxPromptTokens = (int)_nudPromptTokens.Value;
         c.EmbeddedFimGpuLayers = (int)_nudGpuLayers.Value;
-        c.EmbeddedFimPreferVulkan = _chkVulkan.Checked;
+        c.EmbeddedFimCtxSize = (int)_nudCtxSize.Value;
+        c.LlamaServerPreferVulkan = _chkVulkan.Checked;
 
         if (string.Equals(c.EmbeddedFimPreset, "Small", StringComparison.OrdinalIgnoreCase)
             || string.Equals(c.EmbeddedFimPreset, "Medium", StringComparison.OrdinalIgnoreCase)
@@ -283,14 +292,14 @@ public sealed class EmbeddedFimPreferencesPanel : UserControl
         _lblStatus.Text = "Running speed test…";
         try
         {
-            var report = await _bootstrap.RunSpeedBenchmarkAsync(
+            var report = await _bootstrap.RunSpeedTestAsync(
                 (int)_nudMaxTokens.Value,
                 (int)_nudPromptTokens.Value,
                 c.EmbeddedFimPrefixPercentage,
-                c.EmbeddedFimSuffixPercentage,
-                (int)_nudDebounce.Value,
-                (int)_nudGpuLayers.Value).ConfigureAwait(true);
-            _lblStatus.Text = JustyBase.Ai.Fim.Benchmark.FimSpeedBenchmark.FormatComparison(report);
+                c.EmbeddedFimSuffixPercentage).ConfigureAwait(true);
+            _lblStatus.Text = report.Succeeded
+                ? $"{report.ModelName}: {report.TokensPerSecond:0.#} tok/s ({report.ElapsedMs} ms)."
+                : $"{report.ModelName}: speed test produced no completion.";
         }
         catch (Exception ex)
         {
