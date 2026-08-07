@@ -13,7 +13,9 @@ using AppBase.Data.Core.Models;
 using AppBase.Services;
 using AppBase.Services.Helpers;
 using AppBase.Services.Utilities;
+using JustyBaseLegacy.UI.Ai;
 using JustyBaseLegacy.UI.Fim;
+using JustyBase.Ai.Embedded.Server;
 using JustyBaseLegacy.UI.Sql;
 using JustyBaseLegacy.UI.ImportExport;
 using JustData.Application.ImportExport;
@@ -37,6 +39,7 @@ using JustyBaseLegacy.UI.Models;
 using JustyBaseLegacy.UI.Login;
 using JustyBaseLegacy.UI.Windowing;
 using JustData.ViewModels;
+using JustData.ViewModels.Ai;
 using JustData.Application.Communication;
 using JustData.Application;
 using JustData.Application.Editor;
@@ -48,7 +51,8 @@ using JustData.Application.Startup;
 using JustData.Application.Sql;
 using JustData.ViewModels.Variables;
 using JustData.ViewModels.Files;
-using JustData.Application.Git;
+using JustyBase.Ai.Git;
+using JustyBase.Core.Git;
 using JustData.ViewModels.Git;
 using JustyBaseLegacy.UI.Forms;
 using JustData.ViewModels.Editor;
@@ -422,9 +426,12 @@ namespace JustyBaseLegacy.UI
             , IConnectionProfileCatalog connectionProfileCatalog
             , EditorCatalogProjection editorCatalogProjection
             , FimEditorHost? fimEditorHost = null
-            , JustyBase.Ai.Fim.Download.IFimModelCatalog? fimModelCatalog = null
-            , JustyBaseLegacy.UI.Fim.IFimModelBootstrapService? fimModelBootstrap = null
+            , JustyBase.Ai.Embedded.Download.IModelCatalog? fimModelCatalog = null
+            , JustyBase.Ai.Embedded.Server.IFimModelBootstrapService? fimModelBootstrap = null
             , IUiDispatcher? uiDispatcher = null
+            , ChatViewModel? chatViewModel = null
+            , JustyBase.Ai.Ports.ISqlDiagnosticsProvider? sqlDiagnosticsProvider = null
+            , JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null
             )
         {
             _tabManager = tabManager ?? throw new ArgumentNullException(nameof(tabManager));
@@ -490,6 +497,9 @@ namespace JustyBaseLegacy.UI
             _fimEditorHost = fimEditorHost;
             _fimModelCatalog = fimModelCatalog;
             _fimModelBootstrap = fimModelBootstrap;
+            _chatViewModel = chatViewModel;
+            _sqlDiagnosticsProvider = sqlDiagnosticsProvider;
+            _chatCatalog = chatCatalog;
             _uiDispatcher = uiDispatcher ?? new JustData.Mvvm.WindowsFormsUiDispatcher(this);
             _fileSearchEngine = fileSearchEngine ?? throw new ArgumentNullException(nameof(fileSearchEngine));
             _loginDataValidator = loginDataValidator ?? throw new ArgumentNullException(nameof(loginDataValidator));
@@ -576,6 +586,7 @@ namespace JustyBaseLegacy.UI
                 InitializeGitControl();
                 InitializeObjectExplorerControl();
                 InitializeDockWindowMenu(dsm);
+                InitializeAiChat(dsm);
                 UpdateGitTimelineForActiveDocument();
 
                 // 3. The last registered tool (Legend) becomes the active
@@ -713,7 +724,10 @@ namespace JustyBaseLegacy.UI
                     _recentFileRuntimeContext.SaveRecentFiles,
                     _uiHelperService,
                     _colorTheme,
-                    _netezzaAutocompleteState);
+                    _netezzaAutocompleteState,
+                    _fimModelCatalog,
+                    _fimModelBootstrap,
+                    _chatCatalog);
             }
         }
 
@@ -1132,8 +1146,8 @@ namespace JustyBaseLegacy.UI
         private GitControl? _gitControl;
         private readonly GitViewModel _gitViewModel;
         private readonly JustyBaseLegacy.UI.Fim.FimEditorHost? _fimEditorHost;
-        private readonly JustyBase.Ai.Fim.Download.IFimModelCatalog? _fimModelCatalog;
-        private readonly JustyBaseLegacy.UI.Fim.IFimModelBootstrapService? _fimModelBootstrap;
+        private readonly JustyBase.Ai.Embedded.Download.IModelCatalog? _fimModelCatalog;
+        private readonly JustyBase.Ai.Embedded.Server.IFimModelBootstrapService? _fimModelBootstrap;
 
         private void InitializeFilesControl()
         {
@@ -2135,6 +2149,10 @@ namespace JustyBaseLegacy.UI
         private ContextMenuStrip BuildAuthoringContextMenu(FastColoredTextBox editor)
         {
             var menu = new ContextMenuStrip { Renderer = _colorTheme.GetRenderer() };
+            var fixInAiChat = new ToolStripMenuItem("Fix in AI Chat");
+            fixInAiChat.Click += async (_, _) => await SendCurrentSqlToAiChatAsync();
+            menu.Items.Add(fixInAiChat);
+            menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Go to Definition\tF12", null, (_, _) => FctbGoToDefinition(editor));
             menu.Items.Add("Find References\tShift+F12", null, (_, _) => FctbShowReferences(editor));
             menu.Items.Add("Rename Symbol\tF2", null, (_, _) => FctbRenameSymbol(editor));

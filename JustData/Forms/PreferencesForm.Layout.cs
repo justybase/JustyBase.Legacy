@@ -101,6 +101,20 @@ namespace JustyBaseLegacy.UI
                 _tabEmbeddedFim,
                 "fim ai embedded llama model gguf ghost completion commit vulkan gpu download"));
 
+            _tabAiChat = new TabPage("AI Chat")
+            {
+                Name = "tabAiChat",
+                UseVisualStyleBackColor = true,
+                Padding = new Padding(8)
+            };
+            tabControls.TabPages.Add(_tabAiChat);
+            _preferenceSections.Add(new PreferenceSection(
+                "AI Chat",
+                "Remote (Codex / OpenAI-compatible) and local embedded AI chat.",
+                "✆",
+                _tabAiChat,
+                "ai chat codex openai compatible embedded llama gguf model backend endpoint api key gpt temperature tokens timeout retries"));
+
             foreach (PreferenceSection section in _preferenceSections)
             {
                 section.Page.AutoScroll = true;

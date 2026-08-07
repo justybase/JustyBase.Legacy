@@ -71,6 +71,8 @@ public static class LegacyApplicationSettingsMapper
         destination.EmbeddedFimContextWindow = source.EmbeddedFimContextWindow;
         destination.EmbeddedFimPreferVulkan = source.EmbeddedFimPreferVulkan;
         destination.EmbeddedFimGpuLayers = source.EmbeddedFimGpuLayers;
+        destination.EmbeddedFimCtxSize = source.EmbeddedFimCtxSize;
+        destination.LlamaServerPreferVulkan = source.LlamaServerPreferVulkan;
         destination.EmbeddedFimAcceptedLicenseModelIds = source.EmbeddedFimAcceptedLicenseModelIds?.ToList() ?? [];
         destination.EmbeddedFimAutoPresetApplied = source.EmbeddedFimAutoPresetApplied;
     }

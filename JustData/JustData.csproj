@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
@@ -70,12 +70,24 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" />
 		<PackageReference Include="DockPanelSuite" />
 		<PackageReference Include="DockPanelSuite.ThemeVS2015" />
+		<PackageReference Include="Microsoft.Web.WebView2" />
+		<PackageReference Include="Markdig" />
+	</ItemGroup>
+
+	<ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' == 'true'">
+		<ProjectReference Include="$(JustyBaseLocalAiProject)" />
+		<ProjectReference Include="$(JustyBaseLocalAiEmbeddedProject)" />
+	</ItemGroup>
+
+	<ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' != 'true'">
+		<PackageReference Include="JustyBase.Ai" />
+		<PackageReference Include="JustyBase.Ai.Embedded" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<ProjectReference Include="..\JustData.Application\JustData.Application.csproj" />
 		<ProjectReference Include="..\JustData.ViewModels\JustData.ViewModels.csproj" />
-		<ProjectReference Include="..\JustyBase.Ai.Fim\JustyBase.Ai.Fim.csproj" />
+
 		<ProjectReference Include="..\App.Data.Netezza\App.Data.Netezza.csproj" />
 		<ProjectReference Include="..\App.Data.DB2\App.Data.DB2.csproj" Condition="'$(IncludeDB2)' == 'true'" />
 		<ProjectReference Include="..\JustyBaseLegacy.AdditionalForms\JustyBaseLegacy.AdditionalForms.csproj" />

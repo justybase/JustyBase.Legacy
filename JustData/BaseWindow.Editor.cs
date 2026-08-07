@@ -624,7 +624,8 @@ namespace JustyBaseLegacy.UI
                     _colorTheme,
                     _netezzaAutocompleteState,
                     _fimModelCatalog,
-                    _fimModelBootstrap);
+                    _fimModelBootstrap,
+                    _chatCatalog);
                 return;
             }
 
@@ -639,7 +640,8 @@ namespace JustyBaseLegacy.UI
                 _colorTheme,
                 _netezzaAutocompleteState,
                 fimCatalog: _fimModelCatalog,
-                fimBootstrap: _fimModelBootstrap);
+                fimBootstrap: _fimModelBootstrap,
+                chatCatalog: _chatCatalog);
             pr.ShowDialog();
         }
 

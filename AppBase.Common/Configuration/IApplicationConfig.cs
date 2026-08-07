@@ -100,8 +100,34 @@ public interface IApplicationConfig : IColorConfig, IEditorConfig
     string EmbeddedFimContextWindow { get; set; }
     bool EmbeddedFimPreferVulkan { get; set; }
     int EmbeddedFimGpuLayers { get; set; }
+    int EmbeddedFimCtxSize { get; set; }
     List<string> EmbeddedFimAcceptedLicenseModelIds { get; set; }
     bool EmbeddedFimAutoPresetApplied { get; set; }
+
+    // AI Chat (shared JustyBase.Ai pipeline)
+    bool EnableAiChat { get; set; }
+    List<JustyBase.Ai.Models.ChatSession> ChatSessions { get; set; }
+    string AiChatBackendId { get; set; }
+    string AiChatOpenAiCompatibleEndpoint { get; set; }
+    string? AiChatOpenAiCompatibleApiKey { get; set; }
+    string AiChatDefaultModel { get; set; }
+    string AiChatDefaultReasoningEffort { get; set; }
+    string AiChatDefaultMode { get; set; }
+    bool AiChatAutoConnect { get; set; }
+    int AiChatHistoryLimit { get; set; }
+    string AiChatSystemPromptOverride { get; set; }
+    double AiChatTemperature { get; set; }
+    int AiChatMaxTokens { get; set; }
+    int AiChatRequestTimeoutMs { get; set; }
+    int AiChatMaxRetries { get; set; }
+    string AiChatPreset { get; set; }
+    bool AiChatPresetIsCustom { get; set; }
+    bool EnableEmbeddedChatAi { get; set; }
+    string EmbeddedChatModelId { get; set; }
+    int EmbeddedChatGpuLayers { get; set; }
+    int EmbeddedChatCtxSize { get; set; }
+    List<string> EmbeddedChatAcceptedLicenseModelIds { get; set; }
+    bool LlamaServerPreferVulkan { get; set; }
 
     public Dictionary<string, Dictionary<int, DatabaseInfo>> CachedDatabaseDictionary { get; set; }
     public void MakeChangesInWrongConfigValues();

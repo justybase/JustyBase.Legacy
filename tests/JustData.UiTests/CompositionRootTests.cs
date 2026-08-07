@@ -56,6 +56,9 @@ public sealed class CompositionRootTests
         var firstSnippetContext = firstScope.ServiceProvider.GetRequiredService<ISnippetInitializationContext>();
         var firstTabNameProvider = firstScope.ServiceProvider.GetRequiredService<ITabNameProvider>();
         var firstDdlProvider = firstScope.ServiceProvider.GetRequiredService<INetezzaDdlCodeProvider>();
+        var firstChatViewModel = firstScope.ServiceProvider.GetRequiredService<JustData.ViewModels.Ai.ChatViewModel>();
+        var firstChatService = firstScope.ServiceProvider.GetRequiredService<JustyBase.Ai.Services.ICopilotChatService>();
+        var firstChatSettings = firstScope.ServiceProvider.GetRequiredService<JustyBase.Ai.Ports.IChatSettingsStore>();
 
         firstScope.Dispose();
         Assert.Throws<ObjectDisposedException>(() => firstFileWatch.Watch([], _ => { }));
@@ -86,5 +89,25 @@ public sealed class CompositionRootTests
         Assert.NotNull(firstObjectExplorer);
         Assert.NotNull(firstVariables);
         Assert.NotNull(firstImportOperation);
+        Assert.NotNull(firstChatViewModel);
+        Assert.NotNull(firstChatService);
+        Assert.NotNull(firstChatSettings);
+
+        using IServiceScope windowScope = provider.CreateScope();
+        // BaseWindow takes the ChatViewModel as a constructor dependency; the
+        // chat dispatcher resolves the window lazily, so this must not cycle.
+        // A headless run may fail inside WinForms InitializeComponent — but the
+        // DI graph itself (all chat services + the window parameters) must resolve.
+        try
+        {
+            _ = windowScope.ServiceProvider.GetRequiredService<BaseWindow>();
+        }
+        catch (Exception resolutionFailure)
+        {
+            Assert.DoesNotContain(
+                "circular dependency",
+                resolutionFailure.ToString(),
+                StringComparison.OrdinalIgnoreCase);
+        }
     }
 }

@@ -17,10 +17,12 @@
 
   <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' == 'true'">
     <ProjectReference Include="$(JustyBaseLocalImportExportProject)" />
+    <ProjectReference Include="$(JustyBaseLocalAiProject)" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' != 'true'">
     <PackageReference Include="JustyBase.ImportExport" />
+    <PackageReference Include="JustyBase.Ai" />
   </ItemGroup>
 
   <PropertyGroup>

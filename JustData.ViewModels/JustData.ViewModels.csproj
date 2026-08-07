@@ -16,8 +16,10 @@
   </ItemGroup>
   <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' == 'true'">
     <ProjectReference Include="$(JustyBaseLocalNetezzaSqlParserProject)" />
+    <ProjectReference Include="$(JustyBaseLocalAiProject)" />
   </ItemGroup>
   <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' != 'true'">
     <PackageReference Include="JustyBase.NetezzaSqlParser" />
+    <PackageReference Include="JustyBase.Ai" />
   </ItemGroup>
 </Project>

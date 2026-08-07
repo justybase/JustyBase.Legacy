@@ -32,10 +32,12 @@ using JustyBaseLegacy.UI.Editor;
 using JustyBaseLegacy.UI.Windowing;
 using JustyBaseLegacy.UI.Sql;
 using JustData.Application.History;
-using JustData.Application.Git;
+using JustyBase.Ai.Git;
+using JustyBase.Core.Git;
 using JustData.ViewModels.Git;
 using JustyBaseLegacy.UI.Fim;
-using JustyBaseLegacy.UI.Git;
+using JustyBaseLegacy.UI.Ai;
+
 using JustyBaseLegacy.UI.Configuration;
 using JustyBase.Core.Database;
 using Microsoft.Extensions.DependencyInjection;
@@ -141,8 +143,6 @@ public static class Program
 
             // Synchronous disposal on the STA thread avoids cross-thread
             // OLE/STA errors from DockPanel Suite and other WinForms controls.
-            // LlamaSharpCompletionProvider now implements IDisposable (no-op)
-            // so the DI container can dispose it synchronously.
             if (provider is not null)
             {
                 try { provider.Dispose(); }
@@ -218,6 +218,7 @@ public static class Program
         services.AddScoped<FilesViewModel>();
         services.AddSingleton<IGitService, SystemGitService>();
         services.AddEmbeddedFimCompletion();
+        services.AddAiChatServices();
         services.AddScoped<GitViewModel>();
         services.AddScoped<ISqlExecutionSessionRegistry, SqlExecutionSessionRegistry>();
         services.AddScoped<IEditorCatalogState, EditorCatalogState>();
@@ -270,7 +271,7 @@ public static class Program
         services.AddSingleton<ICodeActionProvider, CodeActionProvider>();
         services.AddSingleton<ISqlPreprocessingService, SqlPreprocessingService>();
         services.AddSingleton<ISpecialCommandService, SpecialCommandService>();
-        services.AddSingleton<ISqlRiskAnalysisService, SqlRiskAnalysisService>();
+        services.AddSingleton<JustyBase.Core.Risk.SqlRiskAnalysisService>();
         services.AddSingleton<SqlExecutionRiskGate>();
         services.AddSingleton<AppBase.Data.Completion.NetezzaSqlCompletionServices>();
         services.AddSingleton<AppBase.Data.Completion.LegacySqlAuthoringServices>();

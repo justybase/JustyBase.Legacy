@@ -1,4 +1,4 @@
-﻿using AppBase.Common;
+using AppBase.Common;
 using AppBase.Common.Configuration;
 using AppBase.Common.Interfaces;
 using AppBase.Data;
@@ -40,9 +40,12 @@ namespace JustyBaseLegacy.UI
         private readonly PreferencesViewModel _settingsViewModel;
         private SnippetSettings _pendingSnippets = new();
         private bool _specialColoringHandlerAttached;
-        private readonly JustyBase.Ai.Fim.Download.IFimModelCatalog? _fimCatalog;
-        private readonly JustyBaseLegacy.UI.Fim.IFimModelBootstrapService? _fimBootstrap;
+        private readonly JustyBase.Ai.Embedded.Download.IModelCatalog? _fimCatalog;
+        private readonly JustyBase.Ai.Embedded.Server.IFimModelBootstrapService? _fimBootstrap;
         private EmbeddedFimPreferencesPanel? _embeddedFimPanel;
+        private AiChatPreferencesPanel? _aiChatPanel;
+        private TabPage? _tabAiChat;
+        private readonly JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? _chatCatalog;
 
         public PreferencesForm(Action repaintApplication, Action saveManySqlToDisk,
             IApplicationSettingsContext applicationSettingsContext,
@@ -53,8 +56,9 @@ namespace JustyBaseLegacy.UI
             IColorTheme colorTheme,
             INetezzaAutocompleteState netezzaAutocompleteState,
             PreferencesViewModel? settingsViewModel = null,
-            JustyBase.Ai.Fim.Download.IFimModelCatalog? fimCatalog = null,
-            JustyBaseLegacy.UI.Fim.IFimModelBootstrapService? fimBootstrap = null)
+            JustyBase.Ai.Embedded.Download.IModelCatalog? fimCatalog = null,
+            JustyBase.Ai.Embedded.Server.IFimModelBootstrapService? fimBootstrap = null,
+            JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null)
         {
             _applicationSettingsContext = applicationSettingsContext ?? throw new ArgumentNullException(nameof(applicationSettingsContext));
             _netezzaAutocompleteState = netezzaAutocompleteState ?? throw new ArgumentNullException(nameof(netezzaAutocompleteState));
@@ -67,6 +71,7 @@ namespace JustyBaseLegacy.UI
             _config = _applicationSettingsContext.Config;
             _fimCatalog = fimCatalog;
             _fimBootstrap = fimBootstrap;
+            _chatCatalog = chatCatalog;
             _themePreviewAdapter = new WinFormsSettingsThemePreviewAdapter(
                 _applicationSettingsContext,
                 _repaintApplication)
@@ -82,6 +87,7 @@ namespace JustyBaseLegacy.UI
             _colorize = colorTheme;
             BuildModernLayout();
             EnsureEmbeddedFimPanel();
+            EnsureAiChatPanel();
             string lg = System.Globalization.CultureInfo.CurrentCulture.TwoLetterISOLanguageName;
 
             startupPathsDgv.Visible = true;
@@ -133,6 +139,21 @@ namespace JustyBaseLegacy.UI
             };
             _embeddedFimPanel = panel;
             _tabEmbeddedFim.Controls.Add(panel);
+        }
+
+        private void EnsureAiChatPanel()
+        {
+            if (_tabAiChat is null)
+                return;
+            if (_tabAiChat.Controls.Count > 0)
+                return;
+
+            var panel = new AiChatPreferencesPanel(_applicationSettingsContext, _chatCatalog)
+            {
+                Dock = DockStyle.Fill
+            };
+            _aiChatPanel = panel;
+            _tabAiChat.Controls.Add(panel);
         }
 
         internal void PrepareForDocumentHost()
@@ -810,6 +831,7 @@ namespace JustyBaseLegacy.UI
         private void SyncViewModelFromLegacyBuffer()
         {
             _embeddedFimPanel?.ApplyCurrentSettingsTo(_config);
+            _aiChatPanel?.SaveFromUi();
             _settingsViewModel.ReplaceDraft(LegacyApplicationSettingsMapper.ToSnapshot(_config, _pendingSnippets).ToDraft());
         }
 
