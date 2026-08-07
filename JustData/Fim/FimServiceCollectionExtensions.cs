@@ -26,6 +26,7 @@ public static class FimServiceCollectionExtensions
 
         // GGUF catalog + store (shared llama-server model layer).
         collection.AddSingleton<FimModelCatalog>();
+        collection.AddSingleton<IModelCatalog>(sp => sp.GetRequiredService<FimModelCatalog>());
         collection.AddKeyedSingleton<IModelStore>(FimStoreKey, (sp, _) =>
         {
             var catalog = sp.GetRequiredService<FimModelCatalog>();
