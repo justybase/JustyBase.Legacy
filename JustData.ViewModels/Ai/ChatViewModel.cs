@@ -18,6 +18,7 @@ public sealed partial class ChatViewModel : ObservableObject
     private readonly IChatSettingsStore _settingsStore;
     private readonly IUiDispatcher _dispatcher;
     private readonly ISimpleLogger _logger;
+    private readonly SemaphoreSlim _initializeGate = new(1, 1);
     private bool _synchronizingSessionSelection;
 
     public ChatViewModel(
@@ -108,6 +109,10 @@ public sealed partial class ChatViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsStreaming { get; set; }
 
+    /// <summary>True while the AI provider is connecting for the first time (slow embedded model launch).</summary>
+    [ObservableProperty]
+    public partial bool IsInitializing { get; set; }
+
     [ObservableProperty]
     public partial string StatusMessage { get; set; } = "Initializing...";
 
@@ -167,30 +172,42 @@ public sealed partial class ChatViewModel : ObservableObject
     [RelayCommand]
     private async Task ConnectAsync()
     {
-        RaiseUi(() => StatusMessage = "Connecting to AI provider...");
-        var settings = _settingsStore.Settings;
-        var configured = settings.AiChatBackendId;
-        var hasConfigured = !string.IsNullOrWhiteSpace(configured)
-            && _chatService.AvailableBackends.Any(b => b.Id.Equals(configured, StringComparison.OrdinalIgnoreCase));
-
-        var success = hasConfigured
-            ? await _chatService.SwitchBackendAsync(configured)
-            : await _chatService.InitializeAsync();
-
         RaiseUi(() =>
         {
-            IsConnected = success;
-            IsCodexBackend = success
-                && string.Equals(_chatService.ActiveBackendId, "codex", StringComparison.OrdinalIgnoreCase);
-            IsEmbeddedBackend = success
-                && string.Equals(_chatService.ActiveBackendId, "embedded", StringComparison.OrdinalIgnoreCase);
-            StatusMessage = success ? "Connected" : $"Not connected: {_chatService.ConnectionError}";
+            IsInitializing = true;
+            StatusMessage = "Preparing the AI provider — first launch of the embedded model may take a few seconds…";
         });
-        RefreshCodexAccountState();
 
-        if (success)
+        try
         {
-            await RefreshModelsAsync();
+            var settings = _settingsStore.Settings;
+            var configured = settings.AiChatBackendId;
+            var hasConfigured = !string.IsNullOrWhiteSpace(configured)
+                && _chatService.AvailableBackends.Any(b => b.Id.Equals(configured, StringComparison.OrdinalIgnoreCase));
+
+            var success = hasConfigured
+                ? await _chatService.SwitchBackendAsync(configured)
+                : await _chatService.InitializeAsync();
+
+            RaiseUi(() =>
+            {
+                IsConnected = success;
+                IsCodexBackend = success
+                    && string.Equals(_chatService.ActiveBackendId, "codex", StringComparison.OrdinalIgnoreCase);
+                IsEmbeddedBackend = success
+                    && string.Equals(_chatService.ActiveBackendId, "embedded", StringComparison.OrdinalIgnoreCase);
+                StatusMessage = success ? "Connected" : $"Not connected: {_chatService.ConnectionError}";
+            });
+            RefreshCodexAccountState();
+
+            if (success)
+            {
+                await RefreshModelsAsync();
+            }
+        }
+        finally
+        {
+            RaiseUi(() => IsInitializing = false);
         }
     }
 
@@ -240,7 +257,7 @@ public sealed partial class ChatViewModel : ObservableObject
     [RelayCommand]
     private async Task SendAsync()
     {
-        if (IsStreaming)
+        if (IsStreaming || IsInitializing)
             return;
 
         if (string.IsNullOrWhiteSpace(InputText) && PendingAttachments.Count == 0)
@@ -386,8 +403,21 @@ public sealed partial class ChatViewModel : ObservableObject
         if (IsConnected)
             return true;
 
-        await ConnectAsync();
-        return IsConnected;
+        // Serialize lazy initialization so repeated sends during a slow first launch
+        // (e.g. starting the embedded llama-server) do not spawn parallel connects.
+        await _initializeGate.WaitAsync();
+        try
+        {
+            if (IsConnected)
+                return true;
+
+            await ConnectAsync();
+            return IsConnected;
+        }
+        finally
+        {
+            _initializeGate.Release();
+        }
     }
 
     private async Task RefreshModelsAsync()

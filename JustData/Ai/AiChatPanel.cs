@@ -54,6 +54,7 @@ public sealed class AiChatPanel : UserControl
         _viewModel.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(ChatViewModel.IsStreaming)
+                or nameof(ChatViewModel.IsInitializing)
                 or nameof(ChatViewModel.StatusMessage)
                 or nameof(ChatViewModel.IsConnected)
                 or nameof(ChatViewModel.IsCodexSignedIn)
@@ -389,6 +390,12 @@ public sealed class AiChatPanel : UserControl
         _statusLabel!.Text = _viewModel.StatusMessage;
         _accountLabel!.Text = _viewModel.CodexAccountLabel;
         _codexButton!.Text = _viewModel.IsCodexSignedIn ? "Codex sign out" : "Codex sign in";
+
+        // While the provider is connecting (first embedded launch), the composer must be
+        // disabled so repeated Enter presses cannot queue ghost sends.
+        var inputDisabled = _viewModel.IsInitializing;
+        _inputBox!.Enabled = !inputDisabled;
+        _sendButton!.Enabled = !inputDisabled;
 
         // Backends.
         if (_backendCombo!.Items.Count == 0)
