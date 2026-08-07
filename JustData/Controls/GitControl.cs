@@ -1,6 +1,7 @@
 using AppBase.Common;
 using DatabaseDataGridView.WinForms.Coloring;
-using JustData.Application.Git;
+using JustyBase.Ai.Git;
+using JustyBase.Core.Git;
 using JustData.ViewModels.Git;
 using System.ComponentModel;
 using System.Drawing;
@@ -15,7 +16,7 @@ public partial class GitControl : UserControl
     private readonly IColorTheme? _colorTheme;
     private readonly Action<string> _openFileHandler;
     private readonly Action<string> _errorHandler;
-    private readonly Action<JustData.Application.Git.GitFileContents> _diffPreviewHandler;
+    private readonly Action<JustyBase.Core.Git.GitFileContents> _diffPreviewHandler;
     private bool _suppressRepoCombo;
     private bool _applyingDpi;
     private Font? _branchFont;

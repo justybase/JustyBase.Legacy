@@ -1,3 +1,5 @@
+using JustyBase.Core.Risk;
+
 namespace JustData.Application.Sql;
 
 /// <summary>Host confirmation seam used by SQL risk checks.</summary>
@@ -7,9 +9,9 @@ public interface ISqlRiskConfirmation
     bool Confirm(SqlRisk risk);
 }
 
-public sealed class SqlExecutionRiskGate(ISqlRiskAnalysisService analysis)
+public sealed class SqlExecutionRiskGate(SqlRiskAnalysisService analysis)
 {
-    private readonly ISqlRiskAnalysisService _analysis = analysis ?? throw new ArgumentNullException(nameof(analysis));
+    private readonly SqlRiskAnalysisService _analysis = analysis ?? throw new ArgumentNullException(nameof(analysis));
 
     public bool AllowExecution(
         string sql,

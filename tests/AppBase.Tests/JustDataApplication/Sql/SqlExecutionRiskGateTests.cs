@@ -1,4 +1,5 @@
 using JustData.Application.Sql;
+using JustyBase.Core.Risk;
 
 namespace AppBase.Tests.JustDataApplication.Sql;
 

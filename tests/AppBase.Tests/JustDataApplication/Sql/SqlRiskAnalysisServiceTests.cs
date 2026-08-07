@@ -1,4 +1,5 @@
 using JustData.Application.Sql;
+using JustyBase.Core.Risk;
 
 namespace AppBase.Tests.JustDataApplication.Sql;
 
@@ -299,16 +300,6 @@ public sealed class SqlRiskAnalysisServiceTests
         Assert.Equal(0, (int)SqlRiskKind.UnsafeUpdateDelete);
         Assert.Equal(1, (int)SqlRiskKind.MissingDistribute);
         Assert.Equal(2, (int)SqlRiskKind.SelectInto);
-    }
-
-    // ──────────────────────────────────────────────
-    // ISqlRiskAnalysisService contract
-    // ──────────────────────────────────────────────
-
-    [Fact]
-    public void Service_implements_interface()
-    {
-        Assert.IsAssignableFrom<ISqlRiskAnalysisService>(Service);
     }
 
     [Fact]

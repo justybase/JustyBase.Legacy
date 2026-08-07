@@ -1,5 +1,6 @@
 using AppBase.Common;
 using JustData.Application.Sql;
+using JustyBase.Core.Risk;
 using System.Windows.Forms;
 
 namespace JustyBaseLegacy.UI.Sql;
