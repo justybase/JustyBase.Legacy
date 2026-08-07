@@ -81,7 +81,20 @@ public static class FimServiceCollectionExtensions
 
         // FCTB editor host + shared llama-server git commit message AI.
         collection.AddSingleton<FimEditorHost>();
-        collection.AddSingleton<IGitCommitMessageAiService, LlamaServerGitCommitMessageAiService>();
+        collection.AddSingleton<IGitCommitMessageAiService>(sp =>
+        {
+            var settings = sp.GetRequiredService<IFimSettingsStore>();
+            if (!settings.Settings.EnableFimAi)
+            {
+                return new UnavailableGitCommitMessageAiService();
+            }
+
+            var store = sp.GetRequiredKeyedService<IModelStore>(FimStoreKey);
+            return new LlamaServerGitCommitMessageAiService(
+                sp.GetRequiredService<LlamaServerManager>(),
+                store,
+                settings);
+        });
 
         return collection;
     }
