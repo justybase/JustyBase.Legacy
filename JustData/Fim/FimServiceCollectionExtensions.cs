@@ -105,9 +105,10 @@ public static class FimServiceCollectionExtensions
         if (!settings.FimPreferVulkan)
             return 0;
 
+        // Negative = auto: llama-server offloads as many layers as fit in VRAM.
         var layers = settings.FimGpuLayers;
         if (layers < 0)
-            return 99;
+            return -1;
 
         return Math.Clamp(layers, 0, 999);
     }

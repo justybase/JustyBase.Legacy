@@ -157,7 +157,7 @@ public sealed class EmbeddedFimPreferencesPanel : UserControl
             _nudDebounce.Value = Math.Clamp(c.EmbeddedFimDebounceMs > 0 ? c.EmbeddedFimDebounceMs : 600, 250, 3000);
             _nudMaxTokens.Value = Math.Clamp(c.EmbeddedFimMaxTokens, 20, 200);
             _nudPromptTokens.Value = Math.Clamp(c.EmbeddedFimMaxPromptTokens, 256, 8192);
-            _nudGpuLayers.Value = Math.Clamp(c.EmbeddedFimGpuLayers, 0, 999);
+            _nudGpuLayers.Value = Math.Clamp(c.EmbeddedFimGpuLayers < 0 ? 99 : c.EmbeddedFimGpuLayers, 0, 999);
             _nudCtxSize.Value = Math.Clamp(c.EmbeddedFimCtxSize, 512, 131072);
             _chkVulkan.Checked = c.LlamaServerPreferVulkan;
             _lblStatus.Text = _bootstrap.SelectedModelDiskStatus + Environment.NewLine + "Models: " + _bootstrap.ModelsDirectory;
