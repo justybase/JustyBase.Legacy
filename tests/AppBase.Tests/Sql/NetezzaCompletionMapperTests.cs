@@ -11,6 +11,7 @@ using JustyBase.NetezzaSqlParser.Dialects;
 using JustyBase.NetezzaSqlParser.Visitor;
 using NSubstitute;
 using FastColoredTextBoxNS;
+using JustyBase.Core.Database;
 
 namespace AppBase.Tests.Sql;
 
@@ -429,5 +430,17 @@ public sealed class NetezzaCompletionMapperTests
         Assert.Equal("Product identifier", item.DescriptionText);
         Assert.Equal("INTEGER", item.ToolTipTitle);
         Assert.Equal("Product identifier", item.ToolTipText);
+    }
+
+    [Fact]
+    public void MapWordListItem_PreservesNeutralLabelAndMetadata()
+    {
+        var item = FctbCompletionMapper.MapWordListItem(
+            new SqlWordListItem("ADMIN.ORDERS", SqlWordListKind.Table, "Table", "Orders table"));
+
+        Assert.Equal("ADMIN.ORDERS", item.GetTextForReplace());
+        Assert.Equal((int)CompletionIconKind.Table, item.ImageIndex);
+        Assert.Equal("Table", item.DetailText);
+        Assert.Equal("Orders table", item.DescriptionText);
     }
 }

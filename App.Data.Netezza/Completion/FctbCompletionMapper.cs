@@ -1,5 +1,6 @@
 using AppBase.Common;
 using FastColoredTextBoxNS;
+using JustyBase.Core.Database;
 using JustyBase.NetezzaSqlParser.Completion;
 using JustyBase.Netezza.Models;
 using JustyBase.NetezzaSqlParser.Visitor;
@@ -155,6 +156,42 @@ public static class FctbCompletionMapper
             foreach (var item in MapSingle(ci, fragmentText, schema, metadata, sql))
                 yield return item;
         }
+    }
+
+    /// <summary>Maps a neutral live-database word-list item without changing its insert text.</summary>
+    public static AutocompleteItem MapWordListItem(SqlWordListItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+
+        CompletionIconKind icon = item.Kind switch
+        {
+            SqlWordListKind.Table => CompletionIconKind.Table,
+            SqlWordListKind.View => CompletionIconKind.View,
+            SqlWordListKind.Column => CompletionIconKind.Column,
+            SqlWordListKind.Database => CompletionIconKind.Database,
+            SqlWordListKind.Schema => CompletionIconKind.Schema,
+            SqlWordListKind.Function or SqlWordListKind.Procedure => CompletionIconKind.Function,
+            SqlWordListKind.With => CompletionIconKind.Cte,
+            SqlWordListKind.TempTable => CompletionIconKind.Table,
+            SqlWordListKind.Subquery => CompletionIconKind.Reference,
+            SqlWordListKind.Alias => CompletionIconKind.Alias,
+            SqlWordListKind.Snippet => CompletionIconKind.Snippet,
+            SqlWordListKind.DataType => CompletionIconKind.DataType,
+            SqlWordListKind.Variable => CompletionIconKind.Variable,
+            _ => CompletionIconKind.Keyword
+        };
+
+        AutocompleteItem result = icon is CompletionIconKind.Keyword
+            or CompletionIconKind.DataType
+            or CompletionIconKind.Variable
+            ? new AutocompleteItem(item.Label)
+            : new MethodAutocompleteItem2(item.Label);
+
+        return CompletionItemAppearance.Apply(
+            result,
+            icon,
+            item.Detail ?? item.Kind.ToString(),
+            item.Description);
     }
 
     private static IEnumerable<AutocompleteItem> MapSingle(

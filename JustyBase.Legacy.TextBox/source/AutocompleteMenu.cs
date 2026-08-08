@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
+using JustyBase.NetezzaSqlParser.Completion;
 using System.Drawing;
 using System.Drawing.Text;
 using System.ComponentModel;
@@ -432,6 +433,16 @@ namespace FastColoredTextBoxNS
         {
             Menu.LastAutocompleteForced = forced;
             if (!Menu.Enabled)
+            {
+                Menu.Close();
+                return;
+            }
+
+            // A passive completion request after whitespace must stay silent;
+            // Ctrl+Space remains the explicit forced path.
+            if (!forced
+                && tb.SelectionStart > 0
+                && CompletionGate.ShouldSuppressTrigger(tb.Text[tb.SelectionStart - 1]))
             {
                 Menu.Close();
                 return;

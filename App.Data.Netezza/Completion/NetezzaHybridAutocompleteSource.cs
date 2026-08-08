@@ -8,6 +8,7 @@ using AppBase.Data.Core.Models;
 using FastColoredTextBoxNS;
 using FastColoredTextBoxNS.Helpers;
 using JustData.Application.Sql;
+using JustyBase.Core.Database;
 using JustyBase.Netezza.Completion;
 using JustyBase.NetezzaSqlParser.Authoring;
 using JustyBase.NetezzaSqlParser.Completion;
@@ -30,12 +31,12 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
     private readonly IConnectionSessionRegistry _connectionSessions;
     private readonly INetezzaSchemaTableCatalog _schemaTables;
     private readonly NetezzaSqlCompletionServices _completionServices;
-    private NzCompletionEngine _completionEngine;
     private SqlDialect _dialect;
     private EditorDocumentId _documentId;
     private readonly ISchemaProvider _schemaProvider;
     private readonly LegacySnippetsProvider _snippetsProvider;
     private readonly LegacyDbCompletionFallback _dbFallback;
+    private readonly ISqlDbWordListProvider _wordListProvider;
     private readonly INetezzaAutocompleteState _state;
     private readonly Func<string> _connectionNameProvider;
     private readonly Func<string> _databaseNameProvider;
@@ -55,7 +56,8 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         INetezzaAutocompleteState state,
         EditorDocumentId? documentId = null,
         Func<string>? connectionNameProvider = null,
-        Func<string>? databaseNameProvider = null)
+        Func<string>? databaseNameProvider = null,
+        ISqlDbWordListProvider? wordListProvider = null)
     {
         _menu = menu;
         _completionContext = completionContext;
@@ -77,10 +79,14 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
             generalDbService,
             _schemaTables,
             _connectionSessions);
+        _wordListProvider = wordListProvider ?? new LegacyDbWordListProvider(
+            completionContext,
+            generalDbService,
+            _schemaTables,
+            _connectionSessions);
 
         _documentId = documentId ?? EditorDocumentId.New();
         _dialect = ResolveDialect(_connectionNameProvider());
-        _completionEngine = completionServices.CreateEngine(_documentId.ToString(), _dialect);
     }
 
     public void SetDocumentId(EditorDocumentId documentId)
@@ -89,7 +95,6 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
             return;
         _completionServices.ParsingCoordinator.Release(_documentId.ToString());
         _documentId = documentId;
-        _completionEngine = _completionServices.CreateEngine(_documentId.ToString(), _dialect);
     }
 
     public void ResetCache() => _dbFallback.ResetCache();
@@ -140,7 +145,6 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         _dialect = ResolveDialect(activeConnectionName);
         if (_dialect != previousDialect)
             _completionServices.InvalidateSchema();
-        _completionEngine = _completionServices.CreateEngine(_documentId.ToString(), _dialect);
 
         if (_dialect is not (SqlDialect.Netezza or SqlDialect.Db2))
         {
@@ -230,7 +234,13 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         // shared DocumentParsingCoordinator. Do not cache the mapped FCTB list:
         // AliasHints and HintWithTable are intentionally mutated asynchronously
         // by AutocompleteClass and must be reflected immediately.
-        foreach (var item in BuildSqlCompletions(fragmentText, sql, cursorOffset, tb.LinesCount, activeDatabaseName))
+        foreach (var item in BuildSqlCompletions(
+                     fragmentText,
+                     sql,
+                     cursorOffset,
+                     tb.LinesCount,
+                     activeConnectionName,
+                     activeDatabaseName))
             yield return item;
     }
 
@@ -239,6 +249,7 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         string sql,
         int cursorOffset,
         int lineCount,
+        string activeConnectionName,
         string activeDatabaseName)
     {
         var ddTables = FctbCompletionMapper.MapDatabaseDoubleDotTables(
@@ -273,8 +284,26 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
             AliasHints.Sort(NetezzaLegacyCompletionHelpers.SortMethodAliases(_keyValuePairsForAutocomplete));
         }
 
-        (string engineSql, int engineCursor) = SliceSqlForEngine(sql, cursorOffset, largeDoc, forced);
-        var engineItems = _completionEngine.GetCompletions(engineSql, engineCursor).ToList();
+        var orchestration = CompletionOrchestrator.GetCompletions(
+            sql,
+            cursorOffset,
+            _schemaProvider,
+            _dialect,
+            _dialect == SqlDialect.Netezza ? _wordListProvider : null,
+            _dialect == SqlDialect.Netezza
+                ? (engineItems, candidateSql) =>
+                    SqlCompletionMergePolicy.ShouldRunLegacyPath(engineItems, candidateSql)
+                    || (text.Contains('.') && engineItems.Count == 0)
+                : null,
+            _completionServices.ParsingCoordinator,
+            _documentId.ToString(),
+            activeConnectionName,
+            activeDatabaseName,
+            new CompletionOrchestrationOptions { ForcedAutocomplete = forced })
+            .GetAwaiter()
+            .GetResult();
+
+        var engineItems = orchestration.EngineItems;
         var mappedEngineItems = FctbCompletionMapper.MapEngineItems(
             engineItems, text, _schemaProvider, _completionServices.MetadataSnapshot, sql).ToList();
         var emittedLabels = BuildEmittedLabelSet(engineItems, text);
@@ -282,20 +311,12 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         foreach (var item in mappedEngineItems)
             yield return item;
 
-        bool needsLegacyFallback = _dialect == SqlDialect.Netezza
-            && (SqlCompletionMergePolicy.ShouldRunLegacyPath(engineItems, sql)
-                || (text.Contains('.') && mappedEngineItems.Count == 0));
-
-        if (needsLegacyFallback)
+        foreach (var wordListItem in orchestration.WordListItems)
         {
-            var seen = new HashSet<string>(emittedLabels, StringComparer.OrdinalIgnoreCase);
-            foreach (var item in _dbFallback.GetCompletions(text))
-            {
-                var label = item.ToString();
-                if (!seen.Add(label))
-                    continue;
-                yield return item;
-            }
+            var item = FctbCompletionMapper.MapWordListItem(wordListItem);
+            if (!emittedLabels.Add(item.GetTextForReplace()))
+                continue;
+            yield return item;
         }
 
         foreach (var item in YieldSupplementalAliasHints(engineItems, emittedLabels))
