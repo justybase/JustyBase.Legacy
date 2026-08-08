@@ -21,32 +21,52 @@ public static class FimServiceCollectionExtensions
 
     public static IServiceCollection AddEmbeddedFimCompletion(this IServiceCollection collection)
     {
+        // Apple Silicon runs the native MLX backend (uv + mlx_lm.server); everything else uses
+        // the bundled llama.cpp llama-server with GGUF models.
+        var useMlx = AppleSiliconRuntime.IsSupported;
+
         // Shared FIM settings port.
         collection.AddSingleton<IFimSettingsStore, LegacyFimSettingsStore>();
 
-        // GGUF catalog + store (shared llama-server model layer).
+        // Catalog + store (MLX snapshot on Apple Silicon, GGUF otherwise).
         collection.AddSingleton<FimModelCatalog>();
         collection.AddSingleton<IModelCatalog>(sp => sp.GetRequiredService<FimModelCatalog>());
         collection.AddKeyedSingleton<IModelStore>(FimStoreKey, (sp, _) =>
         {
             var catalog = sp.GetRequiredService<FimModelCatalog>();
             var settings = sp.GetRequiredService<IFimSettingsStore>();
-            return new HuggingFaceModelStore(catalog, () => settings.Settings.FimModelId);
+            return useMlx
+                ? (IModelStore)new HuggingFaceMlxRepoStore(catalog, () => settings.Settings.FimModelId)
+                : new HuggingFaceModelStore(catalog, () => settings.Settings.FimModelId);
         });
 
-        // llama-server binary + subprocess manager (shared with the AI chat backend).
+        // Runtime + subprocess manager (shared with the AI chat backend).
+        if (useMlx)
+        {
+            collection.AddSingleton<MlxServerRuntime>();
+        }
+
         collection.AddSingleton(sp =>
         {
-            var settings = sp.GetRequiredService<IFimSettingsStore>();
-            return new LlamaServerBinaryManager(() => settings.Settings.FimPreferVulkan);
-        });
-        collection.AddSingleton<LlamaServerManager>();
+            if (useMlx)
+            {
+                return new LlamaServerManager(sp.GetRequiredService<MlxServerRuntime>());
+            }
 
-        // FIM provider (llama.cpp native FIM templates).
+            var settings = sp.GetRequiredService<IFimSettingsStore>();
+            return new LlamaServerManager(new LlamaServerBinaryManager(() => settings.Settings.FimPreferVulkan));
+        });
+
+        // FIM provider (MLX /v1/completions on Apple Silicon, llama.cpp native FIM otherwise).
         collection.AddSingleton<ICompletionProvider>(sp =>
         {
             var manager = sp.GetRequiredService<LlamaServerManager>();
             var store = sp.GetRequiredKeyedService<IModelStore>(FimStoreKey);
+            if (useMlx)
+            {
+                return new MlxFimProvider(manager, store);
+            }
+
             var settings = sp.GetRequiredService<IFimSettingsStore>();
             return new LlamaServerFimProvider(
                 manager,
