@@ -26,7 +26,6 @@ public sealed partial class ChatViewModel : ObservableObject
     private CancellationTokenSource? _codexLoginCts;
     private CancellationTokenSource? _backendSwitchCts;
     private int _modelsRefreshVersion;
-    private bool _synchronizingSessionSelection;
     private bool _constructed;
 
     public ChatViewModel(
@@ -614,16 +613,8 @@ public sealed partial class ChatViewModel : ObservableObject
 
     private void RefreshSavedSessions()
     {
-        _synchronizingSessionSelection = true;
-        try
-        {
-            OnPropertyChanged(nameof(SavedSessions));
-            OnPropertyChanged(nameof(CurrentSessionTitle));
-        }
-        finally
-        {
-            _synchronizingSessionSelection = false;
-        }
+        OnPropertyChanged(nameof(SavedSessions));
+        OnPropertyChanged(nameof(CurrentSessionTitle));
     }
 
     private void RefreshCodexAccountState()
