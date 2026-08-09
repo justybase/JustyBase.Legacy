@@ -21,6 +21,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Checkout shared JustyBase libraries
+        uses: actions/checkout@v7
+        with:
+          repository: justybase/JustyBase.NetezzaSql
+          path: JustyBase.NetezzaSql
+
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
         with:
