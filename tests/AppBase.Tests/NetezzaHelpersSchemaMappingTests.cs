@@ -83,6 +83,7 @@ public sealed class NetezzaHelpersSchemaMappingTests
         ((INetezza)nz).GetConnection().Returns(connection);
 
         var registry = Substitute.For<IConnectionSessionRegistry>();
+#pragma warning disable CS8601 // NSubstitute's out-argument matcher is intentionally nullable.
         registry.TryGetValue("CONN1", out Arg.Any<IGeneralDb>())
             .Returns(call =>
             {
@@ -225,6 +226,7 @@ public sealed class NetezzaHelpersSchemaMappingTests
                 call[1] = nz!;
                 return true;
             });
+#pragma warning restore CS8601
 
         bool ok = NetezzaHelpers.InitializeConnectionSchemaData(runtime, registry, schemaCatalog, null, "CONN1");
 
