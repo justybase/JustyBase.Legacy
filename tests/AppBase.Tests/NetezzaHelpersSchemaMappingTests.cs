@@ -86,7 +86,7 @@ public sealed class NetezzaHelpersSchemaMappingTests
         registry.TryGetValue("CONN1", out Arg.Any<IGeneralDb>())
             .Returns(call =>
             {
-                call[1] = nz;
+                call[1] = nz!;
                 return true;
             });
 
@@ -195,7 +195,7 @@ public sealed class NetezzaHelpersSchemaMappingTests
         registry.TryGetValue("CONN1", out Arg.Any<IGeneralDb>())
             .Returns(call =>
             {
-                call[1] = nz;
+                call[1] = nz!;
                 return true;
             });
 
@@ -222,7 +222,7 @@ public sealed class NetezzaHelpersSchemaMappingTests
         registry.TryGetValue("CONN1", out Arg.Any<IGeneralDb>())
             .Returns(call =>
             {
-                call[1] = nz;
+                call[1] = nz!;
                 return true;
             });
 
