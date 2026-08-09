@@ -7,6 +7,9 @@ using JustyBase.Ai.Services;
 
 namespace JustData.ViewModels.Ai;
 
+/// <summary>Backend pair carrying both the machine id and the display name for ComboBox binding.</summary>
+public sealed record ChatBackendOption(string Id, string DisplayName);
+
 /// <summary>
 /// WinForms-host chat view model over the shared <see cref="ChatSessionController"/>.
 /// Pure UI-agnostic layer — the panel binds to its properties and commands.
@@ -19,7 +22,12 @@ public sealed partial class ChatViewModel : ObservableObject
     private readonly IUiDispatcher _dispatcher;
     private readonly ISimpleLogger _logger;
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
+    private readonly SemaphoreSlim _backendSwitchGate = new(1, 1);
+    private CancellationTokenSource? _codexLoginCts;
+    private CancellationTokenSource? _backendSwitchCts;
+    private int _modelsRefreshVersion;
     private bool _synchronizingSessionSelection;
+    private bool _constructed;
 
     public ChatViewModel(
         ChatSessionController controller,
@@ -48,6 +56,7 @@ public sealed partial class ChatViewModel : ObservableObject
         });
         _controller.UserMessageAdded += (_, _) => RaiseUi(() => MessagesChanged?.Invoke());
         _controller.AssistantMessageStarted += (_, _) => RaiseUi(() => MessagesChanged?.Invoke());
+        _controller.AssistantMessageContentChanged += (_, _) => RaiseUi(() => MessagesChanged?.Invoke());
         _controller.AssistantMessageCompleted += (_, _) => RaiseUi(() => MessagesChanged?.Invoke());
         _controller.ToolConfirmationRequested += (_, _) => RaiseUi(() => MessagesChanged?.Invoke());
         _controller.StatusMessageChanged += (_, message) => RaiseUi(() => StatusMessage = message);
@@ -57,9 +66,9 @@ public sealed partial class ChatViewModel : ObservableObject
             AvailableModes.Add(mode);
         }
 
-        foreach (var (_, name) in _chatService.AvailableBackends)
+        foreach (var (id, displayName) in _chatService.AvailableBackends)
         {
-            AvailableBackends.Add(name);
+            AvailableBackends.Add(new ChatBackendOption(id, displayName));
         }
 
         var settings = _settingsStore.Settings;
@@ -74,6 +83,15 @@ public sealed partial class ChatViewModel : ObservableObject
 
         RefreshSavedSessions();
         RefreshCodexAccountState();
+
+        // Probe account/read once at startup so an already-signed-in session is detected
+        // without waiting for the user to click the Codex button.
+        RefreshCodexCommand.Execute(null);
+
+        // The embedded model list is a pure disk probe — populate the dropdown right
+        // away so downloaded models are visible even before the backend connects.
+        _ = RefreshModelsAsync();
+        _constructed = true;
     }
 
     /// <summary>
@@ -91,6 +109,7 @@ public sealed partial class ChatViewModel : ObservableObject
 
     /// <summary>Raised when the message list content needs a UI re-render.</summary>
     public event Action? MessagesChanged;
+    public event Action? AttachmentsChanged;
 
     public List<ChatMessage> Messages => _controller.Messages;
 
@@ -130,7 +149,7 @@ public sealed partial class ChatViewModel : ObservableObject
     [ObservableProperty]
     public partial string SelectedBackendId { get; set; } = "codex";
 
-    public List<string> AvailableBackends { get; } = [];
+    public List<ChatBackendOption> AvailableBackends { get; } = [];
 
     [ObservableProperty]
     public partial string SelectedModel { get; set; } = string.Empty;
@@ -196,7 +215,9 @@ public sealed partial class ChatViewModel : ObservableObject
                     && string.Equals(_chatService.ActiveBackendId, "codex", StringComparison.OrdinalIgnoreCase);
                 IsEmbeddedBackend = success
                     && string.Equals(_chatService.ActiveBackendId, "embedded", StringComparison.OrdinalIgnoreCase);
-                StatusMessage = success ? "Connected" : $"Not connected: {_chatService.ConnectionError}";
+                StatusMessage = success
+                    ? $"Connected to {GetBackendDisplayName(_chatService.ActiveBackendId)}"
+                    : $"Not connected: {_chatService.ConnectionError}";
             });
             RefreshCodexAccountState();
 
@@ -217,16 +238,30 @@ public sealed partial class ChatViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(backendId))
             return;
 
-        RaiseUi(() => StatusMessage = "Switching backend...");
-        var success = await _chatService.SwitchBackendAsync(backendId);
-        RaiseUi(() =>
+        var switchCts = new CancellationTokenSource();
+        var previousSwitchCts = Interlocked.Exchange(ref _backendSwitchCts, switchCts);
+        previousSwitchCts?.Cancel();
+
+        await _backendSwitchGate.WaitAsync();
+        try
         {
+            if (switchCts.IsCancellationRequested)
+                return;
+
+            RaiseUi(() => StatusMessage = "Switching backend...");
+            var success = await _chatService.SwitchBackendAsync(backendId);
+            if (switchCts.IsCancellationRequested)
+                return;
+
             if (success)
             {
                 IsConnected = true;
                 IsCodexBackend = string.Equals(backendId, "codex", StringComparison.OrdinalIgnoreCase);
                 IsEmbeddedBackend = string.Equals(backendId, "embedded", StringComparison.OrdinalIgnoreCase);
-                StatusMessage = "Connected";
+                StatusMessage = $"Connected to {GetBackendDisplayName(backendId)}";
+
+                await RefreshModelsAsync();
+                _settingsStore.Update(s => s.AiChatBackendId = backendId);
             }
             else
             {
@@ -234,21 +269,39 @@ public sealed partial class ChatViewModel : ObservableObject
                 IsCodexBackend = false;
                 IsEmbeddedBackend = false;
                 StatusMessage = $"Failed: {_chatService.ConnectionError}";
+                ClearModelLists();
             }
-        });
 
-        RefreshCodexAccountState();
-        _settingsStore.Update(s => s.AiChatBackendId = backendId);
-
-        if (success)
+            RaiseUi(RefreshCodexAccountState);
+        }
+        catch (OperationCanceledException) when (switchCts.IsCancellationRequested)
         {
-            await RefreshModelsAsync();
+            // A newer backend selection superseded this switch.
+        }
+        catch (Exception ex)
+        {
+            _logger.TrackError(ex, isCrash: false);
+            if (!switchCts.IsCancellationRequested)
+            {
+                IsConnected = false;
+                IsCodexBackend = false;
+                IsEmbeddedBackend = false;
+                StatusMessage = $"Failed: {ex.Message}";
+                ClearModelLists();
+            }
+        }
+        finally
+        {
+            _backendSwitchGate.Release();
+            if (ReferenceEquals(_backendSwitchCts, switchCts))
+                _backendSwitchCts = null;
+            switchCts.Dispose();
         }
     }
 
     partial void OnSelectedBackendIdChanged(string value)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        if (!_constructed || string.IsNullOrWhiteSpace(value))
             return;
 
         _ = SwitchBackendCommand.ExecuteAsync(value);
@@ -273,6 +326,7 @@ public sealed partial class ChatViewModel : ObservableObject
         var attachments = PendingAttachments.ToList();
         PendingAttachments.Clear();
         HasPendingAttachments = false;
+        AttachmentsChanged?.Invoke();
 
         var reasoningEffort = ShowReasoningEffort && !string.IsNullOrWhiteSpace(SelectedReasoningEffort)
             ? SelectedReasoningEffort
@@ -349,6 +403,7 @@ public sealed partial class ChatViewModel : ObservableObject
             IsDirectory = isDirectory
         });
         HasPendingAttachments = PendingAttachments.Count > 0;
+        AttachmentsChanged?.Invoke();
     }
 
     [RelayCommand]
@@ -359,6 +414,7 @@ public sealed partial class ChatViewModel : ObservableObject
 
         PendingAttachments.Remove(attachment);
         HasPendingAttachments = PendingAttachments.Count > 0;
+        AttachmentsChanged?.Invoke();
     }
 
     [RelayCommand]
@@ -372,13 +428,59 @@ public sealed partial class ChatViewModel : ObservableObject
             return;
         }
 
-        StatusMessage = "Finish sign-in in the browser, then click Sign in again to refresh the account.";
-        RefreshCodexAccountState();
+        _codexLoginCts?.Cancel();
+        _codexLoginCts?.Dispose();
+        _codexLoginCts = new CancellationTokenSource();
+        var cts = _codexLoginCts;
+
+        StatusMessage = "Finish sign-in in the browser. Waiting for confirmation...";
+        for (var attempt = 0; attempt < 120 && !cts.IsCancellationRequested; attempt++)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            CodexAccountInfo? account = null;
+            try
+            {
+                account = await _chatService.ReadCodexAccountAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.TrackError(ex, isCrash: false);
+            }
+
+            RaiseUi(RefreshCodexAccountState);
+            if (account?.IsAuthenticated == true)
+            {
+                StatusMessage = "Signed in to ChatGPT.";
+                return;
+            }
+        }
+
+        if (cts.IsCancellationRequested)
+        {
+            StatusMessage = "Codex sign-in was cancelled.";
+        }
+        else
+        {
+            StatusMessage = "Sign-in window opened. Finish sign-in, then click Codex sign in again to refresh the account.";
+        }
     }
 
     [RelayCommand]
     private async Task SignOutCodexAsync()
     {
+        _codexLoginCts?.Cancel();
         var loggedOut = await _chatService.LogoutCodexAsync();
         RefreshCodexAccountState();
         StatusMessage = loggedOut ? "Signed out from Codex." : "Could not sign out from Codex.";
@@ -396,6 +498,16 @@ public sealed partial class ChatViewModel : ObservableObject
         {
             RaiseUi(RefreshCodexAccountState);
         }, TaskScheduler.Default);
+    }
+
+    private string GetBackendDisplayName(string? backendId)
+    {
+        if (string.IsNullOrWhiteSpace(backendId))
+            return backendId ?? string.Empty;
+
+        var match = _chatService.AvailableBackends
+            .FirstOrDefault(b => b.Id.Equals(backendId, StringComparison.OrdinalIgnoreCase));
+        return string.IsNullOrWhiteSpace(match.DisplayName) ? backendId : match.DisplayName;
     }
 
     private async Task<bool> EnsureConnectedAsync()
@@ -422,11 +534,22 @@ public sealed partial class ChatViewModel : ObservableObject
 
     private async Task RefreshModelsAsync()
     {
+        var refreshVersion = Interlocked.Increment(ref _modelsRefreshVersion);
+        var activeBackendId = _chatService.ActiveBackendId;
         AvailableModels.Clear();
         AvailableReasoningEfforts.Clear();
         try
         {
             var models = await _chatService.GetAvailableModelsAsync();
+
+            // An older probe may finish after a backend switch. Never let its result
+            // put the previous backend's models back into the combo.
+            if (refreshVersion != Volatile.Read(ref _modelsRefreshVersion)
+                || !string.Equals(activeBackendId, _chatService.ActiveBackendId, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
             foreach (var model in models)
             {
                 if (!AvailableModels.Contains(model, StringComparer.OrdinalIgnoreCase))
@@ -438,15 +561,34 @@ public sealed partial class ChatViewModel : ObservableObject
                 AvailableModels.Add(SelectedModel);
             }
 
+            if (AvailableModels.Count > 0
+                && !AvailableModels.Contains(SelectedModel, StringComparer.OrdinalIgnoreCase))
+            {
+                SelectedModel = AvailableModels[0];
+            }
+
             if (ShowReasoningEffort)
             {
                 var efforts = await _chatService.GetAvailableReasoningEffortsAsync(SelectedModel);
+
+                if (refreshVersion != Volatile.Read(ref _modelsRefreshVersion)
+                    || !string.Equals(activeBackendId, _chatService.ActiveBackendId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
                 AvailableReasoningEfforts.Clear();
                 foreach (var effort in efforts)
                     AvailableReasoningEfforts.Add(effort);
 
                 if (AvailableReasoningEfforts.Count == 0 && !string.IsNullOrWhiteSpace(SelectedReasoningEffort))
                     AvailableReasoningEfforts.Add(SelectedReasoningEffort);
+
+                if (AvailableReasoningEfforts.Count > 0
+                    && !AvailableReasoningEfforts.Contains(SelectedReasoningEffort, StringComparer.OrdinalIgnoreCase))
+                {
+                    SelectedReasoningEffort = AvailableReasoningEfforts[0];
+                }
             }
         }
         catch (Exception ex)
@@ -456,6 +598,18 @@ public sealed partial class ChatViewModel : ObservableObject
         }
 
         RaiseUi(() => OnPropertyChanged(nameof(AvailableModels)));
+    }
+
+    private void ClearModelLists()
+    {
+        Interlocked.Increment(ref _modelsRefreshVersion);
+        AvailableModels.Clear();
+        AvailableReasoningEfforts.Clear();
+        RaiseUi(() =>
+        {
+            OnPropertyChanged(nameof(AvailableModels));
+            OnPropertyChanged(nameof(AvailableReasoningEfforts));
+        });
     }
 
     private void RefreshSavedSessions()
@@ -477,9 +631,7 @@ public sealed partial class ChatViewModel : ObservableObject
         var account = _chatService.CodexAccount;
         IsCodexSignedIn = account?.IsAuthenticated == true;
         CodexAccountLabel = account?.IsAuthenticated == true
-            ? string.IsNullOrWhiteSpace(account.Email)
-                ? $"Signed in ({account.Plan ?? "ChatGPT"})"
-                : account.Email
+            ? "Signed in"
             : "Not signed in";
     }
 

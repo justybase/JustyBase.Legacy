@@ -18,6 +18,7 @@ public static class LegacyApplicationSettingsMapper
         MapLintToDraft(config, draft.Lint);
         MapTerminalToDraft(config, draft.Terminal);
         MapEmbeddedFimToDraft(config, draft.EmbeddedFim);
+        MapAiChatToDraft(config, draft.AiChat);
         draft.Snippets = snippets?.Clone() ?? new SnippetSettings();
         return new ApplicationSettingsSnapshot(draft);
     }
@@ -48,6 +49,7 @@ public static class LegacyApplicationSettingsMapper
         ApplyLintToLegacy(draft.Lint, config);
         ApplyTerminalToLegacy(draft.Terminal, config);
         ApplyEmbeddedFimToLegacy(draft.EmbeddedFim, config);
+        ApplyAiChatToLegacy(draft.AiChat, config);
     }
 
     /// <summary>
@@ -75,6 +77,36 @@ public static class LegacyApplicationSettingsMapper
         destination.LlamaServerPreferVulkan = source.LlamaServerPreferVulkan;
         destination.EmbeddedFimAcceptedLicenseModelIds = source.EmbeddedFimAcceptedLicenseModelIds?.ToList() ?? [];
         destination.EmbeddedFimAutoPresetApplied = source.EmbeddedFimAutoPresetApplied;
+    }
+
+    /// <summary>Copies the live AI-chat controls into the Preferences form's transactional buffer.</summary>
+    public static void CopyAiChatSettings(IApplicationConfig source, IApplicationConfig destination)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(destination);
+
+        destination.EnableAiChat = source.EnableAiChat;
+        destination.AiChatBackendId = source.AiChatBackendId;
+        destination.AiChatOpenAiCompatibleEndpoint = source.AiChatOpenAiCompatibleEndpoint;
+        destination.AiChatOpenAiCompatibleApiKey = source.AiChatOpenAiCompatibleApiKey;
+        destination.AiChatDefaultModel = source.AiChatDefaultModel;
+        destination.AiChatDefaultReasoningEffort = source.AiChatDefaultReasoningEffort;
+        destination.AiChatDefaultMode = source.AiChatDefaultMode;
+        destination.AiChatAutoConnect = source.AiChatAutoConnect;
+        destination.AiChatHistoryLimit = source.AiChatHistoryLimit;
+        destination.AiChatSystemPromptOverride = source.AiChatSystemPromptOverride;
+        destination.AiChatTemperature = source.AiChatTemperature;
+        destination.AiChatMaxTokens = source.AiChatMaxTokens;
+        destination.AiChatRequestTimeoutMs = source.AiChatRequestTimeoutMs;
+        destination.AiChatMaxRetries = source.AiChatMaxRetries;
+        destination.AiChatPreset = source.AiChatPreset;
+        destination.AiChatPresetIsCustom = source.AiChatPresetIsCustom;
+        destination.EnableEmbeddedChatAi = source.EnableEmbeddedChatAi;
+        destination.EmbeddedChatModelId = source.EmbeddedChatModelId;
+        destination.EmbeddedChatGpuLayers = source.EmbeddedChatGpuLayers;
+        destination.EmbeddedChatCtxSize = source.EmbeddedChatCtxSize;
+        destination.EmbeddedChatAcceptedLicenseModelIds = source.EmbeddedChatAcceptedLicenseModelIds?.ToList() ?? [];
+        destination.LlamaServerPreferVulkan = source.LlamaServerPreferVulkan;
     }
 
     public static SnippetSettings CloneSnippets(SnippetSettings snippets) => snippets.Clone();
@@ -423,6 +455,58 @@ public static class LegacyApplicationSettingsMapper
         target.EmbeddedFimAutoPresetApplied = source.EmbeddedFimAutoPresetApplied;
     }
 
+    private static void MapAiChatToDraft(IApplicationConfig source, AiChatSettings target)
+    {
+        target.EnableAiChat = source.EnableAiChat;
+        target.AiChatBackendId = source.AiChatBackendId;
+        target.AiChatOpenAiCompatibleEndpoint = source.AiChatOpenAiCompatibleEndpoint;
+        target.AiChatOpenAiCompatibleApiKey = source.AiChatOpenAiCompatibleApiKey;
+        target.AiChatDefaultModel = source.AiChatDefaultModel;
+        target.AiChatDefaultReasoningEffort = source.AiChatDefaultReasoningEffort;
+        target.AiChatDefaultMode = source.AiChatDefaultMode;
+        target.AiChatAutoConnect = source.AiChatAutoConnect;
+        target.AiChatHistoryLimit = source.AiChatHistoryLimit;
+        target.AiChatSystemPromptOverride = source.AiChatSystemPromptOverride;
+        target.AiChatTemperature = source.AiChatTemperature;
+        target.AiChatMaxTokens = source.AiChatMaxTokens;
+        target.AiChatRequestTimeoutMs = source.AiChatRequestTimeoutMs;
+        target.AiChatMaxRetries = source.AiChatMaxRetries;
+        target.AiChatPreset = source.AiChatPreset;
+        target.AiChatPresetIsCustom = source.AiChatPresetIsCustom;
+        target.EnableEmbeddedChatAi = source.EnableEmbeddedChatAi;
+        target.EmbeddedChatModelId = source.EmbeddedChatModelId;
+        target.EmbeddedChatGpuLayers = source.EmbeddedChatGpuLayers;
+        target.EmbeddedChatCtxSize = source.EmbeddedChatCtxSize;
+        target.EmbeddedChatAcceptedLicenseModelIds = source.EmbeddedChatAcceptedLicenseModelIds?.ToList() ?? [];
+        target.LlamaServerPreferVulkan = source.LlamaServerPreferVulkan;
+    }
+
+    private static void ApplyAiChatToLegacy(AiChatSettings source, IApplicationConfig target)
+    {
+        target.EnableAiChat = source.EnableAiChat;
+        target.AiChatBackendId = source.AiChatBackendId;
+        target.AiChatOpenAiCompatibleEndpoint = source.AiChatOpenAiCompatibleEndpoint;
+        target.AiChatOpenAiCompatibleApiKey = source.AiChatOpenAiCompatibleApiKey;
+        target.AiChatDefaultModel = source.AiChatDefaultModel;
+        target.AiChatDefaultReasoningEffort = source.AiChatDefaultReasoningEffort;
+        target.AiChatDefaultMode = source.AiChatDefaultMode;
+        target.AiChatAutoConnect = source.AiChatAutoConnect;
+        target.AiChatHistoryLimit = source.AiChatHistoryLimit;
+        target.AiChatSystemPromptOverride = source.AiChatSystemPromptOverride;
+        target.AiChatTemperature = source.AiChatTemperature;
+        target.AiChatMaxTokens = source.AiChatMaxTokens;
+        target.AiChatRequestTimeoutMs = source.AiChatRequestTimeoutMs;
+        target.AiChatMaxRetries = source.AiChatMaxRetries;
+        target.AiChatPreset = source.AiChatPreset;
+        target.AiChatPresetIsCustom = source.AiChatPresetIsCustom;
+        target.EnableEmbeddedChatAi = source.EnableEmbeddedChatAi;
+        target.EmbeddedChatModelId = source.EmbeddedChatModelId;
+        target.EmbeddedChatGpuLayers = source.EmbeddedChatGpuLayers;
+        target.EmbeddedChatCtxSize = source.EmbeddedChatCtxSize;
+        target.EmbeddedChatAcceptedLicenseModelIds = source.EmbeddedChatAcceptedLicenseModelIds?.ToList() ?? [];
+        target.LlamaServerPreferVulkan = source.LlamaServerPreferVulkan;
+    }
+
     private static Dictionary<string, Dictionary<int, DatabaseInfoSnapshot>> ConvertCacheToSnapshot(
         Dictionary<string, Dictionary<int, DatabaseInfo>>? value)
     {
@@ -460,6 +544,7 @@ public static class LegacyApplicationSettingsMapper
         ApplyFilesStartupToLegacyViaReflection(draft.FilesStartup, destination);
         ApplyLintToLegacyViaReflection(draft.Lint, destination);
         ApplyTerminalToLegacyViaReflection(draft.Terminal, destination);
+        ApplyAiChatToLegacy(draft.AiChat, destination);
     }
 
     private static void ApplyAppearanceToLegacyViaReflection(AppearanceSettings source, IApplicationConfig target)

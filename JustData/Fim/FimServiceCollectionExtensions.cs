@@ -105,11 +105,6 @@ public static class FimServiceCollectionExtensions
         collection.AddSingleton<IGitCommitMessageAiService>(sp =>
         {
             var settings = sp.GetRequiredService<IFimSettingsStore>();
-            if (!settings.Settings.EnableFimAi)
-            {
-                return new UnavailableGitCommitMessageAiService();
-            }
-
             var store = sp.GetRequiredKeyedService<IModelStore>(FimStoreKey);
             return new LlamaServerGitCommitMessageAiService(
                 sp.GetRequiredService<LlamaServerManager>(),

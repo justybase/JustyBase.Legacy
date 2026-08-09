@@ -1,3 +1,4 @@
+using AppBase.Common;
 using JustData.ViewModels.Ai;
 using JustyBase.Ai.Models;
 using Microsoft.Web.WebView2.WinForms;
@@ -51,14 +52,19 @@ public sealed class AiChatPanel : UserControl
         BuildLayout();
 
         _viewModel.MessagesChanged += OnMessagesChanged;
+        _viewModel.AttachmentsChanged += OnAttachmentsChanged;
         _viewModel.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(ChatViewModel.IsStreaming)
                 or nameof(ChatViewModel.IsInitializing)
                 or nameof(ChatViewModel.StatusMessage)
+                or nameof(ChatViewModel.InputText)
                 or nameof(ChatViewModel.IsConnected)
                 or nameof(ChatViewModel.IsCodexSignedIn)
                 or nameof(ChatViewModel.CodexAccountLabel)
+                or nameof(ChatViewModel.SelectedModel)
+                or nameof(ChatViewModel.AvailableModels)
+                or nameof(ChatViewModel.AvailableReasoningEfforts)
                 or nameof(ChatViewModel.SavedSessions)
                 or nameof(ChatViewModel.CurrentSessionTitle)
                 or nameof(ChatViewModel.IsCodexBackend)
@@ -81,6 +87,7 @@ public sealed class AiChatPanel : UserControl
         HookWebView();
         SyncHeaderUi();
         OnMessagesChanged();
+        RefreshAttachments();
         RefreshSessions();
     }
 
@@ -117,32 +124,79 @@ public sealed class AiChatPanel : UserControl
 
     private Control BuildHeaderPanel()
     {
-        var header = new FlowLayoutPanel
+        var dpi = DeviceDpi;
+        var headerHeight = DpiScale.Scale(70, dpi);
+        var labelMargin = new Padding(DpiScale.Scale(4, dpi), DpiScale.Scale(3, dpi), DpiScale.Scale(2, dpi), DpiScale.Scale(3, dpi));
+        var comboMargin = new Padding(DpiScale.Scale(2, dpi), DpiScale.Scale(2, dpi), DpiScale.Scale(6, dpi), DpiScale.Scale(2, dpi));
+
+        var header = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 62,
-            WrapContents = true,
-            Padding = new Padding(0),
-            FlowDirection = FlowDirection.LeftToRight
+            Height = headerHeight,
+            ColumnCount = 6,
+            RowCount = 2,
+            Padding = new Padding(0)
         };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
+        header.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        header.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
 
-        header.Controls.Add(MakeLabel("Backend:"));
-        _backendCombo = MakeCombo(150);
-        header.Controls.Add(_backendCombo);
+        var backendLabel = MakeLabel("Backend:");
+        backendLabel.Margin = labelMargin;
+        backendLabel.Anchor = AnchorStyles.Right;
+        header.Controls.Add(backendLabel, 0, 0);
 
-        header.Controls.Add(MakeLabel("Model:"));
-        _modelCombo = MakeCombo(180);
-        header.Controls.Add(_modelCombo);
+        _backendCombo = MakeCombo(0, "aiChatPanelBackend");
+        _backendCombo.DisplayMember = nameof(ChatBackendOption.DisplayName);
+        _backendCombo.Margin = comboMargin;
+        _backendCombo.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        header.Controls.Add(_backendCombo, 1, 0);
 
-        header.Controls.Add(MakeLabel("Effort:"));
-        _effortCombo = MakeCombo(90);
-        header.Controls.Add(_effortCombo);
+        var modelLabel = MakeLabel("Model:");
+        modelLabel.Margin = labelMargin;
+        modelLabel.Anchor = AnchorStyles.Right;
+        header.Controls.Add(modelLabel, 2, 0);
 
-        header.Controls.Add(MakeLabel("Mode:"));
-        _modeCombo = MakeCombo(110);
-        header.Controls.Add(_modeCombo);
+        _modelCombo = MakeCombo(0, "aiChatPanelModel");
+        _modelCombo.Margin = comboMargin;
+        _modelCombo.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        header.Controls.Add(_modelCombo, 3, 0);
 
-        _codexButton = new Button { Text = "Codex sign in", AutoSize = true, Margin = new Padding(4, 3, 4, 3) };
+        var effortLabel = MakeLabel("Effort:");
+        effortLabel.Margin = labelMargin;
+        effortLabel.Anchor = AnchorStyles.Right;
+        header.Controls.Add(effortLabel, 4, 0);
+
+        _effortCombo = MakeCombo(0, "aiChatPanelReasoningEffort");
+        _effortCombo.Margin = comboMargin;
+        _effortCombo.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        header.Controls.Add(_effortCombo, 5, 0);
+
+        var modeLabel = MakeLabel("Mode:");
+        modeLabel.Margin = labelMargin;
+        modeLabel.Anchor = AnchorStyles.Right;
+        header.Controls.Add(modeLabel, 0, 1);
+
+        _modeCombo = MakeCombo(0, "aiChatPanelMode");
+        _modeCombo.DisplayMember = nameof(ChatModeConfig.DisplayName);
+        _modeCombo.Margin = comboMargin;
+        _modeCombo.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        header.Controls.Add(_modeCombo, 1, 1);
+
+        _codexButton = new Button
+        {
+            Text = "Codex sign in",
+            Name = "aiChatPanelCodexSignIn",
+            AccessibleName = "Codex sign in",
+            AutoSize = true,
+            Margin = new Padding(DpiScale.Scale(4, dpi), DpiScale.Scale(2, dpi), DpiScale.Scale(4, dpi), DpiScale.Scale(2, dpi)),
+            Anchor = AnchorStyles.Left
+        };
         _codexButton.Click += async (_, _) =>
         {
             if (_viewModel.IsCodexSignedIn)
@@ -150,19 +204,21 @@ public sealed class AiChatPanel : UserControl
             else
                 await _viewModel.SignInCodexCommand.ExecuteAsync(null);
         };
-        header.Controls.Add(_codexButton);
+        header.Controls.Add(_codexButton, 2, 1);
 
         _accountLabel = MakeLabel(string.Empty);
         _accountLabel.AutoSize = true;
-        header.Controls.Add(_accountLabel);
+        _accountLabel.Margin = labelMargin;
+        _accountLabel.Anchor = AnchorStyles.Left;
+        header.Controls.Add(_accountLabel, 3, 1);
 
         _backendCombo.SelectedIndexChanged += (_, _) =>
         {
             if (_suppressSessionSync)
                 return;
-            if (_backendCombo.SelectedItem is not string id)
+            if (_backendCombo.SelectedItem is not ChatBackendOption option)
                 return;
-            _viewModel.SelectedBackendId = id;
+            _viewModel.SelectedBackendId = option.Id;
         };
         _modelCombo.SelectedIndexChanged += (_, _) =>
         {
@@ -185,10 +241,17 @@ public sealed class AiChatPanel : UserControl
 
     private Control BuildComposerPanel()
     {
+        var dpi = DeviceDpi;
+        var composerHeight = DpiScale.Scale(84, dpi);
+        var attachmentHeight = DpiScale.Scale(22, dpi);
+        var buttonWidth = DpiScale.Scale(80, dpi);
+        var buttonHeight = DpiScale.Scale(26, dpi);
+        var buttonMargin = DpiScale.Scale(2, dpi);
+
         var composer = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 84,
+            Height = composerHeight,
             ColumnCount = 3,
             RowCount = 2
         };
@@ -200,22 +263,31 @@ public sealed class AiChatPanel : UserControl
 
         _attachmentStrip = new FlowLayoutPanel
         {
+            Name = "aiChatPanelAttachments",
+            AccessibleName = "Pending chat attachments",
             Dock = DockStyle.Fill,
             AutoScroll = true,
             FlowDirection = FlowDirection.LeftToRight,
             WrapContents = false,
-            Height = 22
+            Height = attachmentHeight
         };
         composer.Controls.Add(_attachmentStrip, 0, 0);
         composer.SetColumnSpan(_attachmentStrip, 3);
 
         _inputBox = new TextBox
         {
+            Name = "aiChatPanelInput",
+            AccessibleName = "Chat message",
             Multiline = true,
             Dock = DockStyle.Fill,
             ScrollBars = ScrollBars.Vertical,
             AcceptsReturn = true,
             Font = new Font("Consolas", 10F)
+        };
+        _inputBox.TextChanged += (_, _) =>
+        {
+            if (!string.Equals(_viewModel.InputText, _inputBox.Text, StringComparison.Ordinal))
+                _viewModel.InputText = _inputBox.Text;
         };
         _inputBox.KeyDown += async (_, e) =>
         {
@@ -228,7 +300,15 @@ public sealed class AiChatPanel : UserControl
         };
         composer.Controls.Add(_inputBox, 0, 1);
 
-        var attachButton = new Button { Text = "Attach…", Width = 80, Height = 26, Margin = new Padding(2) };
+        var attachButton = new Button
+        {
+            Text = "Attach…",
+            Name = "aiChatPanelAttach",
+            AccessibleName = "Attach files",
+            Width = buttonWidth,
+            Height = buttonHeight,
+            Margin = new Padding(buttonMargin)
+        };
         attachButton.Click += (_, _) =>
         {
             using var dialog = new OpenFileDialog { Multiselect = true, Title = "Attach files as references" };
@@ -240,11 +320,28 @@ public sealed class AiChatPanel : UserControl
         };
         composer.Controls.Add(attachButton, 1, 1);
 
-        _sendButton = new Button { Text = "Send", Width = 80, Height = 26, Margin = new Padding(2) };
+        _sendButton = new Button
+        {
+            Text = "Send",
+            Name = "aiChatPanelSend",
+            AccessibleName = "Send chat message",
+            Width = buttonWidth,
+            Height = buttonHeight,
+            Margin = new Padding(buttonMargin)
+        };
         _sendButton.Click += async (_, _) => await _viewModel.SendCommand.ExecuteAsync(null);
         composer.Controls.Add(_sendButton, 2, 1);
 
-        _stopButton = new Button { Text = "Stop", Width = 80, Height = 26, Margin = new Padding(2), Visible = false };
+        _stopButton = new Button
+        {
+            Text = "Stop",
+            Name = "aiChatPanelStop",
+            AccessibleName = "Stop chat response",
+            Width = buttonWidth,
+            Height = buttonHeight,
+            Margin = new Padding(buttonMargin),
+            Visible = false
+        };
         _stopButton.Click += async (_, _) => await _viewModel.CancelCommand.ExecuteAsync(null);
         composer.Controls.Add(_stopButton, 2, 1);
 
@@ -253,46 +350,82 @@ public sealed class AiChatPanel : UserControl
 
     private Control BuildSessionsPanel()
     {
-        var sessions = new FlowLayoutPanel
+        var dpi = DeviceDpi;
+        var sessionsHeight = DpiScale.Scale(36, dpi);
+
+        var sessions = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 30,
-            FlowDirection = FlowDirection.LeftToRight,
+            Height = sessionsHeight,
+            ColumnCount = 4,
+            RowCount = 1,
             Padding = new Padding(0)
         };
+        sessions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        sessions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        sessions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        sessions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        sessions.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-        sessions.Controls.Add(MakeLabel("Session:"));
-        _sessionCombo = MakeCombo(300);
+        var sessionLabel = MakeLabel("Session:");
+        sessionLabel.Anchor = AnchorStyles.Right;
+        sessions.Controls.Add(sessionLabel, 0, 0);
+
+        _sessionCombo = MakeCombo(0, "aiChatPanelSession");
         _sessionCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+        _sessionCombo.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        _sessionCombo.Margin = new Padding(DpiScale.Scale(2, dpi), DpiScale.Scale(2, dpi), DpiScale.Scale(4, dpi), DpiScale.Scale(2, dpi));
         _sessionCombo.SelectedIndexChanged += (_, _) =>
         {
             if (_suppressSessionSync || _sessionCombo.SelectedItem is not ChatSession session)
                 return;
             _viewModel.OpenSessionCommand.Execute(session);
         };
-        sessions.Controls.Add(_sessionCombo);
+        sessions.Controls.Add(_sessionCombo, 1, 0);
 
-        var newButton = new Button { Text = "New", Width = 60, Height = 24, Margin = new Padding(4, 2, 2, 2) };
+        var newButton = new Button
+        {
+            Text = "New",
+            Name = "aiChatPanelNewSession",
+            AccessibleName = "New chat session",
+            Width = DpiScale.Scale(60, dpi),
+            Height = DpiScale.Scale(26, dpi),
+            Margin = new Padding(DpiScale.Scale(4, dpi), DpiScale.Scale(2, dpi), DpiScale.Scale(2, dpi), DpiScale.Scale(2, dpi)),
+            Anchor = AnchorStyles.Left
+        };
         newButton.Click += (_, _) => _viewModel.NewSessionCommand.Execute(null);
-        sessions.Controls.Add(newButton);
+        sessions.Controls.Add(newButton, 2, 0);
 
-        var deleteButton = new Button { Text = "Delete", Width = 70, Height = 24, Margin = new Padding(2) };
+        var deleteButton = new Button
+        {
+            Text = "Delete",
+            Name = "aiChatPanelDeleteSession",
+            AccessibleName = "Delete chat session",
+            Width = DpiScale.Scale(70, dpi),
+            Height = DpiScale.Scale(26, dpi),
+            Margin = new Padding(DpiScale.Scale(2, dpi), DpiScale.Scale(2, dpi), DpiScale.Scale(4, dpi), DpiScale.Scale(2, dpi)),
+            Anchor = AnchorStyles.Left
+        };
         deleteButton.Click += (_, _) =>
         {
             if (_sessionCombo.SelectedItem is ChatSession session)
                 _viewModel.DeleteSessionCommand.Execute(session);
         };
-        sessions.Controls.Add(deleteButton);
+        sessions.Controls.Add(deleteButton, 3, 0);
 
         return sessions;
     }
 
     private Control BuildStatusPanel()
     {
+        var dpi = DeviceDpi;
+        var statusHeight = DpiScale.Scale(24, dpi);
+
         _statusLabel = MakeLabel("AI idle");
         _statusLabel.Dock = DockStyle.Top;
-        _statusLabel.Height = 20;
+        _statusLabel.Height = statusHeight;
         _statusLabel.AutoEllipsis = true;
+        _statusLabel.TextAlign = ContentAlignment.MiddleLeft;
         return _statusLabel;
     }
 
@@ -349,6 +482,69 @@ public sealed class AiChatPanel : UserControl
         RefreshSessions();
     }
 
+    private void OnAttachmentsChanged() => RefreshAttachments();
+
+    private void RefreshAttachments()
+    {
+        if (_attachmentStrip is null || IsDisposed)
+            return;
+
+        _attachmentStrip.SuspendLayout();
+        try
+        {
+            var existingControls = _attachmentStrip.Controls.Cast<Control>().ToArray();
+            _attachmentStrip.Controls.Clear();
+            foreach (var control in existingControls)
+            {
+                control.Dispose();
+            }
+
+            for (var index = 0; index < _viewModel.PendingAttachments.Count; index++)
+            {
+                var attachment = _viewModel.PendingAttachments[index];
+                var chip = new Panel
+                {
+                    Name = $"aiChatAttachment{index}",
+                    AccessibleName = attachment.DisplayLabel,
+                    AutoSize = true,
+                    Height = DpiScale.Scale(22, DeviceDpi),
+                    Margin = new Padding(2),
+                    Padding = new Padding(2, 0, 2, 0),
+                    BorderStyle = BorderStyle.FixedSingle
+                };
+                var label = new Label
+                {
+                    Text = attachment.DisplayLabel,
+                    AutoSize = true,
+                    Dock = DockStyle.Left,
+                    TextAlign = ContentAlignment.MiddleLeft,
+                    Padding = new Padding(2, 1, 2, 1)
+                };
+                var removeButton = new Button
+                {
+                    Text = "×",
+                    Name = $"aiChatAttachmentRemove{index}",
+                    AccessibleName = $"Remove {attachment.DisplayLabel}",
+                    AutoSize = false,
+                    Width = DpiScale.Scale(22, DeviceDpi),
+                    Height = DpiScale.Scale(20, DeviceDpi),
+                    Dock = DockStyle.Right,
+                    FlatStyle = FlatStyle.Flat,
+                    Margin = new Padding(0)
+                };
+                removeButton.FlatAppearance.BorderSize = 0;
+                removeButton.Click += (_, _) => _viewModel.RemoveAttachmentCommand.Execute(attachment);
+                chip.Controls.Add(removeButton);
+                chip.Controls.Add(label);
+                _attachmentStrip.Controls.Add(chip);
+            }
+        }
+        finally
+        {
+            _attachmentStrip.ResumeLayout();
+        }
+    }
+
     private void RenderConversation()
     {
         var html = ChatHtmlRenderer.Render(_viewModel.Messages);
@@ -391,6 +587,14 @@ public sealed class AiChatPanel : UserControl
         _accountLabel!.Text = _viewModel.CodexAccountLabel;
         _codexButton!.Text = _viewModel.IsCodexSignedIn ? "Codex sign out" : "Codex sign in";
 
+        if (_inputBox is not null
+            && !string.Equals(_inputBox.Text, _viewModel.InputText, StringComparison.Ordinal))
+        {
+            var selectionStart = Math.Min(_inputBox.SelectionStart, _viewModel.InputText.Length);
+            _inputBox.Text = _viewModel.InputText;
+            _inputBox.SelectionStart = selectionStart;
+        }
+
         // While the provider is connecting (first embedded launch), the composer must be
         // disabled so repeated Enter presses cannot queue ghost sends.
         var inputDisabled = _viewModel.IsInitializing;
@@ -401,15 +605,17 @@ public sealed class AiChatPanel : UserControl
         if (_backendCombo!.Items.Count == 0)
         {
             _suppressSessionSync = true;
-            foreach (var id in _viewModel.AvailableBackends)
-                _backendCombo.Items.Add(id);
-            _backendCombo.SelectedItem = _viewModel.SelectedBackendId;
+            foreach (var option in _viewModel.AvailableBackends)
+                _backendCombo.Items.Add(option);
             _suppressSessionSync = false;
         }
-        else if (!Equals(_backendCombo.SelectedItem, _viewModel.SelectedBackendId))
+
+        var backendToSelect = _viewModel.AvailableBackends
+            .FirstOrDefault(b => string.Equals(b.Id, _viewModel.SelectedBackendId, StringComparison.OrdinalIgnoreCase));
+        if (backendToSelect is not null && !Equals(_backendCombo.SelectedItem, backendToSelect))
         {
             _suppressSessionSync = true;
-            _backendCombo.SelectedItem = _viewModel.SelectedBackendId;
+            _backendCombo.SelectedItem = backendToSelect;
             _suppressSessionSync = false;
         }
 
@@ -484,11 +690,29 @@ public sealed class AiChatPanel : UserControl
         _suppressSessionSync = false;
     }
 
-    private static Label MakeLabel(string text)
-        => new() { Text = text, AutoSize = true, Margin = new Padding(4, 6, 4, 2) };
+    private Label MakeLabel(string text)
+    {
+        var dpi = DeviceDpi;
+        return new Label
+        {
+            Text = text,
+            AutoSize = true,
+            Margin = new Padding(DpiScale.Scale(4, dpi), DpiScale.Scale(6, dpi), DpiScale.Scale(4, dpi), DpiScale.Scale(2, dpi))
+        };
+    }
 
-    private static ComboBox MakeCombo(int width)
-        => new() { Width = width, DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(2, 4, 6, 2) };
+    private ComboBox MakeCombo(int width, string automationId)
+    {
+        var dpi = DeviceDpi;
+        return new ComboBox
+        {
+            Width = width,
+            Name = automationId,
+            AccessibleName = automationId,
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Margin = new Padding(DpiScale.Scale(2, dpi), DpiScale.Scale(4, dpi), DpiScale.Scale(6, dpi), DpiScale.Scale(2, dpi))
+        };
+    }
 
     protected override void Dispose(bool disposing)
     {
@@ -496,6 +720,7 @@ public sealed class AiChatPanel : UserControl
         {
             _renderTimer?.Dispose();
             _webView?.Dispose();
+            _viewModel.AttachmentsChanged -= OnAttachmentsChanged;
         }
 
         base.Dispose(disposing);

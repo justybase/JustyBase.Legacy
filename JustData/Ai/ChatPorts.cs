@@ -4,6 +4,7 @@ using AppBase.Common.Interfaces;
 using AppBase.Data.Core.Core;
 using AppBase.Data.Core.Enums;
 using AppBase.Data.Core.Interfaces;
+using AppBase.Services;
 using JustData.Application.Schema;
 using JustyBase.Ai.Ports;
 using JustyBase.NetezzaSqlParser.Linter;
@@ -38,7 +39,7 @@ public sealed class LegacyChatSettingsStore : IChatSettingsStore
         {
             EnableAiChat = config.EnableAiChat,
             ChatSessions = config.ChatSessions,
-            AiChatBackendId = config.AiChatBackendId,
+            AiChatBackendId = NormalizeBackendId(config.AiChatBackendId),
             AiChatOpenAiCompatibleEndpoint = config.AiChatOpenAiCompatibleEndpoint,
             AiChatOpenAiCompatibleApiKey = config.AiChatOpenAiCompatibleApiKey,
             AiChatDefaultModel = config.AiChatDefaultModel,
@@ -87,6 +88,24 @@ public sealed class LegacyChatSettingsStore : IChatSettingsStore
         config.EmbeddedChatCtxSize = settings.EmbeddedChatCtxSize;
         config.EmbeddedChatAcceptedLicenseModelIds = settings.EmbeddedChatAcceptedLicenseModelIds;
         config.LlamaServerPreferVulkan = settings.LlamaServerPreferVulkan;
+    }
+
+    /// <summary>
+    /// Maps display names (legacy UI wrote them into the setting) back onto the machine ids
+    /// the backend resolution expects ("embedded", "openai-compatible", "codex").
+    /// </summary>
+    private static string NormalizeBackendId(string? backendId)
+    {
+        if (string.IsNullOrWhiteSpace(backendId))
+            return string.Empty;
+
+        return backendId.Trim() switch
+        {
+            "Embedded (local)" => "embedded",
+            "OpenAI Compatible" => "openai-compatible",
+            "Codex (ChatGPT)" => "codex",
+            _ => backendId
+        };
     }
 }
 
@@ -277,14 +296,13 @@ public sealed class LazyWinFormsUiDispatcher : IUiDispatcher
 /// <summary>Adapter over the host logger for the shared chat pipeline.</summary>
 public sealed class LegacyChatLogger : ISimpleLogger
 {
-    private readonly ILogger _logger;
-
     public LegacyChatLogger(ILogger logger)
     {
-        _logger = logger;
+        ArgumentNullException.ThrowIfNull(logger);
     }
 
-    public void TrackError(Exception ex, bool isCrash) => _logger.LogError(ex.Message, ex);
+    public void TrackError(Exception ex, bool isCrash)
+        => FileDiagnosticLog.WriteError(ex.Message, ex);
 }
 
 /// <summary>Adapter over the host application environment for the shared chat pipeline.</summary>

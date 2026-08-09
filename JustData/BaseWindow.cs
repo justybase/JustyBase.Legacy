@@ -434,6 +434,7 @@ namespace JustyBaseLegacy.UI
             , JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null
             )
         {
+            Program.LogStartup("BaseWindow ctor: begin");
             _tabManager = tabManager ?? throw new ArgumentNullException(nameof(tabManager));
             _loggerLoud = logger ?? throw new ArgumentNullException(nameof(logger));
             _loggerLoud.SetWindow(this);
@@ -547,10 +548,13 @@ namespace JustyBaseLegacy.UI
 
             _netezzaHelperService.Initialize(_netezzaSchemaRefreshController);
 
+            Program.LogStartup("BaseWindow ctor: before InitializeComponent");
             InitializeComponent();
+            Program.LogStartup("BaseWindow ctor: after InitializeComponent");
 
             tabContextMenuStrip.Opening += TabContextMenuStrip_Opening;
             _tabManager.Initialize(_tabControlMain);
+            Program.LogStartup("BaseWindow ctor: after tabManager.Initialize");
 
             if (_tabManager is DockSuiteTabManager dsm)
             {
@@ -600,6 +604,7 @@ namespace JustyBaseLegacy.UI
                 //    In DockSuite mode _tabControlMain is hidden and never
                 //    receives focus, so F5/Ctrl+Enter/etc. would be dead.
                 this.KeyDown += tabControlMain_KeyDown;
+                Program.LogStartup("BaseWindow ctor: after dock suite init");
             }
 
             ControlBox = false;
@@ -656,6 +661,7 @@ namespace JustyBaseLegacy.UI
             _mvvmDatabaseExplorerControl?.TbFastSchemaSearch.ContextMenuStrip?.Items.Add(itm);
 
             StartsElements();
+            Program.LogStartup("BaseWindow ctor: after StartsElements");
             _watchForNewImport.NotifyFilter = NotifyFilters.FileName;
             _watchForNewImport.Created += WatchForNewImport_Created;
             _watchForNewImport.Filter = "*.xlsx";
@@ -664,6 +670,7 @@ namespace JustyBaseLegacy.UI
             _regularActionTimer.Interval = 1_000 * 60 * _applicationSettingsContext.Config.RegularActionTimerMinutes;
             _regularActionTimer.Tick += RegularActionTimer_Tick;
             _regularActionTimer.Start();
+            Program.LogStartup("BaseWindow ctor: end");
         }
 
         private bool _uiTestOpenFileScheduled;

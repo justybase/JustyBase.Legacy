@@ -831,7 +831,10 @@ namespace JustyBaseLegacy.UI
         private void SyncViewModelFromLegacyBuffer()
         {
             _embeddedFimPanel?.ApplyCurrentSettingsTo(_config);
-            _aiChatPanel?.SaveFromUi();
+            // The AI panel has its own controls, but Preferences saves one transactional
+            // buffer. Merge those controls into that buffer before rebuilding the draft; reading
+            // the live settings context here would overwrite the user's unsaved changes.
+            _aiChatPanel?.ApplyCurrentSettingsTo(_config);
             _settingsViewModel.ReplaceDraft(LegacyApplicationSettingsMapper.ToSnapshot(_config, _pendingSnippets).ToDraft());
         }
 

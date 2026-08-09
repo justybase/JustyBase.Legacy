@@ -30,6 +30,8 @@ internal static class ChatHtmlRenderer
         sb.AppendLine("p{margin:4px 0;}");
         sb.AppendLine("table{border-collapse:collapse;margin:6px 0;}td,th{border:1px solid #cbd5e1;padding:3px 8px;}");
         sb.AppendLine(".tool-card{border:1px solid #94a3b8;border-left:4px solid #64748b;padding:8px;border-radius:6px;margin:6px 0;background:#f8fafc;}");
+        sb.AppendLine(".thinking{background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:6px 8px;margin:6px 0;color:#475569;font-size:12px;}");
+        sb.AppendLine(".thinking summary{cursor:pointer;font-weight:600;color:#64748b;}");
         sb.AppendLine(".tool-card button{margin:4px 6px 0 0;padding:4px 14px;border-radius:4px;border:1px solid #94a3b8;cursor:pointer;}");
         sb.AppendLine(".approve{background:#dcfce7;}.deny{background:#fee2e2;}");
         sb.AppendLine(".meta{color:#6b7280;font-size:11px;margin-top:2px;}");
@@ -63,6 +65,13 @@ internal static class ChatHtmlRenderer
             {
                 var html = Markdown.ToHtml(content, Pipeline);
                 sb.Append(html);
+            }
+
+            if (message.HasThinkingContent)
+            {
+                sb.Append("<details class='thinking'><summary>Thinking</summary>");
+                sb.Append(Markdown.ToHtml(ChatMarkdownSanitizer.Sanitize(message.ThinkingContent ?? string.Empty), Pipeline));
+                sb.Append("</details>");
             }
 
             if (message.GenerationTimeMs > 0)

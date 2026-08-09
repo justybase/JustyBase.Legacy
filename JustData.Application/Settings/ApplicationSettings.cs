@@ -376,6 +376,62 @@ public sealed class EmbeddedFimSettings
     };
 }
 
+/// <summary>
+/// Transactional AI-chat preferences. This deliberately contains only primitive settings so
+/// the application-settings layer does not depend on the chat runtime or its session model.
+/// </summary>
+public sealed class AiChatSettings
+{
+    public bool EnableAiChat { get; set; }
+    public string AiChatBackendId { get; set; } = "codex";
+    public string AiChatOpenAiCompatibleEndpoint { get; set; } = "http://localhost:1234/v1";
+    public string? AiChatOpenAiCompatibleApiKey { get; set; }
+    public string AiChatDefaultModel { get; set; } = "gpt-5.6-luna";
+    public string AiChatDefaultReasoningEffort { get; set; } = "low";
+    public string AiChatDefaultMode { get; set; } = "expert";
+    public bool AiChatAutoConnect { get; set; }
+    public int AiChatHistoryLimit { get; set; } = 10;
+    public string AiChatSystemPromptOverride { get; set; } = string.Empty;
+    public double AiChatTemperature { get; set; } = 0.7;
+    public int AiChatMaxTokens { get; set; } = 2048;
+    public int AiChatRequestTimeoutMs { get; set; } = 60000;
+    public int AiChatMaxRetries { get; set; } = 1;
+    public string AiChatPreset { get; set; } = "balanced";
+    public bool AiChatPresetIsCustom { get; set; }
+    public bool EnableEmbeddedChatAi { get; set; }
+    public string EmbeddedChatModelId { get; set; } = "qwen3.5-4b";
+    public int EmbeddedChatGpuLayers { get; set; } = 99;
+    public int EmbeddedChatCtxSize { get; set; } = 4096;
+    public List<string> EmbeddedChatAcceptedLicenseModelIds { get; set; } = [];
+    public bool LlamaServerPreferVulkan { get; set; } = true;
+
+    public AiChatSettings Clone() => new()
+    {
+        EnableAiChat = EnableAiChat,
+        AiChatBackendId = AiChatBackendId,
+        AiChatOpenAiCompatibleEndpoint = AiChatOpenAiCompatibleEndpoint,
+        AiChatOpenAiCompatibleApiKey = AiChatOpenAiCompatibleApiKey,
+        AiChatDefaultModel = AiChatDefaultModel,
+        AiChatDefaultReasoningEffort = AiChatDefaultReasoningEffort,
+        AiChatDefaultMode = AiChatDefaultMode,
+        AiChatAutoConnect = AiChatAutoConnect,
+        AiChatHistoryLimit = AiChatHistoryLimit,
+        AiChatSystemPromptOverride = AiChatSystemPromptOverride,
+        AiChatTemperature = AiChatTemperature,
+        AiChatMaxTokens = AiChatMaxTokens,
+        AiChatRequestTimeoutMs = AiChatRequestTimeoutMs,
+        AiChatMaxRetries = AiChatMaxRetries,
+        AiChatPreset = AiChatPreset,
+        AiChatPresetIsCustom = AiChatPresetIsCustom,
+        EnableEmbeddedChatAi = EnableEmbeddedChatAi,
+        EmbeddedChatModelId = EmbeddedChatModelId,
+        EmbeddedChatGpuLayers = EmbeddedChatGpuLayers,
+        EmbeddedChatCtxSize = EmbeddedChatCtxSize,
+        EmbeddedChatAcceptedLicenseModelIds = EmbeddedChatAcceptedLicenseModelIds?.ToList() ?? [],
+        LlamaServerPreferVulkan = LlamaServerPreferVulkan
+    };
+}
+
 public sealed class ApplicationSettingsDraft
 {
     public AppearanceSettings Appearance { get; set; } = new();
@@ -386,6 +442,7 @@ public sealed class ApplicationSettingsDraft
     public LintSettings Lint { get; set; } = new();
     public TerminalSettings Terminal { get; set; } = new();
     public EmbeddedFimSettings EmbeddedFim { get; set; } = new();
+    public AiChatSettings AiChat { get; set; } = new();
     public SnippetSettings Snippets { get; set; } = new();
 
     public ApplicationSettingsDraft Clone() => new()
@@ -398,6 +455,7 @@ public sealed class ApplicationSettingsDraft
         Lint = Lint.Clone(),
         Terminal = Terminal.Clone(),
         EmbeddedFim = EmbeddedFim.Clone(),
+        AiChat = AiChat.Clone(),
         Snippets = Snippets.Clone()
     };
 }
