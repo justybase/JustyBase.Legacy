@@ -27,7 +27,7 @@ jobs:
       uses: actions/checkout@v7
       with:
         repository: justybase/JustyBase.NetezzaSql
-        ref: agent/fix-review-regressions
+        ref: master
         path: JustyBase.NetezzaSql
 
     - name: Stage shared libraries beside repository
