@@ -21,6 +21,8 @@ public sealed class FctbInlineCompletionController : IDisposable
     private readonly Func<bool>? _isEnabledProvider;
     private readonly int _debounceMs;
     private CancellationTokenSource? _debounceCts;
+    private readonly HashSet<Keys> _pressedKeys = [];
+    private bool _scheduleAfterKeysReleased;
     private string? _ghostText;
     private int _ghostOffset = -1;
     private bool _attached;
@@ -92,6 +94,8 @@ public sealed class FctbInlineCompletionController : IDisposable
         _editor.SelectionChanged += OnSelectionChanged;
         _editor.PreviewKeyDown += OnPreviewKeyDown;
         _editor.KeyDown += OnKeyDown;
+        _editor.KeyUp += OnKeyUp;
+        _editor.LostFocus += OnEditorLostFocus;
         _editor.PaintLine += OnPaintLine;
         if (_completionMenu is not null)
         {
@@ -114,6 +118,8 @@ public sealed class FctbInlineCompletionController : IDisposable
         _editor.SelectionChanged -= OnSelectionChanged;
         _editor.PreviewKeyDown -= OnPreviewKeyDown;
         _editor.KeyDown -= OnKeyDown;
+        _editor.KeyUp -= OnKeyUp;
+        _editor.LostFocus -= OnEditorLostFocus;
         _editor.PaintLine -= OnPaintLine;
         if (_completionMenu is not null)
         {
@@ -123,6 +129,8 @@ public sealed class FctbInlineCompletionController : IDisposable
             _completionMenu.Selected -= OnCompletionSelected;
         }
         _attached = false;
+        _pressedKeys.Clear();
+        _scheduleAfterKeysReleased = false;
     }
 
     public void Dispose()
@@ -172,7 +180,7 @@ public sealed class FctbInlineCompletionController : IDisposable
         _completionContinuationActive = false;
         if (HasGhostText)
             ClearGhostText();
-        Schedule();
+        ScheduleWhenIdle();
     }
 
     private void OnSelectionChanged(object? sender, EventArgs e)
@@ -195,6 +203,8 @@ public sealed class FctbInlineCompletionController : IDisposable
 
     private void OnPreviewKeyDown(object? sender, PreviewKeyDownEventArgs e)
     {
+        TrackKeyDown(e.KeyCode);
+
         if (e.KeyCode == Keys.Tab
             && e.Modifiers == Keys.None
             && _completionMenu?.Visible == true)
@@ -206,8 +216,31 @@ public sealed class FctbInlineCompletionController : IDisposable
         }
     }
 
+    private void OnKeyUp(object? sender, KeyEventArgs e)
+    {
+        _pressedKeys.Remove(e.KeyCode);
+        if (_pressedKeys.Count != 0 || !_scheduleAfterKeysReleased)
+            return;
+
+        _scheduleAfterKeysReleased = false;
+        Schedule();
+    }
+
+    private void OnEditorLostFocus(object? sender, EventArgs e)
+    {
+        // Windows may not deliver KeyUp when focus moves to another control.
+        // Clear the state so a later edit cannot remain blocked forever.
+        _pressedKeys.Clear();
+        _scheduleAfterKeysReleased = false;
+        CancelPending();
+    }
+
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
+        // PreviewKeyDown normally runs first. Keep this as a fallback for keys
+        // that FastColoredTextBox reports only through KeyDown.
+        TrackKeyDown(e.KeyCode);
+
         if (_completionTabInFlight && e.KeyCode == Keys.Tab && e.Modifiers == Keys.None)
         {
             _completionTabInFlight = false;
@@ -264,7 +297,7 @@ public sealed class FctbInlineCompletionController : IDisposable
                 SetGhostText(_editor.SelectionStart, visibleSeed);
         }
 
-        Schedule();
+        ScheduleWhenIdle();
     }
 
     private void OnCompletionMenuVisibleChanged(object? sender, EventArgs e)
@@ -398,6 +431,28 @@ public sealed class FctbInlineCompletionController : IDisposable
         _ = RunDebouncedAsync(token);
     }
 
+    private void ScheduleWhenIdle()
+    {
+        if (_pressedKeys.Count != 0)
+        {
+            // A held key can repeat more slowly than the normal debounce
+            // interval. Do not let one of those repeats start an expensive
+            // FIM request while the user is still typing.
+            _scheduleAfterKeysReleased = true;
+            CancelPending();
+            return;
+        }
+
+        _scheduleAfterKeysReleased = false;
+        Schedule();
+    }
+
+    private void TrackKeyDown(Keys key)
+    {
+        if (key != Keys.None)
+            _pressedKeys.Add(key);
+    }
+
     private async Task RunDebouncedAsync(CancellationToken token)
     {
         try
@@ -412,17 +467,21 @@ public sealed class FctbInlineCompletionController : IDisposable
             string documentText = string.Empty;
             int caret = 0;
             CompletionSelectionSnapshot? completionSelection = null;
+            bool keyIsStillPressed = false;
             if (_editor.IsDisposed || !_editor.IsHandleCreated)
                 return;
 
             await InvokeOnUiAsync(() =>
             {
+                keyIsStillPressed = _pressedKeys.Count != 0;
                 documentText = _editor.Text;
                 caret = _editor.SelectionStart;
                 completionSelection = _completionSelection;
             }).ConfigureAwait(false);
 
-            if (token.IsCancellationRequested || string.IsNullOrWhiteSpace(documentText))
+            if (token.IsCancellationRequested
+                || keyIsStillPressed
+                || string.IsNullOrWhiteSpace(documentText))
                 return;
 
             var suggestion = await _completeAsync(
