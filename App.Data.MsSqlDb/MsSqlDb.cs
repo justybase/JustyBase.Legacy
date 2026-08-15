@@ -5,6 +5,7 @@ using AppBase.Data.Core.Enums;
 using AppBase.Data.Core.Interfaces;
 using AppBase.Data.Core.Models;
 using Microsoft.Data.SqlClient;
+using System.ComponentModel;
 using System.Data;
 using System.Data.Common;
 using System.Text.RegularExpressions;
@@ -35,7 +36,69 @@ public sealed class MsSqlDb : GeneralDb
     Dictionary<string, SqlServerJobs> _jobs = new Dictionary<string, SqlServerJobs>();
     public Dictionary<string, SqlServerJobs> Jobs => _jobs;
 
+    /// <summary>
+    /// Optional confirmation hook for an untrusted server certificate. When
+    /// the login fails because the certificate chain is not trusted, the
+    /// provider asks the hook and, on acceptance, retries once with
+    /// TrustServerCertificate=True.
+    /// </summary>
+    public Func<Exception, bool>? ConfirmUntrustedCertificate { get; set; }
+
     public override void InitDb()
+    {
+        try
+        {
+            InitDbCore();
+        }
+        catch (Exception ex) when (IsUntrustedCertificateTrustError(ex))
+        {
+            if (ConnectionString.Contains("TrustServerCertificate", StringComparison.OrdinalIgnoreCase)
+                || ConfirmUntrustedCertificate is null
+                || !ConfirmUntrustedCertificate(ex))
+            {
+                throw;
+            }
+
+            ConnectionString = ConnectionString.TrimEnd() + ";TrustServerCertificate=True;";
+            InitDbCore();
+        }
+    }
+
+    private static bool IsUntrustedCertificateTrustError(Exception ex)
+    {
+        for (Exception? current = ex; current is not null; current = current.InnerException)
+        {
+            // Prefer the Win32/security error codes over localized message text.
+            // Schannel surfaces SEC_E_CERT_UNTRUSTED (0x80090325) for the
+            // "certificate chain was issued by an authority that is not trusted"
+            // login failure; CERT_E_UNTRUSTED* cover the certificate-store
+            // validation range (0x800B0109..0x800B0112). The native code may
+            // surface either as the full HRESULT or as its low 16 bits.
+            if (current is Win32Exception win32)
+            {
+                uint code = unchecked((uint)win32.NativeErrorCode);
+                if (code is 0x80090325 or 0x800B0109 or 0x800B010B or 0x800B010D or 0x800B0112
+                    || (code & 0xFFFF) is 0x0325 or 0x0109 or 0x010B or 0x010D or 0x0112)
+                {
+                    return true;
+                }
+            }
+
+            // Fallback for providers that surface a managed message without
+            // the Win32 error code. Matches the canonical English and Polish
+            // untrusted-chain texts only.
+            string message = current.Message ?? string.Empty;
+            if (message.Contains("certificate chain", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("certyfikat", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void InitDbCore()
     {
         using (SqlConnection conn = new SqlConnection(ConnectionString))
         {
@@ -152,21 +215,13 @@ public sealed class MsSqlDb : GeneralDb
         }
         foreach (DataRow item in tables.Rows)//owner, name,type
         {
-            string tabName = item.ItemArray[2] as string;
-            if (!tabName.IsGoodName())
-            {
-                tabName = $"\"{tabName}\"";
-            }
+            string tabName = QuoteIfNeeded(item.ItemArray[2] as string);
                 AutocompleteSuggestions.TreeWords.Add($"{item.ItemArray[0]}.{item.ItemArray[1]}.{tabName}");
         }
 
         foreach (DataRow item in views.Rows)
         {
-            string tabName = item.ItemArray[2] as string;
-            if (!tabName.IsGoodName())
-            {
-                tabName = $"\"{tabName}\"";
-            }
+            string tabName = QuoteIfNeeded(item.ItemArray[2] as string);
                 AutocompleteSuggestions.TreeWords.Add($"{item.ItemArray[0]}.{item.ItemArray[1]}.{tabName}");
         }
 
@@ -203,6 +258,42 @@ public sealed class MsSqlDb : GeneralDb
 
         }
         */
+    }
+
+    /// <summary>
+    /// SQL Server accepts unquoted identifiers matching /^[A-Za-z_][A-Za-z0-9_]*$/,
+    /// including lowercase names. Mirrors the VSCode extension insert-text rule
+    /// (identifierUtils.formatIdentifierForSql) with one addition: names that are
+    /// reserved words (order, user, select, ...) are also emitted with double
+    /// quotes, since unquoted reserved words are a T-SQL syntax error. Only the
+    /// identifier pattern and the shared reserved-word list trigger quoting.
+    /// </summary>
+    private string QuoteIfNeeded(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return name;
+        }
+
+        if (name[0] == '_' || char.IsAsciiLetter(name[0]))
+        {
+            for (int i = 1; i < name.Length; i++)
+            {
+                char c = name[i];
+                if (c == '_' || char.IsAsciiLetterOrDigit(c))
+                {
+                    continue;
+                }
+
+                return $"\"{name}\"";
+            }
+
+            return _generalDbService.ReservedWords?.Contains(name.ToUpperInvariant()) == true
+                ? $"\"{name}\""
+                : name;
+        }
+
+        return $"\"{name}\"";
     }
 
     protected override void AddToCache(string dbname, string schema, string tablename)
@@ -440,6 +531,15 @@ WHERE
 
     public override DbConnection GetConnection(string databaseName, bool usePool = true)
     {
-        throw new NotImplementedException();
+        if (string.IsNullOrWhiteSpace(databaseName))
+        {
+            return GetConnection();
+        }
+
+        SqlConnectionStringBuilder builder = new SqlConnectionStringBuilder(ConnectionString)
+        {
+            InitialCatalog = databaseName
+        };
+        return new SqlConnection(builder.ConnectionString);
     }
 }

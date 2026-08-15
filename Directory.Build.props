@@ -3,7 +3,7 @@
     <Nullable>annotations</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
-    <NoWarn>$(NoWarn);WFO1000</NoWarn>
+    <NoWarn>$(NoWarn);WFO1000;MSB3277</NoWarn>
     <Version>1.1.0.6</Version>
     <Authors>Krzysztof Duśko</Authors>
     <PackageLicenseExpression>LGPL-3.0-or-later</PackageLicenseExpression>
@@ -15,9 +15,13 @@
     <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
     <Platforms Condition="'$(Platforms)' == ''">x64</Platforms>
     <PlatformTarget Condition="'$(PlatformTarget)' == ''">x64</PlatformTarget>
-    <!-- DB2 is part of the default desktop distribution. It remains possible
-         to opt out explicitly with -p:IncludeDB2=false for reduced builds. -->
+    <!-- DB2, MS SQL Server and PostgreSQL are part of the default desktop
+         distribution. It remains possible to opt out explicitly with
+         -p:IncludeDB2=false / -p:IncludeMsSql=false / -p:IncludePostgres=false
+         for reduced builds. -->
     <IncludeDB2 Condition="'$(IncludeDB2)' == ''">true</IncludeDB2>
+    <IncludeMsSql Condition="'$(IncludeMsSql)' == ''">true</IncludeMsSql>
+    <IncludePostgres Condition="'$(IncludePostgres)' == ''">true</IncludePostgres>
 
     <!--
       Local sibling checkout (##justybase/JustyBase.NetezzaSql):

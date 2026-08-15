@@ -21,11 +21,18 @@ public sealed class SqlDialectResolver
         if (_generalDbService is null || string.IsNullOrWhiteSpace(connectionName))
             return SqlDialect.Netezza;
 
-        return string.Equals(
-            _generalDbService.DriverName(connectionName),
-            "DB2",
-            StringComparison.OrdinalIgnoreCase)
-            ? SqlDialect.Db2
-            : SqlDialect.Netezza;
+        string driverName = _generalDbService.DriverName(connectionName);
+
+        if (string.Equals(driverName, "DB2", StringComparison.OrdinalIgnoreCase))
+            return SqlDialect.Db2;
+
+        if (string.Equals(driverName, "MsSqlStd", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(driverName, "MsSqlTrusted", StringComparison.OrdinalIgnoreCase))
+            return SqlDialect.Mssql;
+
+        if (string.Equals(driverName, "Postgres", StringComparison.OrdinalIgnoreCase))
+            return SqlDialect.PostgreSql;
+
+        return SqlDialect.Netezza;
     }
 }

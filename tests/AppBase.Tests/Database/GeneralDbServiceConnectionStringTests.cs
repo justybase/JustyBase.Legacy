@@ -93,6 +93,28 @@ public sealed class GeneralDbServiceConnectionStringTests
     }
 
     [Fact]
+    public void MsSql_TrustServerCertificate_AppendedAfterExplicitAcceptance()
+    {
+        GeneralDbService service = CreateService("database.local");
+        Assert.Equal("Server=database.local;Database=DEV_DB;User Id=test-user;Password=test-password;", service.ConnectionStringForMsSql("development"));
+
+        service.AllowMsSqlTrustServerCertificate("development");
+
+        Assert.Equal(
+            "Server=database.local;Database=DEV_DB;User Id=test-user;Password=test-password;TrustServerCertificate=True;",
+            service.ConnectionStringForMsSql("development"));
+        Assert.Equal(
+            "Server=database.local;Database=OTHER;User Id=test-user;Password=test-password;TrustServerCertificate=True;",
+            service.ConnectionStringForMsSql("development", "OTHER"));
+        Assert.Equal(
+            "Server=database.local;Database=DEV_DB;Trusted_Connection=True;TrustServerCertificate=True;",
+            service.ConnectionStringForMsSqlTrusted("development"));
+        Assert.Equal(
+            "Server=database.local;Database=OTHER;Trusted_Connection=True;TrustServerCertificate=True;",
+            service.ConnectionStringForMsSqlTrusted("development", "OTHER"));
+    }
+
+    [Fact]
     public void ClipToLines_SplitsRowsAndPreservesEmbeddedNewline()
     {
         GeneralDbService service = CreateService("database.local");

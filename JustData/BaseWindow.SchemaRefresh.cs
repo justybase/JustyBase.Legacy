@@ -228,6 +228,11 @@ namespace JustyBaseLegacy.UI
                     _connectionSessions.Set(selConnName, gdb);
                     try
                     {
+                        // Route initialization through the repository single-flight
+                        // instead of calling InitDb directly. The schema tree can
+                        // request the same connection concurrently, and DB2's
+                        // InitDb mutates ordinary dictionaries that cannot be
+                        // initialized by two callers at once.
                         await _schemaRefreshCoordinator.RefreshAsync(
                             selConnName,
                             new JustData.Application.Schema.SchemaRefreshRequest(
@@ -255,12 +260,26 @@ namespace JustyBaseLegacy.UI
                     }
 
                     statusTextBox.Text = $"{dbName} schema refreshed";
+                    // Fill the provider suggestion store after the first connect;
+                    // re-selection refreshes it, but the initial session never did.
+                    try
+                    {
+                        gdb.ResetDynamicCollection();
+                    }
+                    catch (Exception resetEx)
+                    {
+                        _loggerLoud.LogError($"Failed to refresh completion suggestions for '{selConnName}'", resetEx);
+                    }
                     SchemaRefreshOptionEnable(true);
                     chageEnableStateOfNotAddedTab(true);
                 }
                 else if (_connectionSessions.TryGetValue(selConnName, out var gdbReset))
                 {
                     gdbReset.ResetDynamicCollection();
+                    // The session already exists, so the tree was already rendered
+                    // for this connection (every session-creating path renders it).
+                    // Skip the trailing InitializeAsync re-render, which would
+                    // collapse the whole tree for no content change.
                     nonNetezzaMvvmInitialized = true;
                 }
 

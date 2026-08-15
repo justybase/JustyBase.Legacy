@@ -33,7 +33,7 @@
 **JustyBase.Legacy** is a solo-maintained desktop IDE focused on **IBM Netezza / PureData**.  
 Write and run SQL, browse catalog objects, tune preferences in a docked settings tab, and keep connection profiles encrypted on disk.
 
-Netezza and DB2 are included in the default shipped provider set. The SQL editor selects the matching dialect for the active connection; Netezza remains the fallback for unknown connections. MS SQL, Oracle, and PostgreSQL remain optional compile-time providers.
+Netezza, DB2, MS SQL Server, and PostgreSQL are included in the default shipped provider set. The SQL editor selects the matching dialect for the active connection; Netezza remains the fallback for unknown connections. Oracle remains an optional compile-time provider.
 
 ---
 
@@ -61,7 +61,7 @@ Light and dark themes are both first-class (`UseSpecialColoring`).
 
 ## Features
 
-- **Dialect-aware SQL editor** — Netezza and DB2 syntax highlighting, completion, hover, signature help, and linting selected per active connection
+- **Dialect-aware SQL editor** — Netezza, DB2, MS SQL Server, and PostgreSQL syntax highlighting, completion, hover, signature help, and linting selected per active connection
 - **Quick Open (`Ctrl+P`)** — VS Code–style search across `.sql` file names and contents in the Files panel roots, the selected Git repo (when set), and open SQL tabs; Enter opens/focuses the file and jumps to a content match line when applicable
 - **Virtual-mode result grid** — large result sets, filter/export to CSV / Excel
 - **Object explorer** — connections, databases, tables; open DDL and navigate into objects
@@ -89,13 +89,17 @@ flowchart TB
 
   subgraph providers [Providers]
     NZ[App.Data.Netezza]
-    OPT[Optional MsSql / Oracle / Postgres]
+    MSSQL[App.Data.MsSqlDb]
+    PG[App.Data.Postgres]
+    OPT[Optional Oracle]
   end
 
   JVM --> JA
   JD --> JVM
   JD --> JA
   JD --> NZ
+  JD --> MSSQL
+  JD --> PG
   JD -.-> OPT
 ```
 
@@ -140,8 +144,10 @@ When sibling folder `../JustyBase.NetezzaSql` exists (e.g. a `##justybase` multi
 Optional provider (example):
 
 ```powershell
-dotnet build JustData/JustData.csproj -c Release -p:IncludeMsSql=true
+dotnet build JustData/JustData.csproj -c Release -p:IncludeOracle=true
 ```
+
+The default distribution includes Netezza, DB2, MS SQL Server, and PostgreSQL; use `-p:IncludeDB2=false`, `-p:IncludeMsSql=false`, and/or `-p:IncludePostgres=false` for reduced builds.
 
 Self-contained publish:
 

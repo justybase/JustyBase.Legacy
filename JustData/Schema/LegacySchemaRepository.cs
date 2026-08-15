@@ -3,6 +3,7 @@ using AppBase.Common;
 using AppBase.Common.Configuration;
 using AppBase.Common.Interfaces;
 using AppBase.Data;
+using AppBase.Data.Core;
 using AppBase.Data.Core.Core;
 using AppBase.Data.Core.Enums;
 using AppBase.Data.Core.Interfaces;
@@ -10,6 +11,7 @@ using AppBase.Data.Core.Models;
 using JustData.Application.Login;
 using JustData.Application.Schema;
 using System.Collections.Concurrent;
+using System.Data;
 
 namespace JustyBaseLegacy.UI.Schema;
 
@@ -100,6 +102,38 @@ public sealed class LegacySchemaRepository : ISchemaRepository, IOutlineReposito
                 SchemaNodeKind.ObjectGroup => MapDb2Objects(parent, database),
                 SchemaNodeKind.Table or SchemaNodeKind.View
                     or SchemaNodeKind.Alias or SchemaNodeKind.Nickname or SchemaNodeKind.Synonym => MapColumns(parent, database),
+                _ => []
+            };
+        }
+
+        // SQL Server keeps its catalog in the provider-side INFORMATION_SCHEMA
+        // DataTables (tables/views/procedures) populated by InitDb. Map those
+        // rows per database/schema instead of objectInSchema, which the
+        // provider does not fill.
+        if (database.DatabaseType == DatabaseTypeEnum.MsSqlDb && database is GeneralDb msSqlDb)
+        {
+            return parent.Kind switch
+            {
+                SchemaNodeKind.Connection => MapDatabases(parent, database),
+                SchemaNodeKind.Database => MapMsSqlSchemas(parent, msSqlDb),
+                SchemaNodeKind.Schema => MapMsSqlObjectGroups(parent, msSqlDb),
+                SchemaNodeKind.ObjectGroup => MapMsSqlObjects(parent, msSqlDb),
+                SchemaNodeKind.Table or SchemaNodeKind.View => MapColumns(parent, database),
+                _ => []
+            };
+        }
+
+        // PostgreSQL is single-database per connection; its provider DataTables
+        // carry schema in column 0 and object name in column 1 (no catalog).
+        if (database.DatabaseType == DatabaseTypeEnum.Postgres && database is GeneralDb postgresDb)
+        {
+            return parent.Kind switch
+            {
+                SchemaNodeKind.Connection => MapDatabases(parent, database),
+                SchemaNodeKind.Database => MapPostgresSchemas(parent, postgresDb),
+                SchemaNodeKind.Schema => MapPostgresObjectGroups(parent, postgresDb),
+                SchemaNodeKind.ObjectGroup => MapPostgresObjects(parent, postgresDb),
+                SchemaNodeKind.Table or SchemaNodeKind.View => MapColumns(parent, database),
                 _ => []
             };
         }
@@ -816,5 +850,222 @@ public sealed class LegacySchemaRepository : ISchemaRepository, IOutlineReposito
         string[] columns = database.GetColumns(parent.Path.Database ?? database.DefaultDatabaseName, parent.Path.Schema ?? string.Empty, parent.Name);
         return columns.Select(column => new SchemaNode($"{parent.Id}/{column}", column, SchemaNodeKind.Column,
             new(parent.Path.Connection, parent.Path.Database, parent.Path.Schema, parent.Name), false)).ToArray();
+    }
+
+    private static IReadOnlyList<SchemaNode> MapMsSqlSchemas(SchemaNode parent, GeneralDb database)
+    {
+        string db = parent.Path.Database ?? database.DefaultDatabaseName;
+        var schemas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (DataTable catalog in new[] { database.tables, database.views, database.procedures })
+        {
+            if (catalog is null)
+                continue;
+
+            foreach (DataRow row in catalog.Rows)
+            {
+                if (!string.Equals(GetRowString(row, 0, "TABLE_CATALOG", "ROUTINE_CATALOG"), db, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string schema = GetRowString(row, 1, "TABLE_SCHEMA", "ROUTINE_SCHEMA");
+                if (!string.IsNullOrWhiteSpace(schema))
+                    schemas.Add(schema);
+            }
+        }
+
+        return schemas.OrderBy(schema => schema, StringComparer.OrdinalIgnoreCase)
+            .Select(schema => new SchemaNode($"{parent.Id}/{schema}", schema, SchemaNodeKind.Schema,
+                new(parent.Path.Connection, parent.Path.Database, schema), true))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<SchemaNode> MapMsSqlObjectGroups(SchemaNode parent, GeneralDb database)
+    {
+        var groups = new List<SchemaNode>();
+        foreach ((string name, SchemaNodeKind kind) in MsSqlObjectGroupDefinitions)
+        {
+            if (MsSqlObjectCount(database, parent.Path.Database ?? database.DefaultDatabaseName, parent.Name, kind) > 0)
+            {
+                groups.Add(new SchemaNode(
+                    $"{parent.Id}/{name}",
+                    name,
+                    SchemaNodeKind.ObjectGroup,
+                    new(parent.Path.Connection, parent.Path.Database, parent.Name),
+                    true,
+                    ProviderKind: name));
+            }
+        }
+
+        return groups.ToArray();
+    }
+
+    private static IReadOnlyList<(string Name, SchemaNodeKind Kind)> MsSqlObjectGroupDefinitions { get; } =
+    [
+        ("Tables", SchemaNodeKind.Table),
+        ("Views", SchemaNodeKind.View),
+        ("Procedures", SchemaNodeKind.Procedure)
+    ];
+
+    private static int MsSqlObjectCount(GeneralDb database, string db, string schema, SchemaNodeKind kind)
+    {
+        DataTable? catalog = MsSqlCatalogForKind(database, kind);
+        if (catalog is null)
+            return 0;
+
+        int count = 0;
+        foreach (DataRow row in catalog.Rows)
+        {
+            if (string.Equals(GetRowString(row, 0, "TABLE_CATALOG", "ROUTINE_CATALOG"), db, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(GetRowString(row, 1, "TABLE_SCHEMA", "ROUTINE_SCHEMA"), schema, StringComparison.OrdinalIgnoreCase))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static DataTable? MsSqlCatalogForKind(GeneralDb database, SchemaNodeKind kind) => kind switch
+    {
+        SchemaNodeKind.Table => database.tables,
+        SchemaNodeKind.View => database.views,
+        SchemaNodeKind.Procedure => database.procedures,
+        _ => null
+    };
+
+    private static IReadOnlyList<SchemaNode> MapMsSqlObjects(SchemaNode parent, GeneralDb database)
+    {
+        string db = parent.Path.Database ?? database.DefaultDatabaseName;
+        string schema = parent.Path.Schema ?? parent.Name;
+        var objects = new List<SchemaNode>();
+        foreach ((string groupName, SchemaNodeKind kind) in MsSqlObjectGroupDefinitions)
+        {
+            if (!string.Equals(groupName, parent.Name, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            DataTable? catalog = MsSqlCatalogForKind(database, kind);
+            if (catalog is null)
+                continue;
+
+            foreach (DataRow row in catalog.Rows)
+            {
+                if (!string.Equals(GetRowString(row, 0, "TABLE_CATALOG", "ROUTINE_CATALOG"), db, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (!string.Equals(GetRowString(row, 1, "TABLE_SCHEMA", "ROUTINE_SCHEMA"), schema, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string name = GetRowString(row, 2, "TABLE_NAME", "ROUTINE_NAME");
+                if (string.IsNullOrWhiteSpace(name))
+                    continue;
+
+                bool hasChildren = kind is SchemaNodeKind.Table or SchemaNodeKind.View;
+                objects.Add(new SchemaNode($"{parent.Id}/{name}", name, kind,
+                    new(parent.Path.Connection, parent.Path.Database, schema, name), hasChildren));
+            }
+        }
+
+        return objects.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static IReadOnlyList<SchemaNode> MapPostgresSchemas(SchemaNode parent, GeneralDb database)
+    {
+        var schemas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (DataTable? catalog in new[] { database.tables, database.views, database.procedures })
+        {
+            if (catalog is null)
+                continue;
+
+            foreach (DataRow row in catalog.Rows)
+            {
+                string schema = GetRowString(row, 0, "table_schema", "routine_schema");
+                if (!string.IsNullOrWhiteSpace(schema))
+                    schemas.Add(schema);
+            }
+        }
+
+        return schemas.OrderBy(schema => schema, StringComparer.OrdinalIgnoreCase)
+            .Select(schema => new SchemaNode($"{parent.Id}/{schema}", schema, SchemaNodeKind.Schema,
+                new(parent.Path.Connection, parent.Path.Database, schema), true))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<SchemaNode> MapPostgresObjectGroups(SchemaNode parent, GeneralDb database)
+    {
+        string schema = parent.Name;
+        var groups = new List<SchemaNode>();
+        foreach ((string name, SchemaNodeKind kind) in MsSqlObjectGroupDefinitions)
+        {
+            if (PostgresObjectCount(database, schema, kind) > 0)
+            {
+                groups.Add(new SchemaNode(
+                    $"{parent.Id}/{name}",
+                    name,
+                    SchemaNodeKind.ObjectGroup,
+                    new(parent.Path.Connection, parent.Path.Database, schema),
+                    true,
+                    ProviderKind: name));
+            }
+        }
+
+        return groups.ToArray();
+    }
+
+    private static int PostgresObjectCount(GeneralDb database, string schema, SchemaNodeKind kind)
+    {
+        DataTable? catalog = MsSqlCatalogForKind(database, kind);
+        if (catalog is null)
+            return 0;
+
+        int count = 0;
+        foreach (DataRow row in catalog.Rows)
+        {
+            if (string.Equals(GetRowString(row, 0, "table_schema", "routine_schema"), schema, StringComparison.OrdinalIgnoreCase))
+                count++;
+        }
+
+        return count;
+    }
+
+    private static IReadOnlyList<SchemaNode> MapPostgresObjects(SchemaNode parent, GeneralDb database)
+    {
+        string schema = parent.Path.Schema ?? parent.Name;
+        var objects = new List<SchemaNode>();
+        foreach ((string groupName, SchemaNodeKind kind) in MsSqlObjectGroupDefinitions)
+        {
+            if (!string.Equals(groupName, parent.Name, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            DataTable? catalog = MsSqlCatalogForKind(database, kind);
+            if (catalog is null)
+                continue;
+
+            foreach (DataRow row in catalog.Rows)
+            {
+                if (!string.Equals(GetRowString(row, 0, "table_schema", "routine_schema"), schema, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string name = GetRowString(row, 1, "tableName", "viewname", "routine_name");
+                if (string.IsNullOrWhiteSpace(name))
+                    continue;
+
+                bool hasChildren = kind is SchemaNodeKind.Table or SchemaNodeKind.View;
+                objects.Add(new SchemaNode($"{parent.Id}/{name}", name, kind,
+                    new(parent.Path.Connection, parent.Path.Database, schema, name), hasChildren));
+            }
+        }
+
+        return objects.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static string GetRowString(DataRow row, int fallbackPosition, params string[] preferredNames)
+    {
+        foreach (string name in preferredNames)
+        {
+            if (row.Table.Columns[name] is DataColumn column)
+                return row[column]?.ToString() ?? string.Empty;
+        }
+
+        return fallbackPosition < row.ItemArray.Length
+            ? row.ItemArray[fallbackPosition]?.ToString() ?? string.Empty
+            : string.Empty;
     }
 }

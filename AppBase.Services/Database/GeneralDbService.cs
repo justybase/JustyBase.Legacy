@@ -9,6 +9,7 @@ using AppBase.Data.Core.Interfaces;
 #if INCLUDE_ORACLE
 using Oracle.ManagedDataAccess.Client;
 #endif
+using System.Collections.Concurrent;
 using System.Globalization;
 
 namespace AppBase.Services;
@@ -50,6 +51,7 @@ public partial class GeneralDbService : IGeneralDbService
     private readonly ILogger _logger;
     private readonly IConnectionCredentialLookup _credentials;
     private readonly IDatabaseProviderFactory _providerFactory;
+    private readonly ConcurrentDictionary<string, byte> _trustedMsSqlConnections = new(StringComparer.OrdinalIgnoreCase);
 
     public GeneralDbService(ILogger logger, IConnectionCredentialLookup credentials, IDatabaseProviderFactory providerFactory = null)
     {
@@ -58,6 +60,49 @@ public partial class GeneralDbService : IGeneralDbService
         _providerFactory = providerFactory ?? new DatabaseProviderFactory();
         _nfi.NumberDecimalDigits = MinimumNumericPrecision;
         RelatedDatabaseType = DatabaseTypeEnum.Netezza;
+    }
+
+    public void AllowMsSqlTrustServerCertificate(string connectionName)
+    {
+        if (!string.IsNullOrWhiteSpace(connectionName))
+        {
+            _trustedMsSqlConnections.TryAdd(connectionName, 0);
+        }
+    }
+
+    private bool ConfirmMsSqlUntrustedCertificate(string connectionName, Exception originalError)
+    {
+        if (_logger.MessageBox_Show(
+                null,
+                "The server certificate could not be verified. Connecting anyway will bypass certificate validation for this session." +
+                $"\r\n\r\n{TruncateForDialog(originalError.Message)}" +
+                "\r\n\r\nConnect anyway?",
+                "Server certificate not trusted",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning) != DialogResult.Yes)
+        {
+            return false;
+        }
+
+        AllowMsSqlTrustServerCertificate(connectionName);
+        return true;
+    }
+
+    private static string TruncateForDialog(string message)
+    {
+        if (string.IsNullOrEmpty(message))
+        {
+            return message;
+        }
+
+        return message.Length <= 300 ? message : message[..300] + "…";
+    }
+
+    private string MsSqlTrustServerCertificateFlag(string connectionName)
+    {
+        return _trustedMsSqlConnections.ContainsKey(connectionName)
+            ? "TrustServerCertificate=True;"
+            : string.Empty;
     }
 
     public string[] ClipToLines(char sepInClipboard, ref string clip, char escapechar)
@@ -105,22 +150,22 @@ public partial class GeneralDbService : IGeneralDbService
 
     public string ConnectionStringForMsSql(string connectionName)
     {
-        return $"Server={Server(connectionName)};Database={DBname(connectionName)};User Id={UserName(connectionName)};Password={Password(connectionName)};";
+        return $"Server={Server(connectionName)};Database={DBname(connectionName)};User Id={UserName(connectionName)};Password={Password(connectionName)};{MsSqlTrustServerCertificateFlag(connectionName)}";
     }
 
     public string ConnectionStringForMsSql(string connectionName, string db)
     {
-        return $"Server={Server(connectionName)};Database={db};User Id={UserName(connectionName)};Password={Password(connectionName)};";
+        return $"Server={Server(connectionName)};Database={db};User Id={UserName(connectionName)};Password={Password(connectionName)};{MsSqlTrustServerCertificateFlag(connectionName)}";
     }
 
     public string ConnectionStringForMsSqlTrusted(string connectionName)
     {
-        return $"Server={Server(connectionName)};Database={DBname(connectionName)};Trusted_Connection=True;";
+        return $"Server={Server(connectionName)};Database={DBname(connectionName)};Trusted_Connection=True;{MsSqlTrustServerCertificateFlag(connectionName)}";
     }
 
     public string ConnectionStringForMsSqlTrusted(string connectionName, string db)
     {
-        return $"Server={Server(connectionName)};Database={db};Trusted_Connection=True;";
+        return $"Server={Server(connectionName)};Database={db};Trusted_Connection=True;{MsSqlTrustServerCertificateFlag(connectionName)}";
     }
 
     public string ConnectionStringForNz(int timeout, string connectionName, string db = null)
@@ -240,6 +285,12 @@ public partial class GeneralDbService : IGeneralDbService
 
             dbName = result.DatabaseName;
             gdb = result.Database;
+#if INCLUDE_MSSQL
+            if (gdb is AppBase.Data.MsSqlDb.MsSqlDb msSqlDb)
+            {
+                msSqlDb.ConfirmUntrustedCertificate = ex => ConfirmMsSqlUntrustedCertificate(connectionName, ex);
+            }
+#endif
             if (result.DatabaseType.HasValue)
             {
                 RelatedDatabaseType = result.DatabaseType.Value;

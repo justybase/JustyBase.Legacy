@@ -259,7 +259,9 @@ public sealed class LegacySqlAuthoringServices : IDisposable
             return
             [
                 GetLintEngine(SqlDialect.Netezza),
-                GetLintEngine(SqlDialect.Db2)
+                GetLintEngine(SqlDialect.Db2),
+                GetLintEngine(SqlDialect.Mssql),
+                GetLintEngine(SqlDialect.PostgreSql)
             ];
         }
     }

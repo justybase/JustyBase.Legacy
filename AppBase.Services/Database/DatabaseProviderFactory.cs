@@ -80,6 +80,7 @@ public sealed class DatabaseProviderFactory : IDatabaseProviderFactory
         {
             IGeneralDb database = new Oracle(databaseRuntimeContext, logger, importExportTasks, databaseService)
             {
+                LogErrorStdColor = logErrorStdColor,
                 ConnectionString = databaseService.ConnectionStringForOracle(connectionName)
             };
 
@@ -91,6 +92,8 @@ public sealed class DatabaseProviderFactory : IDatabaseProviderFactory
         {
             IGeneralDb database = new Postgres(databaseRuntimeContext, logger, importExportTasks, databaseService)
             {
+                LogErrorStdColor = logErrorStdColor,
+                ConnectionName = connectionName,
                 ConnectionString = databaseService.ConnectionStringForPostgreSQL(connectionName)
             };
 
@@ -102,6 +105,7 @@ public sealed class DatabaseProviderFactory : IDatabaseProviderFactory
         {
             IGeneralDb database = new MsSqlDb(databaseRuntimeContext, logger, importExportTasks, databaseService)
             {
+                LogErrorStdColor = logErrorStdColor,
                 ConnectionName = connectionName,
                 ConnectionString = databaseService.ConnectionStringForMsSql(connectionName)
             };
@@ -113,6 +117,7 @@ public sealed class DatabaseProviderFactory : IDatabaseProviderFactory
         {
             IGeneralDb database = new MsSqlDb(databaseRuntimeContext, logger, importExportTasks, databaseService)
             {
+                LogErrorStdColor = logErrorStdColor,
                 ConnectionName = connectionName,
                 ConnectionString = databaseService.ConnectionStringForMsSqlTrusted(connectionName)
             };

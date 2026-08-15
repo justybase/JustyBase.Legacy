@@ -190,44 +190,78 @@ public sealed class Postgres : GeneralDb
     public override void ResetDynamicCollection()
     {
         ResetDynamicCollectionH();
-        if (_users == null)
+        if (_users is null)
         {
-            throw new Exception("problem with users - posgres - resetDynamicCollection");
+            throw new Exception("problem with users - postgres - resetDynamicCollection");
         }
-        if (_users.Columns.Count <= 2)
-        {
-            return;
-        }
+
+        // InitDb fills _users with one column (table_schema); the provider is
+        // single-database, so schema/table rows carry no catalog column.
         foreach (DataRow user in _users.Rows)
         {
-            AutocompleteSuggestions.OneWord.Add(user.ItemArray[1] as string);
-        }
-
-        foreach (DataRow itx in _users.Rows)
-        {
-            var user = itx.ItemArray[1];
-
-            DataRow[] tableCol;
-            tableCol = tables?.Select($"TABLE_SCHEMA = '{user}' AND TABLE_CATALOG = '{DefaultDatabaseName}'");
-
-            foreach (DataRow item in tableCol)//owner, name,type
+            string schema = user.ItemArray[0] as string;
+            if (string.IsNullOrWhiteSpace(schema))
             {
-                string tabName = item.ItemArray[2] as string;
-                if (!tabName.IsGoodName())
+                continue;
+            }
+
+            AutocompleteSuggestions.OneWord.Add(schema);
+
+            if (tables is not null)
+            {
+                foreach (DataRow item in tables.Rows)
                 {
-                    tabName = $"\"{tabName}\"";
+                    if (string.Equals(item.ItemArray[0] as string, schema, StringComparison.OrdinalIgnoreCase))
+                    {
+                        AutocompleteSuggestions.TwoWords.Add($"{schema}.{QuoteIfNeeded(item.ItemArray[1] as string)}");
+                    }
                 }
-                AutocompleteSuggestions.TwoWords.Add($"{user}.{tabName}");
             }
 
-            DataRow[] viewCol;
-            viewCol = views?.Select($"TABLE_SCHEMA = '{user}' AND TABLE_CATALOG = '{DefaultDatabaseName}'");
-
-            foreach (DataRow item in viewCol)
+            if (views is not null)
             {
-                AutocompleteSuggestions.TwoWords.Add($"{user}.{item.ItemArray[2]}");
+                foreach (DataRow item in views.Rows)
+                {
+                    if (string.Equals(item.ItemArray[0] as string, schema, StringComparison.OrdinalIgnoreCase))
+                    {
+                        AutocompleteSuggestions.TwoWords.Add($"{schema}.{QuoteIfNeeded(item.ItemArray[1] as string)}");
+                    }
+                }
             }
         }
+    }
+
+    /// <summary>
+    /// Mirrors the VSCode extension quoting rules for the postgres dialect:
+    /// double quotes are emitted only when the name falls outside
+    /// /^[A-Za-z_][A-Za-z0-9_]*$/ or is a PostgreSQL reserved word.
+    /// </summary>
+    private string QuoteIfNeeded(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return name;
+        }
+
+        if (name[0] == '_' || char.IsAsciiLetter(name[0]))
+        {
+            for (int i = 1; i < name.Length; i++)
+            {
+                char c = name[i];
+                if (c != '_' && !char.IsAsciiLetterOrDigit(c))
+                {
+                    return $"\"{name}\"";
+                }
+            }
+        }
+        else
+        {
+            return $"\"{name}\"";
+        }
+
+        return _generalDbService.ReservedWords?.Contains(name.ToUpperInvariant()) == true
+            ? $"\"{name}\""
+            : name;
     }
 
     protected override void AddToCache(string dbname, string schema, string tablename)
@@ -238,6 +272,20 @@ public sealed class Postgres : GeneralDb
     public override DbConnection GetConnection()
     {
         return new NpgsqlConnection(ConnectionString);
+    }
+
+    public override DbConnection GetConnection(string databaseName, bool usePool = true)
+    {
+        if (string.IsNullOrWhiteSpace(databaseName))
+        {
+            return GetConnection();
+        }
+
+        NpgsqlConnectionStringBuilder builder = new NpgsqlConnectionStringBuilder(ConnectionString)
+        {
+            Database = databaseName
+        };
+        return new NpgsqlConnection(builder.ConnectionString);
     }
 
 
@@ -582,11 +630,6 @@ ORDER BY
     }
 
     public override string SearchInProcedureSource(string txtToSearch)
-    {
-        throw new NotImplementedException();
-    }
-
-    public override DbConnection GetConnection(string databaseName, bool usePool = true)
     {
         throw new NotImplementedException();
     }

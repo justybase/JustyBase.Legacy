@@ -52,6 +52,8 @@ $publishArguments = @(
     '-r', 'win-x64',
     '-p:Platform=x64',
     '-p:IncludeDB2=true',
+    '-p:IncludeMsSql=true',
+    '-p:IncludePostgres=true',
     '-p:UseAOT=false',
     '-p:PublishAot=false',
     '-p:PublishTrimmed=false',
@@ -100,6 +102,14 @@ if ($missingRuntimeAssemblies) {
 
 if (-not (Test-Path -LiteralPath (Join-Path $stagingPath 'IBM.Data.Db2.dll') -PathType Leaf)) {
     throw "DB2 managed provider was not included in publish staging: $stagingPath"
+}
+
+if (-not (Test-Path -LiteralPath (Join-Path $stagingPath 'Microsoft.Data.SqlClient.dll') -PathType Leaf)) {
+    throw "MS SQL Server managed provider was not included in publish staging: $stagingPath"
+}
+
+if (-not (Test-Path -LiteralPath (Join-Path $stagingPath 'Npgsql.dll') -PathType Leaf)) {
+    throw "PostgreSQL managed provider was not included in publish staging: $stagingPath"
 }
 
 $db2NativeDriver = Get-ChildItem -LiteralPath $stagingPath -Recurse -File -Filter 'db2app64.dll' |

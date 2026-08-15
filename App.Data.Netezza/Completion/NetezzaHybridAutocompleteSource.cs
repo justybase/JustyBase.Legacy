@@ -27,10 +27,10 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
     private readonly AutocompleteMenu _menu;
     private readonly INetezzaCompletionContext _completionContext;
     private readonly Func<string> _activeDocumentTitleProvider;
-    private readonly IGeneralDbService _generalDbService;
     private readonly IConnectionSessionRegistry _connectionSessions;
     private readonly INetezzaSchemaTableCatalog _schemaTables;
     private readonly NetezzaSqlCompletionServices _completionServices;
+    private readonly SqlDialectResolver _dialectResolver;
     private SqlDialect _dialect;
     private EditorDocumentId _documentId;
     private readonly ISchemaProvider _schemaProvider;
@@ -62,7 +62,7 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         _menu = menu;
         _completionContext = completionContext;
         _activeDocumentTitleProvider = activeDocumentTitleProvider;
-        _generalDbService = generalDbService;
+        _dialectResolver = new SqlDialectResolver(generalDbService);
         _connectionSessions = connectionSessions ?? throw new ArgumentNullException(nameof(connectionSessions));
         _schemaTables = schemaTables ?? throw new ArgumentNullException(nameof(schemaTables));
         _completionServices = completionServices;
@@ -146,7 +146,7 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         if (_dialect != previousDialect)
             _completionServices.InvalidateSchema();
 
-        if (_dialect is not (SqlDialect.Netezza or SqlDialect.Db2))
+        if (_dialect is not (SqlDialect.Netezza or SqlDialect.Db2 or SqlDialect.Mssql or SqlDialect.PostgreSql))
         {
             foreach (var item in YieldGeneralDriverFallback(activeConnectionName))
                 yield return PrepareLegacyItem(item);
@@ -155,44 +155,53 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
 
         if (_dialect == SqlDialect.Netezza)
             _completionServices.EnsureSchemaForConnection(_completionContext, activeConnectionName);
-        else if (_connectionSessions.TryGetValue(activeConnectionName, out IGeneralDb? database)
-            && database.DatabaseType == DatabaseTypeEnum.DB2)
-            _completionServices.EnsureDb2Schema(database, activeConnectionName, activeDatabaseName);
+        else if (_connectionSessions.TryGetValue(activeConnectionName, out IGeneralDb? database))
+        {
+            if (database.DatabaseType == DatabaseTypeEnum.DB2)
+                _completionServices.EnsureDb2Schema(database, activeConnectionName, activeDatabaseName);
+            else if (database.DatabaseType == DatabaseTypeEnum.MsSqlDb)
+                _completionServices.EnsureMsSqlSchema(database, activeConnectionName, activeDatabaseName);
+            else if (database.DatabaseType == DatabaseTypeEnum.Postgres)
+                _completionServices.EnsurePostgresSchema(database, activeConnectionName);
+        }
 
         List<AutocompleteItem> engineItems = GetSqlCompletions(
             text,
             activeConnectionName,
             activeDatabaseName).ToList();
-        if (_dialect != SqlDialect.Db2)
+        if (_dialect is not (SqlDialect.Db2 or SqlDialect.Mssql or SqlDialect.PostgreSql))
         {
             foreach (var item in engineItems)
                 yield return PrepareLegacyItem(item);
             yield break;
         }
 
-        var db2Items = new List<AutocompleteItem>(engineItems);
+        var mergedItems = new List<AutocompleteItem>(engineItems);
         var emitted = new HashSet<string>(
-            db2Items.Select(item => item.ToString()),
+            mergedItems.Select(item => item.ToString()),
             StringComparer.OrdinalIgnoreCase);
-        foreach (var item in _dbFallback.GetCompletions(
-            text,
-            activeConnectionName,
-            activeDatabaseName,
-            _menu.Fragment.tb.Text))
+        if (_dialect == SqlDialect.Db2)
         {
-            if (emitted.Add(item.ToString()))
-                db2Items.Add(item);
+            foreach (var item in _dbFallback.GetCompletions(
+                text,
+                activeConnectionName,
+                activeDatabaseName,
+                _menu.Fragment.tb.Text))
+            {
+                if (emitted.Add(item.ToString()))
+                    mergedItems.Add(item);
+            }
         }
 
         foreach (var item in YieldGeneralDriverFallback(activeConnectionName))
         {
             if (emitted.Add(item.ToString()))
-                db2Items.Add(item);
+                mergedItems.Add(item);
         }
 
         int cursorOffset = _menu.Fragment.tb.PlaceToPosition(_menu.Fragment.End);
         foreach (var item in FctbCompletionMapper.PrioritizeSchemasForRelationContext(
-            db2Items,
+            mergedItems,
             _menu.Fragment.tb.Text,
             cursorOffset))
         {
@@ -455,10 +464,5 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
     }
 
     private SqlDialect ResolveDialect(string connectionName) =>
-        string.Equals(
-            _generalDbService.DriverName(connectionName),
-            "DB2",
-            StringComparison.OrdinalIgnoreCase)
-            ? SqlDialect.Db2
-            : SqlDialect.Netezza;
+        _dialectResolver.Resolve(connectionName);
 }

@@ -95,6 +95,74 @@ public sealed class Phase8SqlAuthoringAdapterTests
         Assert.DoesNotContain(lint.Diagnostics, diagnostic => diagnostic.Code?.StartsWith("NZ", StringComparison.OrdinalIgnoreCase) == true);
     }
 
+    [Fact]
+    public async Task Mssql_connection_selects_mssql_authoring_catalog_and_diagnostic_source()
+    {
+        var completion = CreateCompletion();
+        var generalDbService = Substitute.For<IGeneralDbService>();
+        generalDbService.DriverName(Arg.Any<string>()).Returns("MsSqlTrusted");
+
+        using var legacy = new LegacySqlAuthoringServices(completion, generalDbService);
+        var adapter = new NetezzaSqlAuthoringUseCaseAdapter(
+            new NetezzaSqlAuthoringUseCase(completion, legacy, generalDbService),
+            legacy);
+        EditorDocumentId documentId = EditorDocumentId.New();
+
+        IReadOnlyList<SqlCompletionItem> items = await adapter.CompleteAsync(
+            new SqlCompletionRequest(documentId, "SELECT COA", 10, "mssql"));
+        SqlLintResult lint = await adapter.LintAsync(
+            new SqlLintRequest(documentId, "SELECT * FROM missing_table", "mssql"));
+
+        Assert.Contains(items, item => item.Label.Equals("COALESCE", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(lint.Diagnostics, diagnostic => diagnostic.Source == "MSSQL SQL");
+        Assert.Contains(lint.Diagnostics, diagnostic => diagnostic.Code == "MSS001");
+        Assert.DoesNotContain(lint.Diagnostics, diagnostic => diagnostic.Code?.StartsWith("NZ", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    [Fact]
+    public async Task Postgres_connection_selects_postgres_authoring_catalog_and_diagnostic_source()
+    {
+        var completion = CreateCompletion();
+        var generalDbService = Substitute.For<IGeneralDbService>();
+        generalDbService.DriverName(Arg.Any<string>()).Returns("Postgres");
+
+        using var legacy = new LegacySqlAuthoringServices(completion, generalDbService);
+        var adapter = new NetezzaSqlAuthoringUseCaseAdapter(
+            new NetezzaSqlAuthoringUseCase(completion, legacy, generalDbService),
+            legacy);
+        EditorDocumentId documentId = EditorDocumentId.New();
+
+        IReadOnlyList<SqlCompletionItem> items = await adapter.CompleteAsync(
+            new SqlCompletionRequest(documentId, "SELECT COA", 10, "pg"));
+        SqlLintResult lint = await adapter.LintAsync(
+            new SqlLintRequest(documentId, "SELECT * FROM missing_table", "pg"));
+
+        Assert.Contains(items, item => item.Label.Equals("COALESCE", StringComparison.OrdinalIgnoreCase));
+        // PostgreSqlLintRules is still empty in the parser package, so the
+        // dialect is verified through the completion catalog here.
+        Assert.Empty(lint.Diagnostics);
+        Assert.DoesNotContain(lint.Diagnostics, diagnostic => diagnostic.Code?.StartsWith("NZ", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    [Fact]
+    public async Task Unknown_driver_falls_back_to_netezza_catalog()
+    {
+        var completion = CreateCompletion();
+        var generalDbService = Substitute.For<IGeneralDbService>();
+        generalDbService.DriverName(Arg.Any<string>()).Returns("CustomDriver");
+
+        using var legacy = new LegacySqlAuthoringServices(completion, generalDbService);
+        var adapter = new NetezzaSqlAuthoringUseCaseAdapter(
+            new NetezzaSqlAuthoringUseCase(completion, legacy, generalDbService),
+            legacy);
+        EditorDocumentId documentId = EditorDocumentId.New();
+
+        SqlLintResult lint = await adapter.LintAsync(
+            new SqlLintRequest(documentId, "SELECT * FROM TEST_TABLE", "custom"));
+
+        Assert.Contains(lint.Diagnostics, diagnostic => diagnostic.Source == "Netezza SQL");
+    }
+
     private static string ApplyEdits(string sql, IReadOnlyList<SqlTextEdit> edits)
     {
         string result = sql;
