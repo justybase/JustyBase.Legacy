@@ -228,7 +228,10 @@ namespace JustyBaseLegacy.UI
                     _connectionSessions.Set(selConnName, gdb);
                     try
                     {
-                        await Task.Run(() => gdb.InitDb());
+                        await _schemaRefreshCoordinator.RefreshAsync(
+                            selConnName,
+                            new JustData.Application.Schema.SchemaRefreshRequest(
+                                JustData.Application.Schema.SchemaRefreshMode.Full));
                         // Schema is populated through the MVVM repository.
                         // Use selConnName overload instead of parameterless to avoid
                         // rendering ALL connections before the final fixup call.
@@ -258,6 +261,7 @@ namespace JustyBaseLegacy.UI
                 else if (_connectionSessions.TryGetValue(selConnName, out var gdbReset))
                 {
                     gdbReset.ResetDynamicCollection();
+                    nonNetezzaMvvmInitialized = true;
                 }
 
                 if (SelectedConnectionName == selConnName

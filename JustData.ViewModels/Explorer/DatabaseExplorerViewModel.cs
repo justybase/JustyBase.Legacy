@@ -123,6 +123,13 @@ public sealed class DatabaseExplorerViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // WinForms can raise BeforeExpand more than once while the first async
+        // expansion is still running. Do not start a second catalog refresh for
+        // the same node; some legacy providers mutate ordinary dictionaries in
+        // InitDb and cannot tolerate concurrent initialization.
+        if (node.IsLoading)
+            return;
+
         await RunOperationAsync(async token =>
         {
             await _uiDispatcher.InvokeOnUiAsync(
@@ -142,7 +149,15 @@ public sealed class DatabaseExplorerViewModel : ObservableObject, IDisposable
                     await _uiDispatcher.InvokeOnUiAsync(
                         () => Status = "Refreshing schema…",
                         token);
-                    await _schemaRepository.RefreshAsync(node.Path.Connection, token).ConfigureAwait(false);
+                    // A connection expansion must produce a complete catalog. In
+                    // particular, Netezza's partial mode discovers database names
+                    // but loads objects only for the default database, which leaves
+                    // the other database branches empty when the SQL tab has not
+                    // initialized this connection first.
+                    SchemaRefreshRequest? refreshRequest = node.Kind == SchemaNodeKind.Connection
+                        ? new SchemaRefreshRequest(SchemaRefreshMode.Full)
+                        : null;
+                    await _schemaRepository.RefreshAsync(node.Path.Connection, token, refreshRequest).ConfigureAwait(false);
                     children = await _schemaRepository.GetChildrenAsync(node.Model, token).ConfigureAwait(false);
                 }
 

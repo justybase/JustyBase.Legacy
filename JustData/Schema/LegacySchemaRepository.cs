@@ -73,14 +73,6 @@ public sealed class LegacySchemaRepository : ISchemaRepository, IOutlineReposito
         cancellationToken.ThrowIfCancellationRequested();
         if (!_connectionSessions.TryGetValue(parent.Path.Connection, out var database))
         {
-            if (parent.Kind == SchemaNodeKind.Connection
-                && _profiles.TryGetProfile(parent.Path.Connection, out ConnectionProfile profile))
-            {
-                return [
-                    new SchemaNode($"{parent.Id}/{profile.Database}", profile.Database, SchemaNodeKind.Database,
-                        new(parent.Path.Connection, profile.Database), true)];
-            }
-
             return [];
         }
 
@@ -549,37 +541,35 @@ public sealed class LegacySchemaRepository : ISchemaRepository, IOutlineReposito
 
     private IReadOnlyList<SchemaNode> MapDatabases(SchemaNode parent, IGeneralDb database)
     {
-        if (database is INetezza
-            && _databaseRuntimeContext.DatabaseDictionary.TryGetValue(parent.Path.Connection, out var providerDatabases)
-            && providerDatabases.Count > 0)
+        if (database is INetezza)
         {
-            // Snapshot Values before LINQ to avoid "Collection was modified" when
-            // Netezza.DownloadSchemaNetezza replaces or populates the dictionary
-            // from a background thread (Task.Run).
-            DatabaseInfo[] dbValues = providerDatabases.Values.ToArray();
-            return dbValues
-                .Select(info => info.DatabaseName)
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Select(name => new SchemaNode($"{parent.Id}/{name}", name, SchemaNodeKind.Database,
-                    new(parent.Path.Connection, name), true))
-                .ToArray();
+            if (_databaseRuntimeContext.DatabaseDictionary.TryGetValue(parent.Path.Connection, out var providerDatabases)
+                && providerDatabases.Count > 0)
+            {
+                // Snapshot Values before LINQ to avoid "Collection was modified" when
+                // Netezza.DownloadSchemaNetezza replaces or populates the dictionary
+                // from a background thread (Task.Run).
+                DatabaseInfo[] dbValues = providerDatabases.Values.ToArray();
+                return dbValues
+                    .Select(info => info.DatabaseName)
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(name => new SchemaNode($"{parent.Id}/{name}", name, SchemaNodeKind.Database,
+                        new(parent.Path.Connection, name), true))
+                    .ToArray();
+            }
+
+            // Do not fall back to the profile/default database for Netezza. That
+            // placeholder becomes a permanently cached child of the connection
+            // while DownloadSchemaNetezza is still pending, which is the source
+            // of the SQL-tab-dependent tree reported by users.
+            return [];
         }
 
         IEnumerable<string> names = (database.DatabaseList ?? [])
             .Append(database.DefaultDatabaseName)
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Distinct(StringComparer.OrdinalIgnoreCase);
-
-        // Some providers do not populate DatabaseList/DefaultDatabaseName until
-        // their first schema refresh. Keep the logged-in profile database visible
-        // while that refresh is still in progress instead of rendering a dead root.
-        if (!names.Any()
-            && _profiles.TryGetProfile(parent.Path.Connection, out ConnectionProfile profile)
-            && !string.IsNullOrWhiteSpace(profile.Database))
-        {
-            names = [profile.Database];
-        }
 
         return names.Select(name => new SchemaNode($"{parent.Id}/{name}", name, SchemaNodeKind.Database,
             new(parent.Path.Connection, name), true)).ToArray();
