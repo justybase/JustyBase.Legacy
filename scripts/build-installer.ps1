@@ -57,6 +57,7 @@ $publishArguments = @(
     '-p:UseAOT=false',
     '-p:PublishAot=false',
     '-p:PublishTrimmed=false',
+    '-p:PublishReadyToRun=true',
     '--self-contained', 'true',
     '-o', $stagingPath,
     "-p:Version=$Version"
