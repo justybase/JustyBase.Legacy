@@ -1,5 +1,7 @@
 using AppBase.Common.Configuration;
 using AppBase.Common.Interfaces;
+using JustyBase.Ai.Chat;
+using JustyBase.Ai.Embedded.Abstractions;
 using JustyBase.Ai.Embedded.Download;
 
 namespace JustyBaseLegacy.UI.Controls;
@@ -12,6 +14,7 @@ public sealed class AiChatPreferencesPanel : UserControl
 {
     private readonly IApplicationSettingsContext _settings;
     private readonly EmbeddedChatModelCatalog? _chatCatalog;
+    private readonly IEmbeddedChatModelBootstrapService? _chatBootstrap;
     private static readonly ToolTip toolTip = new();
     private bool _loading;
 
@@ -36,13 +39,21 @@ public sealed class AiChatPreferencesPanel : UserControl
     private NumericUpDown? _embeddedGpuLayers;
     private NumericUpDown? _embeddedCtxSize;
     private CheckBox? _preferVulkan;
+    private Button? _embeddedDownload;
+    private Button? _embeddedCancel;
+    private ProgressBar? _embeddedProgress;
+    private Label? _embeddedStatus;
+    private CancellationTokenSource? _embeddedDownloadCts;
+    private bool _isDisposing;
 
     public AiChatPreferencesPanel(
         IApplicationSettingsContext settings,
-        EmbeddedChatModelCatalog? chatCatalog = null)
+        EmbeddedChatModelCatalog? chatCatalog = null,
+        IEmbeddedChatModelBootstrapService? chatBootstrap = null)
     {
         _settings = settings;
         _chatCatalog = chatCatalog;
+        _chatBootstrap = chatBootstrap;
         AutoScroll = true;
         BuildLayout();
         LoadFromConfig();
@@ -65,10 +76,11 @@ public sealed class AiChatPreferencesPanel : UserControl
 
         AddSectionHeader(root, "General — defaults for new chat sessions");
         _enableChat = AddCheckBox(root, "Enable AI Chat", "Master switch for the AI Chat panel.", "aiChatEnable");
-        _backend = AddCombo(root, "Backend", "Where AI requests are sent: Codex (ChatGPT), OpenAI Compatible or Embedded (local). You can also switch instantly in the AI Chat panel header.", "aiChatBackend");
+        _backend = AddCombo(root, "Backend", "Where AI requests are sent: Codex (ChatGPT), GitHub Copilot, OpenAI Compatible or Embedded (local). You can also switch instantly in the AI Chat panel header.", "aiChatBackend");
         _backend.Items.AddRange(new object[]
         {
             new ComboOption("codex", "Codex (ChatGPT)"),
+            new ComboOption("copilot", "GitHub Copilot"),
             new ComboOption("openai-compatible", "OpenAI Compatible"),
             new ComboOption("embedded", "Embedded (local)")
         });
@@ -87,7 +99,7 @@ public sealed class AiChatPreferencesPanel : UserControl
         _endpoint = AddTextBox(root, "OpenAI-compatible endpoint", "Base URL, e.g. http://localhost:1234/v1", "aiChatEndpoint");
         _apiKey = AddTextBox(root, "API key (optional)", "Bearer token for the OpenAI-compatible endpoint", "aiChatApiKey");
         _apiKey.UseSystemPasswordChar = true;
-        _defaultModel = AddTextBox(root, "Default model", "Model used for new chats with Codex / OpenAI-compatible. The local model is chosen in the Embedded section below.", "aiChatDefaultModel");
+        _defaultModel = AddTextBox(root, "Default model", "Model used for new chats with Codex / Copilot / OpenAI-compatible. The local model is chosen in the Embedded section below.", "aiChatDefaultModel");
         _defaultMode = AddCombo(root, "Default mode", "Expert / SQL Fix / Simple — prompt style for new chats.", "aiChatDefaultMode");
         _defaultMode.Items.AddRange(new object[]
         {
@@ -96,7 +108,7 @@ public sealed class AiChatPreferencesPanel : UserControl
             new ComboOption("simple", "Simple")
         });
         _defaultMode.DisplayMember = "Name";
-        _reasoningEffort = AddTextBox(root, "Reasoning effort (Codex / Embedded)", "low / medium / high — for Codex and the Embedded model (Qwen3-style thinking).", "aiChatReasoningEffort");
+        _reasoningEffort = AddTextBox(root, "Reasoning effort (Codex / Copilot / Embedded)", "low / medium / high — for Codex, Copilot and the Embedded model (Qwen3-style thinking).", "aiChatReasoningEffort");
         _autoConnect = AddCheckBox(root, "Auto-connect on start", "Connect to the selected backend when the app starts.", "aiChatAutoConnect");
         _historyLimit = AddNumeric(root, "History limit (messages)", 1, 100, "aiChatHistoryLimit");
         _temperature = AddNumeric(root, "Temperature", 0, 20, "aiChatTemperature");
@@ -127,22 +139,30 @@ public sealed class AiChatPreferencesPanel : UserControl
             }
         };
         _embeddedModel = AddCombo(root, "Embedded model", "GGUF chat model id — downloaded on first use when the Embedded backend connects.", "aiChatEmbeddedModel");
+        _embeddedModel.SelectedIndexChanged += (_, _) =>
+        {
+            if (_loading)
+                return;
+
+            UpdateEmbeddedDownloadStatus();
+        };
         _embeddedGpuLayers = AddNumeric(root, "Embedded GPU layers", 0, 999, "aiChatEmbeddedGpuLayers");
         _embeddedCtxSize = AddNumeric(root, "Embedded context size", 512, 131072, "aiChatEmbeddedContextSize");
         _embeddedCtxSize.Increment = 512;
         _preferVulkan = AddCheckBox(root, "Prefer Vulkan for llama-server", "Use the Vulkan llama.cpp build when available.", "aiChatPreferVulkan");
+        AddEmbeddedDownloadControls(root);
 
         AddNote(root, "Changes to Backend take effect on the next start. To switch right away, open the AI Chat panel (Settings → Dock windows → AI Chat) and pick the backend in its header.");
 
         Controls.Add(root);
     }
 
-    public void LoadFromConfig()
+    public void LoadFromConfig(IApplicationConfig? source = null)
     {
         _loading = true;
         try
         {
-            var config = _settings.Config;
+            var config = source ?? _settings.Config;
             _enableChat!.Checked = config.EnableAiChat;
             SelectId(_backend!, config.AiChatBackendId);
             if (_backend.SelectedIndex < 0 && _backend.Items.Count > 0)
@@ -185,6 +205,7 @@ public sealed class AiChatPreferencesPanel : UserControl
                 .OfType<ModelDescriptor>()
                 .FirstOrDefault(model => string.Equals(model.Id, config.EmbeddedChatModelId, StringComparison.OrdinalIgnoreCase));
             _embeddedModel.SelectedItem = selectedModel ?? config.EmbeddedChatModelId;
+            UpdateEmbeddedDownloadStatus();
         }
         finally
         {
@@ -218,7 +239,160 @@ public sealed class AiChatPreferencesPanel : UserControl
         config.EmbeddedChatGpuLayers = (int)_embeddedGpuLayers!.Value;
         config.EmbeddedChatCtxSize = (int)_embeddedCtxSize!.Value;
         config.LlamaServerPreferVulkan = _preferVulkan!.Checked;
+        config.EmbeddedChatAcceptedLicenseModelIds = config.EmbeddedChatAcceptedLicenseModelIds?.ToList() ?? [];
 
+    }
+
+    private void AddEmbeddedDownloadControls(TableLayoutPanel root)
+    {
+        root.Controls.Add(new Label { Text = "Model actions", AutoSize = true, Margin = new Padding(4, 8, 4, 2) });
+        var actions = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            WrapContents = true,
+            Margin = new Padding(4, 2, 4, 2)
+        };
+
+        _embeddedDownload = new Button
+        {
+            Text = "Download / prepare",
+            AutoSize = true,
+            Name = "aiChatEmbeddedDownload",
+            AccessibleName = "aiChatEmbeddedDownload"
+        };
+        _embeddedDownload.Click += async (_, _) => await DownloadEmbeddedModelAsync();
+        actions.Controls.Add(_embeddedDownload);
+
+        _embeddedCancel = new Button
+        {
+            Text = "Cancel",
+            AutoSize = true,
+            Name = "aiChatEmbeddedCancel",
+            AccessibleName = "aiChatEmbeddedCancel",
+            Enabled = false
+        };
+        _embeddedCancel.Click += (_, _) => _embeddedDownloadCts?.Cancel();
+        actions.Controls.Add(_embeddedCancel);
+
+        _embeddedProgress = new ProgressBar
+        {
+            Width = 220,
+            Height = 22,
+            Minimum = 0,
+            Maximum = 100,
+            Visible = _chatBootstrap is not null
+        };
+        actions.Controls.Add(_embeddedProgress);
+
+        _embeddedStatus = new Label
+        {
+            AutoSize = true,
+            MaximumSize = new Size(640, 0),
+            Margin = new Padding(4, 6, 4, 2)
+        };
+        actions.Controls.Add(_embeddedStatus);
+        root.Controls.Add(actions);
+
+        if (_chatBootstrap is null)
+        {
+            _embeddedDownload.Enabled = false;
+            _embeddedStatus.Text = "Embedded model download service is unavailable.";
+        }
+    }
+
+    private async Task DownloadEmbeddedModelAsync()
+    {
+        if (_chatBootstrap is null || _embeddedModel is null || _embeddedDownload is null || _embeddedCancel is null)
+            return;
+
+        var model = _embeddedModel.SelectedItem as ModelDescriptor
+            ?? _chatCatalog?.Models.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, _embeddedModel.Text.Trim(), StringComparison.OrdinalIgnoreCase))
+            ?? _chatBootstrap.CurrentModel;
+        if (model.RequiresLicenseAcceptance
+            && !_settings.Config.EmbeddedChatAcceptedLicenseModelIds.Contains(model.Id, StringComparer.OrdinalIgnoreCase))
+        {
+            var result = MessageBox.Show(
+                this,
+                $"{model.LicenseSummary}\n\nAccept {model.LicenseName} to download {model.DisplayName}?",
+                "License acceptance required",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+            if (result != DialogResult.Yes)
+            {
+                _embeddedStatus!.Text = "Download cancelled: license was not accepted.";
+                return;
+            }
+
+            _settings.Config.EmbeddedChatAcceptedLicenseModelIds.Add(model.Id);
+        }
+
+        _embeddedDownloadCts?.Cancel();
+        _embeddedDownloadCts?.Dispose();
+        _embeddedDownloadCts = new CancellationTokenSource();
+        _embeddedDownload.Enabled = false;
+        _embeddedCancel.Enabled = true;
+        _embeddedProgress!.Value = 0;
+        _embeddedStatus!.Text = $"Preparing {model.DisplayName}…";
+
+        try
+        {
+            var progress = new Progress<FimModelProgress>(update =>
+            {
+                if (!CanUpdateDownloadUi)
+                    return;
+                _embeddedProgress!.Value = Math.Clamp((int)Math.Round(update.Fraction * 100), 0, 100);
+                _embeddedStatus!.Text = update.Message;
+            });
+            await _chatBootstrap.EnsureModelAsync(model.Id, progress, _embeddedDownloadCts.Token).ConfigureAwait(true);
+            if (CanUpdateDownloadUi)
+            {
+                _embeddedProgress.Value = 100;
+                _embeddedStatus.Text = _chatBootstrap.SelectedModelDiskStatus;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            if (CanUpdateDownloadUi)
+                _embeddedStatus.Text = "Model download cancelled.";
+        }
+        catch (Exception ex)
+        {
+            if (CanUpdateDownloadUi)
+                _embeddedStatus.Text = $"Model download failed: {ex.Message}";
+        }
+        finally
+        {
+            if (CanUpdateDownloadUi)
+            {
+                _embeddedDownload.Enabled = true;
+                _embeddedCancel.Enabled = false;
+            }
+            _embeddedDownloadCts?.Dispose();
+            _embeddedDownloadCts = null;
+        }
+    }
+
+    private bool CanUpdateDownloadUi
+        => !_isDisposing && !IsDisposed && !Disposing;
+
+    private void UpdateEmbeddedDownloadStatus()
+    {
+        if (CanUpdateDownloadUi && _embeddedStatus is not null && _chatBootstrap is not null)
+            _embeddedStatus.Text = _chatBootstrap.SelectedModelDiskStatus;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _isDisposing = true;
+            _embeddedDownloadCts?.Cancel();
+            _embeddedDownloadCts?.Dispose();
+            _embeddedDownloadCts = null;
+        }
+
+        base.Dispose(disposing);
     }
 
     private static string? GetSelectedId(ComboBox combo)

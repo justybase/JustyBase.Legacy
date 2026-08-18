@@ -14,7 +14,7 @@ public sealed record ChatBackendOption(string Id, string DisplayName);
 /// WinForms-host chat view model over the shared <see cref="ChatSessionController"/>.
 /// Pure UI-agnostic layer — the panel binds to its properties and commands.
 /// </summary>
-public sealed partial class ChatViewModel : ObservableObject
+public sealed partial class ChatViewModel : ObservableObject, IDisposable
 {
     private readonly ChatSessionController _controller;
     private readonly ICopilotChatService _chatService;
@@ -24,9 +24,13 @@ public sealed partial class ChatViewModel : ObservableObject
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
     private readonly SemaphoreSlim _backendSwitchGate = new(1, 1);
     private CancellationTokenSource? _codexLoginCts;
+    private CancellationTokenSource? _copilotLoginCts;
+    private bool _copilotCodeRaised;
     private CancellationTokenSource? _backendSwitchCts;
     private int _modelsRefreshVersion;
     private bool _constructed;
+    private bool _disposed;
+    private readonly Action<string, string> _copilotVerificationHandler;
 
     public ChatViewModel(
         ChatSessionController controller,
@@ -60,6 +64,13 @@ public sealed partial class ChatViewModel : ObservableObject
         _controller.ToolConfirmationRequested += (_, _) => RaiseUi(() => MessagesChanged?.Invoke());
         _controller.StatusMessageChanged += (_, message) => RaiseUi(() => StatusMessage = message);
 
+        _copilotVerificationHandler = (code, url) =>
+        {
+            _copilotCodeRaised = true;
+            RaiseUi(() => CopilotVerificationCodeAvailable?.Invoke(code, url));
+        };
+        _chatService.CopilotLoginVerificationCodeAvailable += _copilotVerificationHandler;
+
         foreach (var mode in ChatModeConfig.AllModes)
         {
             AvailableModes.Add(mode);
@@ -82,10 +93,12 @@ public sealed partial class ChatViewModel : ObservableObject
 
         RefreshSavedSessions();
         RefreshCodexAccountState();
+        RefreshCopilotAccountState();
 
         // Probe account/read once at startup so an already-signed-in session is detected
         // without waiting for the user to click the Codex button.
         RefreshCodexCommand.Execute(null);
+        RefreshCopilotCommand.Execute(null);
 
         // The embedded model list is a pure disk probe — populate the dropdown right
         // away so downloaded models are visible even before the backend connects.
@@ -109,6 +122,12 @@ public sealed partial class ChatViewModel : ObservableObject
     /// <summary>Raised when the message list content needs a UI re-render.</summary>
     public event Action? MessagesChanged;
     public event Action? AttachmentsChanged;
+
+    /// <summary>
+    /// Raised once per Copilot sign-in attempt when the device-flow verification code is
+    /// known. The host surfaces it in a dialog (the code is not visible anywhere else).
+    /// </summary>
+    public event Action<string, string>? CopilotVerificationCodeAvailable;
 
     public List<ChatMessage> Messages => _controller.Messages;
 
@@ -141,6 +160,12 @@ public sealed partial class ChatViewModel : ObservableObject
     public partial bool IsCodexSignedIn { get; set; }
 
     [ObservableProperty]
+    public partial string CopilotAccountLabel { get; set; } = "Not signed in";
+
+    [ObservableProperty]
+    public partial bool IsCopilotSignedIn { get; set; }
+
+    [ObservableProperty]
     public partial ChatMode CurrentMode { get; set; } = ChatMode.Expert;
 
     public List<ChatModeConfig> AvailableModes { get; } = [];
@@ -164,10 +189,13 @@ public sealed partial class ChatViewModel : ObservableObject
     public partial bool IsCodexBackend { get; set; }
 
     [ObservableProperty]
+    public partial bool IsCopilotBackend { get; set; }
+
+    [ObservableProperty]
     public partial bool IsEmbeddedBackend { get; set; }
 
-    /// <summary>Reasoning effort is available for Codex and the embedded llama-server (Qwen3-style thinking).</summary>
-    public bool ShowReasoningEffort => IsCodexBackend || IsEmbeddedBackend;
+    /// <summary>Reasoning effort is available for Codex, Copilot and the embedded llama-server (Qwen3-style thinking).</summary>
+    public bool ShowReasoningEffort => IsCodexBackend || IsCopilotBackend || IsEmbeddedBackend;
 
     public List<ChatAttachment> PendingAttachments { get; } = [];
 
@@ -212,6 +240,8 @@ public sealed partial class ChatViewModel : ObservableObject
                 IsConnected = success;
                 IsCodexBackend = success
                     && string.Equals(_chatService.ActiveBackendId, "codex", StringComparison.OrdinalIgnoreCase);
+                IsCopilotBackend = success
+                    && string.Equals(_chatService.ActiveBackendId, "copilot", StringComparison.OrdinalIgnoreCase);
                 IsEmbeddedBackend = success
                     && string.Equals(_chatService.ActiveBackendId, "embedded", StringComparison.OrdinalIgnoreCase);
                 StatusMessage = success
@@ -219,6 +249,7 @@ public sealed partial class ChatViewModel : ObservableObject
                     : $"Not connected: {_chatService.ConnectionError}";
             });
             RefreshCodexAccountState();
+            RefreshCopilotAccountState();
 
             if (success)
             {
@@ -256,6 +287,7 @@ public sealed partial class ChatViewModel : ObservableObject
             {
                 IsConnected = true;
                 IsCodexBackend = string.Equals(backendId, "codex", StringComparison.OrdinalIgnoreCase);
+                IsCopilotBackend = string.Equals(backendId, "copilot", StringComparison.OrdinalIgnoreCase);
                 IsEmbeddedBackend = string.Equals(backendId, "embedded", StringComparison.OrdinalIgnoreCase);
                 StatusMessage = $"Connected to {GetBackendDisplayName(backendId)}";
 
@@ -266,12 +298,14 @@ public sealed partial class ChatViewModel : ObservableObject
             {
                 IsConnected = false;
                 IsCodexBackend = false;
+                IsCopilotBackend = false;
                 IsEmbeddedBackend = false;
                 StatusMessage = $"Failed: {_chatService.ConnectionError}";
                 ClearModelLists();
             }
 
             RaiseUi(RefreshCodexAccountState);
+            RaiseUi(RefreshCopilotAccountState);
         }
         catch (OperationCanceledException) when (switchCts.IsCancellationRequested)
         {
@@ -284,6 +318,7 @@ public sealed partial class ChatViewModel : ObservableObject
             {
                 IsConnected = false;
                 IsCodexBackend = false;
+                IsCopilotBackend = false;
                 IsEmbeddedBackend = false;
                 StatusMessage = $"Failed: {ex.Message}";
                 ClearModelLists();
@@ -462,6 +497,7 @@ public sealed partial class ChatViewModel : ObservableObject
             if (account?.IsAuthenticated == true)
             {
                 StatusMessage = "Signed in to ChatGPT.";
+                await RefreshModelsAsync();
                 return;
             }
         }
@@ -479,15 +515,131 @@ public sealed partial class ChatViewModel : ObservableObject
     [RelayCommand]
     private async Task SignOutCodexAsync()
     {
+        if (IsStreaming)
+        {
+            StatusMessage = "Stop the current response before signing out from Codex.";
+            return;
+        }
+
         _codexLoginCts?.Cancel();
         var loggedOut = await _chatService.LogoutCodexAsync();
+        if (loggedOut)
+            _controller.ForgetCodexThreadBindings();
         RefreshCodexAccountState();
         StatusMessage = loggedOut ? "Signed out from Codex." : "Could not sign out from Codex.";
         if (string.Equals(_chatService.ActiveBackendId, "codex", StringComparison.OrdinalIgnoreCase))
         {
             IsConnected = false;
             IsCodexBackend = false;
+            ClearModelLists();
         }
+    }
+
+    [RelayCommand]
+    private async Task SignInCopilotAsync()
+    {
+        StatusMessage = "Opening GitHub Copilot sign-in in your browser...";
+        var started = await _chatService.StartCopilotLoginAsync();
+        if (!started)
+        {
+            StatusMessage = $"Copilot sign-in failed: {_chatService.ConnectionError ?? "copilot CLI unavailable"}";
+            return;
+        }
+
+        _copilotLoginCts?.Cancel();
+        _copilotLoginCts?.Dispose();
+        _copilotLoginCts = new CancellationTokenSource();
+        var cts = _copilotLoginCts;
+        _copilotCodeRaised = false;
+
+        StatusMessage = "Finish sign-in in the browser. Waiting for confirmation...";
+        for (var attempt = 0; attempt < 120 && !cts.IsCancellationRequested; attempt++)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            if (!_copilotCodeRaised && !string.IsNullOrWhiteSpace(_chatService.CopilotLoginVerificationCode))
+            {
+                _copilotCodeRaised = true;
+                var code = _chatService.CopilotLoginVerificationCode;
+                var url = string.IsNullOrWhiteSpace(_chatService.CopilotLoginVerificationUrl)
+                    ? "https://github.com/login/device"
+                    : _chatService.CopilotLoginVerificationUrl;
+                CopilotVerificationCodeAvailable?.Invoke(code, url);
+                StatusMessage = $"Waiting for you to approve {code} in the browser...";
+            }
+
+            CopilotAccountInfo? account = null;
+            try
+            {
+                account = await _chatService.ReadCopilotAccountAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.TrackError(ex, isCrash: false);
+            }
+
+            RaiseUi(RefreshCopilotAccountState);
+            if (account?.IsAuthenticated == true)
+            {
+                StatusMessage = "Signed in to GitHub Copilot.";
+                await RefreshModelsAsync();
+                return;
+            }
+        }
+
+        if (cts.IsCancellationRequested)
+        {
+            StatusMessage = "Copilot sign-in was cancelled.";
+        }
+        else
+        {
+            StatusMessage = "Sign-in window opened. Finish sign-in, then click Copilot sign in again to refresh the account.";
+        }
+    }
+
+    [RelayCommand]
+    private async Task SignOutCopilotAsync()
+    {
+        if (IsStreaming)
+        {
+            StatusMessage = "Stop the current response before signing out from Copilot.";
+            return;
+        }
+
+        _copilotLoginCts?.Cancel();
+        var loggedOut = await _chatService.LogoutCopilotAsync();
+        if (loggedOut)
+            _controller.ForgetCopilotSessionBindings();
+        RefreshCopilotAccountState();
+        StatusMessage = loggedOut
+            ? "Signed out from Copilot. Local chat history was kept; Copilot session links were cleared."
+            : "Could not sign out from Copilot.";
+        if (string.Equals(_chatService.ActiveBackendId, "copilot", StringComparison.OrdinalIgnoreCase))
+        {
+            IsConnected = false;
+            IsCopilotBackend = false;
+            ClearModelLists();
+        }
+    }
+
+    [RelayCommand]
+    private void RefreshCopilot()
+    {
+        _ = _chatService.ReadCopilotAccountAsync().ContinueWith(_ =>
+        {
+            RaiseUi(RefreshCopilotAccountState);
+        }, TaskScheduler.Default);
     }
 
     [RelayCommand]
@@ -626,8 +778,20 @@ public sealed partial class ChatViewModel : ObservableObject
             : "Not signed in";
     }
 
+    private void RefreshCopilotAccountState()
+    {
+        var account = _chatService.CopilotAccount;
+        IsCopilotSignedIn = account?.IsAuthenticated == true;
+        CopilotAccountLabel = account?.IsAuthenticated == true
+            ? "Signed in"
+            : "Not signed in";
+    }
+
     private void RaiseUi(Action action)
     {
+        if (_disposed)
+            return;
+
         if (_dispatcher.CheckAccess())
         {
             action();
@@ -636,5 +800,23 @@ public sealed partial class ChatViewModel : ObservableObject
         {
             _ = _dispatcher.InvokeAsync(action);
         }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        _disposed = true;
+        _codexLoginCts?.Cancel();
+        _copilotLoginCts?.Cancel();
+        _backendSwitchCts?.Cancel();
+        _chatService.CopilotLoginVerificationCodeAvailable -= _copilotVerificationHandler;
+        _codexLoginCts?.Dispose();
+        _copilotLoginCts?.Dispose();
+        _backendSwitchCts?.Dispose();
+        // The gates may still be held by an async startup/backend-switch operation.
+        // They are intentionally left for the pending operation to release; disposing
+        // them here would turn a normal window close into ObjectDisposedException.
     }
 }

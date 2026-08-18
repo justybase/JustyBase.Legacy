@@ -91,7 +91,19 @@ public sealed class LegacyApplicationSettingsContext :
         string json = JsonSerializer.Serialize(
             _config,
             MyJsonContextApplicationConfig.Default.ApplicationConfig);
-        SaveTextFileEncodedOrNot(ConfigMainFile, json);
+        string temporaryPath = ConfigMainFile + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            SaveTextFileEncodedOrNot(temporaryPath, json);
+            File.Move(temporaryPath, ConfigMainFile, true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
     }
 
     public void SaveRecentFiles()

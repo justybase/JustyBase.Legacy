@@ -85,6 +85,10 @@ public static class LegacyApplicationSettingsMapper
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(destination);
 
+        // Chat history is runtime-owned rather than part of the transactional
+        // Preferences draft. Preserve the live collection when copying the
+        // primitive AI settings between legacy buffers.
+        destination.ChatSessions = source.ChatSessions;
         destination.EnableAiChat = source.EnableAiChat;
         destination.AiChatBackendId = source.AiChatBackendId;
         destination.AiChatOpenAiCompatibleEndpoint = source.AiChatOpenAiCompatibleEndpoint;

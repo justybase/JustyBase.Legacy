@@ -625,7 +625,8 @@ namespace JustyBaseLegacy.UI
                     _netezzaAutocompleteState,
                     _fimModelCatalog,
                     _fimModelBootstrap,
-                    _chatCatalog);
+                    _chatCatalog,
+                    _chatBootstrap);
                 return;
             }
 
@@ -641,7 +642,8 @@ namespace JustyBaseLegacy.UI
                 _netezzaAutocompleteState,
                 fimCatalog: _fimModelCatalog,
                 fimBootstrap: _fimModelBootstrap,
-                chatCatalog: _chatCatalog);
+                chatCatalog: _chatCatalog,
+                chatBootstrap: _chatBootstrap);
             pr.ShowDialog();
         }
 

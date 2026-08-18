@@ -727,7 +727,8 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
         INetezzaAutocompleteState netezzaAutocompleteState,
         JustyBase.Ai.Embedded.Download.IModelCatalog? fimCatalog = null,
         JustyBase.Ai.Embedded.Server.IFimModelBootstrapService? fimBootstrap = null,
-        JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null)
+        JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null,
+        JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? chatBootstrap = null)
     {
         if (_preferencesContent is not null && !_preferencesContent.IsDisposed)
         {
@@ -748,7 +749,8 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
             netezzaAutocompleteState,
             fimCatalog,
             fimBootstrap,
-            chatCatalog);
+            chatCatalog,
+            chatBootstrap);
         _preferencesContent.Show(_dockPanel, DockState.Document);
         _preferencesContent.Activate();
     }

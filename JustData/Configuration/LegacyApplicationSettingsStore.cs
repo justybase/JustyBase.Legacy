@@ -3,6 +3,7 @@ using AppBase.Common.Interfaces;
 using JustData.Application.Settings;
 using AppBase.Data;
 using AppBase.Data.Core.Models;
+using JustyBase.Ai.Models;
 using System.Text;
 using System.Text.Json;
 
@@ -30,6 +31,12 @@ public sealed class WinFormsApplicationSettingsStore(
         cancellationToken.ThrowIfCancellationRequested();
 
         ApplicationConfig candidate = LegacyApplicationSettingsMapper.ToLegacy(draft);
+        // Chat history is intentionally excluded from the Preferences draft.
+        // Carry it forward so saving unrelated preferences cannot replace the
+        // persisted conversation list with the default empty list.
+        // Take the snapshot before the first await. Chat completion can update both
+        // the session list and nested messages while the old config files are read.
+        candidate.ChatSessions = SnapshotChatSessions(_applicationSettingsContext.Config.ChatSessions);
         SnippetSettings snippets = draft.Snippets.Clone();
         string configPath = _applicationSettingsContext.ConfigMainFile;
         string snippetsPath = Path.Combine(_applicationSettingsContext.ConfigDirectory, "snipets.json");
@@ -109,6 +116,38 @@ public sealed class WinFormsApplicationSettingsStore(
             MonkeySnippets = legacy?.MonkeySnippets?.ToList() ?? []
         };
     }
+
+    private static List<ChatSession> SnapshotChatSessions(IEnumerable<ChatSession> sessions)
+        => sessions.Select(session => new ChatSession
+        {
+            SessionId = session.SessionId,
+            Title = session.Title,
+            CreatedAt = session.CreatedAt,
+            LastActivityAt = session.LastActivityAt,
+            CodexThreadId = session.CodexThreadId,
+            CopilotSessionId = session.CopilotSessionId,
+            Messages = session.Messages.Select(message => new ChatMessage
+            {
+                Content = message.Content,
+                Role = message.Role,
+                Timestamp = message.Timestamp,
+                IsStreaming = message.IsStreaming,
+                GenerationTimeMs = message.GenerationTimeMs,
+                IsToolConfirmation = message.IsToolConfirmation,
+                ToolName = message.ToolName,
+                ToolArgs = message.ToolArgs,
+                ConfirmationPending = message.ConfirmationPending,
+                ThinkingContent = message.ThinkingContent,
+                Attachments = message.Attachments.Select(attachment => attachment.Clone()).ToList(),
+                ToolCalls = message.ToolCalls.Select(toolCall => toolCall.Clone()).ToList(),
+                IsToolExpanded = message.IsToolExpanded,
+                IsUserExpanded = message.IsUserExpanded,
+                Mode = message.Mode,
+                IsLoopStep = message.IsLoopStep,
+                LoopStepNumber = message.LoopStepNumber,
+                LoopStatus = message.LoopStatus
+            }).ToList()
+        }).ToList();
 
     private static void RestoreFile(string path, byte[]? original)
     {

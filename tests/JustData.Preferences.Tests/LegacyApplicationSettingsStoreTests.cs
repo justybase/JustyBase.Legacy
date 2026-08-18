@@ -49,6 +49,40 @@ public sealed class WinFormsApplicationSettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Store_preserves_chat_sessions_when_saving_unrelated_preferences()
+    {
+        Directory.CreateDirectory(_directory);
+        string configPath = Path.Combine(_directory, "config.json");
+        var config = new ApplicationConfig();
+        config.MakeChangesInWrongConfigValues();
+        config.ChatSessions.Add(new JustyBase.Ai.Models.ChatSession
+        {
+            Title = "Keep this chat",
+            Messages = [new JustyBase.Ai.Models.ChatMessage("SELECT 1", "user")]
+        });
+
+        var helpers = Substitute.For<IApplicationSettingsContext>();
+        helpers.Config.Returns(config);
+        helpers.ConfigDirectory.Returns(_directory);
+        helpers.ConfigMainFile.Returns(configPath);
+        helpers.DoSaveConfig.Returns(true);
+
+        var state = new NetezzaAutocompleteState();
+        var store = new WinFormsApplicationSettingsStore(helpers, state);
+        var draft = await store.LoadAsync();
+        draft.Values.Appearance.FontName = "Changed without losing chat";
+
+        await store.SaveAsync(draft.ToDraft());
+
+        var persisted = JsonSerializer.Deserialize(
+            File.ReadAllText(configPath),
+            AppBase.Common.MyJsonContextApplicationConfig.Default.ApplicationConfig)!;
+        Assert.Single(persisted.ChatSessions);
+        Assert.Equal("Keep this chat", persisted.ChatSessions[0].Title);
+        Assert.Equal("Changed without losing chat", persisted.FontName);
+    }
+
+    [Fact]
     public async Task Store_honors_DoSaveConfig_but_still_preserves_legacy_snippet_save_behavior()
     {
         Directory.CreateDirectory(_directory);

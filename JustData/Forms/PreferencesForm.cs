@@ -46,6 +46,7 @@ namespace JustyBaseLegacy.UI
         private AiChatPreferencesPanel? _aiChatPanel;
         private TabPage? _tabAiChat;
         private readonly JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? _chatCatalog;
+        private readonly JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? _chatBootstrap;
 
         public PreferencesForm(Action repaintApplication, Action saveManySqlToDisk,
             IApplicationSettingsContext applicationSettingsContext,
@@ -58,7 +59,8 @@ namespace JustyBaseLegacy.UI
             PreferencesViewModel? settingsViewModel = null,
             JustyBase.Ai.Embedded.Download.IModelCatalog? fimCatalog = null,
             JustyBase.Ai.Embedded.Server.IFimModelBootstrapService? fimBootstrap = null,
-            JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null)
+            JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null,
+            JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? chatBootstrap = null)
         {
             _applicationSettingsContext = applicationSettingsContext ?? throw new ArgumentNullException(nameof(applicationSettingsContext));
             _netezzaAutocompleteState = netezzaAutocompleteState ?? throw new ArgumentNullException(nameof(netezzaAutocompleteState));
@@ -72,6 +74,7 @@ namespace JustyBaseLegacy.UI
             _fimCatalog = fimCatalog;
             _fimBootstrap = fimBootstrap;
             _chatCatalog = chatCatalog;
+            _chatBootstrap = chatBootstrap;
             _themePreviewAdapter = new WinFormsSettingsThemePreviewAdapter(
                 _applicationSettingsContext,
                 _repaintApplication)
@@ -148,7 +151,7 @@ namespace JustyBaseLegacy.UI
             if (_tabAiChat.Controls.Count > 0)
                 return;
 
-            var panel = new AiChatPreferencesPanel(_applicationSettingsContext, _chatCatalog)
+            var panel = new AiChatPreferencesPanel(_applicationSettingsContext, _chatCatalog, _chatBootstrap)
             {
                 Dock = DockStyle.Fill
             };
@@ -186,6 +189,7 @@ namespace JustyBaseLegacy.UI
             _config = LegacyApplicationSettingsMapper.ToLegacy(_settingsViewModel.Draft);
             _pendingSnippets = _settingsViewModel.Draft.Snippets.Clone();
             LoadFromConfig();
+            _aiChatPanel?.LoadFromConfig(_config);
             LoadSnippets();
             checkBoxSpecialColoring.Checked = _config.UseSpecialColoring;
             if (!_specialColoringHandlerAttached)

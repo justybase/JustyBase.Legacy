@@ -432,6 +432,7 @@ namespace JustyBaseLegacy.UI
             , ChatViewModel? chatViewModel = null
             , JustyBase.Ai.Ports.ISqlDiagnosticsProvider? sqlDiagnosticsProvider = null
             , JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null
+            , JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? chatBootstrap = null
             )
         {
             Program.LogStartup("BaseWindow ctor: begin");
@@ -501,6 +502,7 @@ namespace JustyBaseLegacy.UI
             _chatViewModel = chatViewModel;
             _sqlDiagnosticsProvider = sqlDiagnosticsProvider;
             _chatCatalog = chatCatalog;
+            _chatBootstrap = chatBootstrap;
             _uiDispatcher = uiDispatcher ?? new JustData.Mvvm.WindowsFormsUiDispatcher(this);
             _fileSearchEngine = fileSearchEngine ?? throw new ArgumentNullException(nameof(fileSearchEngine));
             _loginDataValidator = loginDataValidator ?? throw new ArgumentNullException(nameof(loginDataValidator));
@@ -734,7 +736,8 @@ namespace JustyBaseLegacy.UI
                     _netezzaAutocompleteState,
                     _fimModelCatalog,
                     _fimModelBootstrap,
-                    _chatCatalog);
+                    _chatCatalog,
+                    _chatBootstrap);
             }
         }
 

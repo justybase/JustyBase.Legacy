@@ -31,7 +31,8 @@ internal sealed class PreferencesDockContent : DockContent
         INetezzaAutocompleteState netezzaAutocompleteState,
         JustyBase.Ai.Embedded.Download.IModelCatalog? fimCatalog = null,
         JustyBase.Ai.Embedded.Server.IFimModelBootstrapService? fimBootstrap = null,
-        JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null)
+        JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null,
+        JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? chatBootstrap = null)
     {
         Text = "JustyBase Settings";
         TabText = "JustyBase Settings";
@@ -53,7 +54,8 @@ internal sealed class PreferencesDockContent : DockContent
             netezzaAutocompleteState,
             fimCatalog: fimCatalog,
             fimBootstrap: fimBootstrap,
-            chatCatalog: chatCatalog);
+            chatCatalog: chatCatalog,
+            chatBootstrap: chatBootstrap);
         _preferencesForm.PrepareForDocumentHost();
         _preferencesForm.FormClosed += PreferencesForm_FormClosed;
         Controls.Add(_preferencesForm);

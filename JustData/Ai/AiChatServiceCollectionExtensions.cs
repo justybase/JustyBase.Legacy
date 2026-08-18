@@ -40,6 +40,9 @@ public static class AiChatServiceCollectionExtensions
                 ? (IModelStore)new HuggingFaceMlxRepoStore(catalog, () => settings.Settings.EmbeddedChatModelId)
                 : new HuggingFaceModelStore(catalog, () => settings.Settings.EmbeddedChatModelId);
         });
+        collection.AddScoped<EmbeddedChatModelBootstrapService>();
+        collection.AddScoped<IEmbeddedChatModelBootstrapService>(sp =>
+            sp.GetRequiredService<EmbeddedChatModelBootstrapService>());
 
         // Backends.
         collection.AddScoped<OpenAiCompatibleChatBackend>();
@@ -53,6 +56,7 @@ public static class AiChatServiceCollectionExtensions
         collection.AddScoped<ILocalModelConfigurationService>(sp => sp.GetRequiredService<LocalModelConfigurationService>());
         collection.AddScoped<SqlExecutionErrorStore>();
         collection.AddScoped<CodexAppServerClient>();
+        collection.AddScoped<CopilotClient>();
         collection.AddScoped<LocalChatService>();
         collection.AddScoped<ICopilotChatService>(sp => sp.GetRequiredService<LocalChatService>());
 

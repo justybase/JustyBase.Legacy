@@ -104,6 +104,7 @@ public sealed class LegacyChatSettingsStore : IChatSettingsStore
             "Embedded (local)" => "embedded",
             "OpenAI Compatible" => "openai-compatible",
             "Codex (ChatGPT)" => "codex",
+            "GitHub Copilot" => "copilot",
             _ => backendId
         };
     }

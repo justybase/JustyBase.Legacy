@@ -2,6 +2,7 @@ using AppBase.Common;
 using JustData.ViewModels.Ai;
 using JustyBase.Ai.Models;
 using Microsoft.Web.WebView2.WinForms;
+using System.ComponentModel;
 using System.Text;
 
 namespace JustyBaseLegacy.UI.Ai;
@@ -38,9 +39,13 @@ public sealed class AiChatPanel : UserControl
     private ComboBox? _sessionCombo;
     private FlowLayoutPanel? _attachmentStrip;
     private Button? _codexButton;
+    private Button? _copilotButton;
+    private Label? _copilotAccountLabel;
+    private Form? _copilotVerificationDialog;
     private bool _webViewReady;
     private bool _renderDirty;
     private bool _suppressSessionSync;
+    private PropertyChangedEventHandler? _viewModelPropertyChangedHandler;
 
     public AiChatPanel(ChatViewModel viewModel)
     {
@@ -53,7 +58,8 @@ public sealed class AiChatPanel : UserControl
 
         _viewModel.MessagesChanged += OnMessagesChanged;
         _viewModel.AttachmentsChanged += OnAttachmentsChanged;
-        _viewModel.PropertyChanged += (_, e) =>
+        _viewModel.CopilotVerificationCodeAvailable += ShowCopilotVerificationDialog;
+        _viewModelPropertyChangedHandler = (_, e) =>
         {
             if (e.PropertyName is nameof(ChatViewModel.IsStreaming)
                 or nameof(ChatViewModel.IsInitializing)
@@ -62,17 +68,21 @@ public sealed class AiChatPanel : UserControl
                 or nameof(ChatViewModel.IsConnected)
                 or nameof(ChatViewModel.IsCodexSignedIn)
                 or nameof(ChatViewModel.CodexAccountLabel)
+                or nameof(ChatViewModel.IsCopilotSignedIn)
+                or nameof(ChatViewModel.CopilotAccountLabel)
                 or nameof(ChatViewModel.SelectedModel)
                 or nameof(ChatViewModel.AvailableModels)
                 or nameof(ChatViewModel.AvailableReasoningEfforts)
                 or nameof(ChatViewModel.SavedSessions)
                 or nameof(ChatViewModel.CurrentSessionTitle)
                 or nameof(ChatViewModel.IsCodexBackend)
+                or nameof(ChatViewModel.IsCopilotBackend)
                 or nameof(ChatViewModel.IsEmbeddedBackend))
             {
                 SyncHeaderUi();
             }
         };
+        _viewModel.PropertyChanged += _viewModelPropertyChangedHandler;
 
         _renderTimer = new System.Windows.Forms.Timer { Interval = 80 };
         _renderTimer.Tick += (_, _) =>
@@ -211,6 +221,30 @@ public sealed class AiChatPanel : UserControl
         _accountLabel.Margin = labelMargin;
         _accountLabel.Anchor = AnchorStyles.Left;
         header.Controls.Add(_accountLabel, 3, 1);
+
+        _copilotButton = new Button
+        {
+            Text = "Copilot sign in",
+            Name = "aiChatPanelCopilotSignIn",
+            AccessibleName = "Copilot sign in",
+            AutoSize = true,
+            Margin = new Padding(DpiScale.Scale(4, dpi), DpiScale.Scale(2, dpi), DpiScale.Scale(4, dpi), DpiScale.Scale(2, dpi)),
+            Anchor = AnchorStyles.Left
+        };
+        _copilotButton.Click += async (_, _) =>
+        {
+            if (_viewModel.IsCopilotSignedIn)
+                await _viewModel.SignOutCopilotCommand.ExecuteAsync(null);
+            else
+                await _viewModel.SignInCopilotCommand.ExecuteAsync(null);
+        };
+        header.Controls.Add(_copilotButton, 4, 1);
+
+        _copilotAccountLabel = MakeLabel(string.Empty);
+        _copilotAccountLabel.AutoSize = true;
+        _copilotAccountLabel.Margin = labelMargin;
+        _copilotAccountLabel.Anchor = AnchorStyles.Left;
+        header.Controls.Add(_copilotAccountLabel, 5, 1);
 
         _backendCombo.SelectedIndexChanged += (_, _) =>
         {
@@ -586,6 +620,8 @@ public sealed class AiChatPanel : UserControl
         _statusLabel!.Text = _viewModel.StatusMessage;
         _accountLabel!.Text = _viewModel.CodexAccountLabel;
         _codexButton!.Text = _viewModel.IsCodexSignedIn ? "Codex sign out" : "Codex sign in";
+        _copilotAccountLabel!.Text = _viewModel.CopilotAccountLabel;
+        _copilotButton!.Text = _viewModel.IsCopilotSignedIn ? "Copilot sign out" : "Copilot sign in";
 
         if (_inputBox is not null
             && !string.Equals(_inputBox.Text, _viewModel.InputText, StringComparison.Ordinal))
@@ -662,6 +698,116 @@ public sealed class AiChatPanel : UserControl
             .FirstOrDefault(m => m.Mode == _viewModel.CurrentMode);
     }
 
+    private void ShowCopilotVerificationDialog(string code, string url)
+    {
+        if (IsDisposed || _copilotVerificationDialog is not null)
+            return;
+
+        var dpi = DeviceDpi;
+        var form = new Form
+        {
+            Text = "GitHub Copilot sign-in",
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            ShowInTaskbar = false,
+            TopMost = true,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(DpiScale.Scale(14, dpi))
+        };
+
+        var instruction = new Label
+        {
+            Text = "The browser may not pre-fill the code. Enter this code on GitHub to finish signing in:",
+            AutoSize = true,
+            MaximumSize = new Size(DpiScale.Scale(360, dpi), 0)
+        };
+
+        var codeBox = new TextBox
+        {
+            Text = code,
+            ReadOnly = true,
+            Font = new Font("Consolas", 14F),
+            TextAlign = HorizontalAlignment.Center,
+            Width = DpiScale.Scale(220, dpi),
+            Margin = new Padding(0, DpiScale.Scale(8, dpi), 0, DpiScale.Scale(8, dpi))
+        };
+
+        var copyButton = new Button
+        {
+            Text = "Copy code",
+            AutoSize = true,
+            Margin = new Padding(0, 0, DpiScale.Scale(6, dpi), 0)
+        };
+        copyButton.Click += (_, _) =>
+        {
+            try
+            {
+                Clipboard.SetText(code);
+                copyButton.Text = "Copied";
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Copilot] clipboard: {ex.Message}");
+            }
+        };
+
+        var openButton = new Button
+        {
+            Text = "Open GitHub",
+            AutoSize = true,
+            Margin = new Padding(0, 0, DpiScale.Scale(6, dpi), 0)
+        };
+        openButton.Click += (_, _) =>
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = url, UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Copilot] open browser: {ex.Message}");
+            }
+        };
+
+        var closeButton = new Button { Text = "Close", AutoSize = true };
+        closeButton.Click += (_, _) => form.Close();
+
+        var buttons = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            AutoSize = true
+        };
+        buttons.Controls.Add(copyButton);
+        buttons.Controls.Add(openButton);
+        buttons.Controls.Add(closeButton);
+
+        var layout = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink
+        };
+        layout.Controls.Add(instruction);
+        layout.Controls.Add(codeBox);
+        layout.Controls.Add(buttons);
+        form.Controls.Add(layout);
+
+        form.FormClosed += (_, _) =>
+        {
+            if (ReferenceEquals(_copilotVerificationDialog, form))
+                _copilotVerificationDialog = null;
+        };
+
+        _copilotVerificationDialog = form;
+        // Show as modal dialog so it stays on screen until the user closes it.
+        form.ShowDialog(this);
+    }
+
     private void RefreshSessions()
     {
         if (_sessionCombo is null || IsDisposed)
@@ -720,7 +866,14 @@ public sealed class AiChatPanel : UserControl
         {
             _renderTimer?.Dispose();
             _webView?.Dispose();
+            _viewModel.MessagesChanged -= OnMessagesChanged;
             _viewModel.AttachmentsChanged -= OnAttachmentsChanged;
+            _viewModel.CopilotVerificationCodeAvailable -= ShowCopilotVerificationDialog;
+            if (_viewModelPropertyChangedHandler is not null)
+                _viewModel.PropertyChanged -= _viewModelPropertyChangedHandler;
+            _copilotVerificationDialog?.Close();
+            _copilotVerificationDialog?.Dispose();
+            _copilotVerificationDialog = null;
         }
 
         base.Dispose(disposing);
