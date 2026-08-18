@@ -46,7 +46,7 @@ namespace JustyBaseLegacy.UI
         private AiChatPreferencesPanel? _aiChatPanel;
         private TabPage? _tabAiChat;
         private readonly JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? _chatCatalog;
-        private readonly JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? _chatBootstrap;
+        private readonly object? _chatBootstrap;
 
         public PreferencesForm(Action repaintApplication, Action saveManySqlToDisk,
             IApplicationSettingsContext applicationSettingsContext,
@@ -60,7 +60,7 @@ namespace JustyBaseLegacy.UI
             JustyBase.Ai.Embedded.Download.IModelCatalog? fimCatalog = null,
             JustyBase.Ai.Embedded.Server.IFimModelBootstrapService? fimBootstrap = null,
             JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null,
-            JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? chatBootstrap = null)
+            object? chatBootstrap = null)
         {
             _applicationSettingsContext = applicationSettingsContext ?? throw new ArgumentNullException(nameof(applicationSettingsContext));
             _netezzaAutocompleteState = netezzaAutocompleteState ?? throw new ArgumentNullException(nameof(netezzaAutocompleteState));

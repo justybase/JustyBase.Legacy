@@ -12,7 +12,7 @@ public partial class BaseWindow
     private readonly ChatViewModel? _chatViewModel;
     private readonly ISqlDiagnosticsProvider? _sqlDiagnosticsProvider;
     private readonly JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? _chatCatalog;
-    private readonly JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? _chatBootstrap;
+    private readonly object? _chatBootstrap;
 
     private void InitializeAiChat(DockSuiteTabManager dsm)
     {

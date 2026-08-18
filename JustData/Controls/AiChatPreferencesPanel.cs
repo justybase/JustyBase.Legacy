@@ -14,7 +14,7 @@ public sealed class AiChatPreferencesPanel : UserControl
 {
     private readonly IApplicationSettingsContext _settings;
     private readonly EmbeddedChatModelCatalog? _chatCatalog;
-    private readonly IEmbeddedChatModelBootstrapService? _chatBootstrap;
+    private readonly object? _chatBootstrap;
     private static readonly ToolTip toolTip = new();
     private bool _loading;
 
@@ -49,7 +49,7 @@ public sealed class AiChatPreferencesPanel : UserControl
     public AiChatPreferencesPanel(
         IApplicationSettingsContext settings,
         EmbeddedChatModelCatalog? chatCatalog = null,
-        IEmbeddedChatModelBootstrapService? chatBootstrap = null)
+        object? chatBootstrap = null)
     {
         _settings = settings;
         _chatCatalog = chatCatalog;
@@ -308,7 +308,7 @@ public sealed class AiChatPreferencesPanel : UserControl
         var model = _embeddedModel.SelectedItem as ModelDescriptor
             ?? _chatCatalog?.Models.FirstOrDefault(candidate =>
                 string.Equals(candidate.Id, _embeddedModel.Text.Trim(), StringComparison.OrdinalIgnoreCase))
-            ?? _chatBootstrap.CurrentModel;
+            ?? (ModelDescriptor)((dynamic)_chatBootstrap).CurrentModel;
         if (model.RequiresLicenseAcceptance
             && !_settings.Config.EmbeddedChatAcceptedLicenseModelIds.Contains(model.Id, StringComparer.OrdinalIgnoreCase))
         {
@@ -344,11 +344,11 @@ public sealed class AiChatPreferencesPanel : UserControl
                 _embeddedProgress!.Value = Math.Clamp((int)Math.Round(update.Fraction * 100), 0, 100);
                 _embeddedStatus!.Text = update.Message;
             });
-            await _chatBootstrap.EnsureModelAsync(model.Id, progress, _embeddedDownloadCts.Token).ConfigureAwait(true);
+            await ((dynamic)_chatBootstrap).EnsureModelAsync(model.Id, progress, _embeddedDownloadCts.Token).ConfigureAwait(true);
             if (CanUpdateDownloadUi)
             {
                 _embeddedProgress.Value = 100;
-                _embeddedStatus.Text = _chatBootstrap.SelectedModelDiskStatus;
+                _embeddedStatus.Text = ((dynamic)_chatBootstrap).SelectedModelDiskStatus;
             }
         }
         catch (OperationCanceledException)
@@ -379,7 +379,7 @@ public sealed class AiChatPreferencesPanel : UserControl
     private void UpdateEmbeddedDownloadStatus()
     {
         if (CanUpdateDownloadUi && _embeddedStatus is not null && _chatBootstrap is not null)
-            _embeddedStatus.Text = _chatBootstrap.SelectedModelDiskStatus;
+            _embeddedStatus.Text = ((dynamic)_chatBootstrap).SelectedModelDiskStatus;
     }
 
     protected override void Dispose(bool disposing)

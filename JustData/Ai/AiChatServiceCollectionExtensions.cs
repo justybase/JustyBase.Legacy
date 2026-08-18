@@ -40,10 +40,6 @@ public static class AiChatServiceCollectionExtensions
                 ? (IModelStore)new HuggingFaceMlxRepoStore(catalog, () => settings.Settings.EmbeddedChatModelId)
                 : new HuggingFaceModelStore(catalog, () => settings.Settings.EmbeddedChatModelId);
         });
-        collection.AddScoped<EmbeddedChatModelBootstrapService>();
-        collection.AddScoped<IEmbeddedChatModelBootstrapService>(sp =>
-            sp.GetRequiredService<EmbeddedChatModelBootstrapService>());
-
         // Backends.
         collection.AddScoped<OpenAiCompatibleChatBackend>();
         collection.AddScoped<ILocalChatBackend>(sp => sp.GetRequiredService<OpenAiCompatibleChatBackend>());

@@ -728,7 +728,7 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
         JustyBase.Ai.Embedded.Download.IModelCatalog? fimCatalog = null,
         JustyBase.Ai.Embedded.Server.IFimModelBootstrapService? fimBootstrap = null,
         JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null,
-        JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? chatBootstrap = null)
+        object? chatBootstrap = null)
     {
         if (_preferencesContent is not null && !_preferencesContent.IsDisposed)
         {
