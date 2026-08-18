@@ -69,7 +69,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
             _copilotCodeRaised = true;
             RaiseUi(() => CopilotVerificationCodeAvailable?.Invoke(code, url));
         };
-        _chatService.CopilotLoginVerificationCodeAvailable += _copilotVerificationHandler;
+        SubscribeCopilotVerificationHandler();
 
         foreach (var mode in ChatModeConfig.AllModes)
         {
@@ -524,7 +524,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         _codexLoginCts?.Cancel();
         var loggedOut = await _chatService.LogoutCodexAsync();
         if (loggedOut)
-            _controller.ForgetCodexThreadBindings();
+            InvokeControllerAction("ForgetCodexThreadBindings");
         RefreshCodexAccountState();
         StatusMessage = loggedOut ? "Signed out from Codex." : "Could not sign out from Codex.";
         if (string.Equals(_chatService.ActiveBackendId, "codex", StringComparison.OrdinalIgnoreCase))
@@ -539,7 +539,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     private async Task SignInCopilotAsync()
     {
         StatusMessage = "Opening GitHub Copilot sign-in in your browser...";
-        var started = await _chatService.StartCopilotLoginAsync();
+        var started = await InvokeServiceBoolAsync("StartCopilotLoginAsync");
         if (!started)
         {
             StatusMessage = $"Copilot sign-in failed: {_chatService.ConnectionError ?? "copilot CLI unavailable"}";
@@ -564,21 +564,23 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
                 break;
             }
 
-            if (!_copilotCodeRaised && !string.IsNullOrWhiteSpace(_chatService.CopilotLoginVerificationCode))
+            var verificationCode = GetServiceString("CopilotLoginVerificationCode");
+            if (!_copilotCodeRaised && !string.IsNullOrWhiteSpace(verificationCode))
             {
                 _copilotCodeRaised = true;
-                var code = _chatService.CopilotLoginVerificationCode;
-                var url = string.IsNullOrWhiteSpace(_chatService.CopilotLoginVerificationUrl)
+                var code = verificationCode;
+                var verificationUrl = GetServiceString("CopilotLoginVerificationUrl");
+                var url = string.IsNullOrWhiteSpace(verificationUrl)
                     ? "https://github.com/login/device"
-                    : _chatService.CopilotLoginVerificationUrl;
+                    : verificationUrl;
                 CopilotVerificationCodeAvailable?.Invoke(code, url);
                 StatusMessage = $"Waiting for you to approve {code} in the browser...";
             }
 
-            CopilotAccountInfo? account = null;
+            object? account = null;
             try
             {
-                account = await _chatService.ReadCopilotAccountAsync(cts.Token);
+                account = await InvokeServiceAsync("ReadCopilotAccountAsync", cts.Token);
             }
             catch (OperationCanceledException)
             {
@@ -590,7 +592,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
             }
 
             RaiseUi(RefreshCopilotAccountState);
-            if (account?.IsAuthenticated == true)
+            if (GetAccountBool(account, "IsAuthenticated"))
             {
                 StatusMessage = "Signed in to GitHub Copilot.";
                 await RefreshModelsAsync();
@@ -618,9 +620,9 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         }
 
         _copilotLoginCts?.Cancel();
-        var loggedOut = await _chatService.LogoutCopilotAsync();
+        var loggedOut = await InvokeServiceBoolAsync("LogoutCopilotAsync");
         if (loggedOut)
-            _controller.ForgetCopilotSessionBindings();
+            InvokeControllerAction("ForgetCopilotSessionBindings");
         RefreshCopilotAccountState();
         StatusMessage = loggedOut
             ? "Signed out from Copilot. Local chat history was kept; Copilot session links were cleared."
@@ -636,7 +638,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void RefreshCopilot()
     {
-        _ = _chatService.ReadCopilotAccountAsync().ContinueWith(_ =>
+        _ = InvokeServiceAsync("ReadCopilotAccountAsync").ContinueWith(_ =>
         {
             RaiseUi(RefreshCopilotAccountState);
         }, TaskScheduler.Default);
@@ -780,12 +782,59 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
 
     private void RefreshCopilotAccountState()
     {
-        var account = _chatService.CopilotAccount;
-        IsCopilotSignedIn = account?.IsAuthenticated == true;
-        CopilotAccountLabel = account?.IsAuthenticated == true
+        var account = GetServiceProperty("CopilotAccount");
+        IsCopilotSignedIn = GetAccountBool(account, "IsAuthenticated");
+        CopilotAccountLabel = IsCopilotSignedIn
             ? "Signed in"
             : "Not signed in";
     }
+
+    // Copilot was added to JustyBase.Ai after the first released package. Keep the
+    // host loadable with that older package while using the API when it is present.
+    private async Task<bool> InvokeServiceBoolAsync(string methodName, CancellationToken cancellationToken = default)
+        => (bool?)await InvokeServiceAsync(methodName, cancellationToken) == true;
+
+    private async Task<object?> InvokeServiceAsync(string methodName, CancellationToken cancellationToken = default)
+    {
+        var method = _chatService.GetType().GetMethod(methodName,
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+        if (method is null)
+            return null;
+
+        var parameters = method.GetParameters();
+        var result = parameters.Length == 0
+            ? method.Invoke(_chatService, null)
+            : method.Invoke(_chatService, new object?[] { cancellationToken });
+        if (result is not Task task)
+            return result;
+
+        await task.ConfigureAwait(false);
+        return task.GetType().GetProperty("Result")?.GetValue(task);
+    }
+
+    private object? GetServiceProperty(string propertyName)
+        => _chatService.GetType().GetProperty(propertyName,
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)?.GetValue(_chatService);
+
+    private string? GetServiceString(string propertyName) => GetServiceProperty(propertyName) as string;
+
+    private static bool GetAccountBool(object? account, string propertyName)
+        => account?.GetType().GetProperty(propertyName)?.GetValue(account) as bool? == true;
+
+    private static string? GetAccountString(object? account, string propertyName)
+        => account?.GetType().GetProperty(propertyName)?.GetValue(account) as string;
+
+    private void InvokeControllerAction(string methodName)
+        => _controller.GetType().GetMethod(methodName,
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)?.Invoke(_controller, null);
+
+    private void SubscribeCopilotVerificationHandler()
+        => _chatService.GetType().GetEvent("CopilotLoginVerificationCodeAvailable")?.AddEventHandler(
+            _chatService, _copilotVerificationHandler);
+
+    private void UnsubscribeCopilotVerificationHandler()
+        => _chatService.GetType().GetEvent("CopilotLoginVerificationCodeAvailable")?.RemoveEventHandler(
+            _chatService, _copilotVerificationHandler);
 
     private void RaiseUi(Action action)
     {
@@ -811,7 +860,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         _codexLoginCts?.Cancel();
         _copilotLoginCts?.Cancel();
         _backendSwitchCts?.Cancel();
-        _chatService.CopilotLoginVerificationCodeAvailable -= _copilotVerificationHandler;
+        UnsubscribeCopilotVerificationHandler();
         _codexLoginCts?.Dispose();
         _copilotLoginCts?.Dispose();
         _backendSwitchCts?.Dispose();
