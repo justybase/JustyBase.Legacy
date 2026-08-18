@@ -52,7 +52,6 @@ public static class AiChatServiceCollectionExtensions
         collection.AddScoped<ILocalModelConfigurationService>(sp => sp.GetRequiredService<LocalModelConfigurationService>());
         collection.AddScoped<SqlExecutionErrorStore>();
         collection.AddScoped<CodexAppServerClient>();
-        collection.AddScoped<CopilotClient>();
         collection.AddScoped<LocalChatService>();
         collection.AddScoped<ICopilotChatService>(sp => sp.GetRequiredService<LocalChatService>());
 

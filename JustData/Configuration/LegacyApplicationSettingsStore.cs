@@ -125,7 +125,6 @@ public sealed class WinFormsApplicationSettingsStore(
             CreatedAt = session.CreatedAt,
             LastActivityAt = session.LastActivityAt,
             CodexThreadId = session.CodexThreadId,
-            CopilotSessionId = session.CopilotSessionId,
             Messages = session.Messages.Select(message => new ChatMessage
             {
                 Content = message.Content,
