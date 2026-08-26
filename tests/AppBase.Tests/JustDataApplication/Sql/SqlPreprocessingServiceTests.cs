@@ -209,6 +209,98 @@ public sealed class SqlPreprocessingServiceTests
         Assert.Equal("5", result.UpdatedSessionVariables["$cnt"]);
     }
 
+    [Fact]
+    public async Task PreprocessAsync_SessionVar_with_SQL_RECORDS_AFFECTED_uses_non_query_evaluator()
+    {
+        var service = new SqlPreprocessingService();
+        SqlPreprocessCommand? evaluatedCommand = null;
+
+        var result = await service.PreprocessAsync(
+            CreateRequest("__SessionVar__$cnt = SQL_RECORDS_AFFECTED[DELETE FROM t]\nSELECT $cnt"),
+            sqlCommandEvaluator: command =>
+            {
+                evaluatedCommand = command;
+                return Task.FromResult<object?>(7);
+            });
+
+        Assert.NotNull(evaluatedCommand);
+        Assert.Equal(SqlPreprocessCommandKind.NonQuery, evaluatedCommand!.Kind);
+        Assert.Equal("DELETE FROM t", evaluatedCommand.Sql);
+        Assert.Equal("7", result.UpdatedSessionVariables["$cnt"]);
+    }
+
+    [Fact]
+    public async Task PreprocessAsync_DeclareAmpersandSqlResult_replaces_bare_and_quoted_variables()
+    {
+        var service = new SqlPreprocessingService();
+        var sql = "declare &some_var = SQL_RESULT[SELECT substr(now()-1,1,4)::char(4)];\r\n"
+            + "CREATE TABLE NAME_&some_var AS (SELECT 1 AS SAMPLE_COL, '&some_var' AS VARIABLE_SAMPLE_COL2 );";
+        string? evaluatedSql = null;
+        SqlPreprocessCommand? evaluatedCommand = null;
+
+        var result = await service.PreprocessAsync(
+            CreateRequest(sql),
+            sqlCommandEvaluator: command =>
+            {
+                evaluatedCommand = command;
+                evaluatedSql = command.Sql;
+                return Task.FromResult<object?>("2026");
+            });
+
+        Assert.NotNull(evaluatedCommand);
+        Assert.Equal(SqlPreprocessCommandKind.Scalar, evaluatedCommand!.Kind);
+        Assert.Equal("SELECT substr(now()-1,1,4)::char(4)", evaluatedSql);
+        Assert.Equal(
+            "\r\nCREATE TABLE NAME_2026 AS (SELECT 1 AS SAMPLE_COL, '2026' AS VARIABLE_SAMPLE_COL2 );",
+            result.ProcessedSql);
+        Assert.Equal("2026", result.UpdatedGlobalVariables["&some_var"]);
+    }
+
+    [Fact]
+    public async Task PreprocessAsync_DeclareAmpersandSqlResult_without_evaluator_fails_before_sql_execution()
+    {
+        var service = new SqlPreprocessingService();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.PreprocessAsync(CreateRequest(
+                "declare &some_var = SQL_RESULT[SELECT 2026];\nSELECT &some_var")));
+    }
+
+    [Fact]
+    public async Task PreprocessAsync_DeclareAmpersandSqlResult_propagates_evaluator_failure()
+    {
+        var service = new SqlPreprocessingService();
+        var expected = new InvalidOperationException("scalar query failed");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.PreprocessAsync(
+                CreateRequest("declare &some_var = SQL_RESULT[SELECT 2026];\nSELECT 1"),
+                sqlEvaluator: _ => Task.FromException<object?>(expected)));
+    }
+
+    [Fact]
+    public async Task PreprocessAsync_prompt_cancellation_does_not_evaluate_SQL_RESULT()
+    {
+        var service = new SqlPreprocessingService();
+        bool evaluated = false;
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            service.PreprocessAsync(
+                CreateRequest(
+                    "SELECT $missing;\n"
+                    + "declare &some_var = SQL_RESULT[DELETE FROM t];\n"
+                    + "SELECT &some_var",
+                    allowPrompts: true),
+                promptService: new NullPromptService(),
+                sqlEvaluator: _ =>
+                {
+                    evaluated = true;
+                    return Task.FromResult<object?>(1);
+                }));
+
+        Assert.False(evaluated);
+    }
+
     // ──────────────────────────────────────────────
     // __GlobalVar__ directive
     // ──────────────────────────────────────────────
@@ -540,26 +632,34 @@ public sealed class SqlPreprocessingServiceTests
             _values = values;
         }
 
-        public Task<IReadOnlyDictionary<string, string>> PromptAsync(
+        public Task<IReadOnlyDictionary<string, string>?> PromptAsync(
             IReadOnlyDictionary<string, string> unresolvedVariables,
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             WasCalled = true;
-            return Task.FromResult<IReadOnlyDictionary<string, string>>(
+            return Task.FromResult<IReadOnlyDictionary<string, string>?>(
                 new Dictionary<string, string>(_values, StringComparer.OrdinalIgnoreCase));
         }
     }
 
     private sealed class CancellablePromptService : IVariablePromptService
     {
-        public Task<IReadOnlyDictionary<string, string>> PromptAsync(
+        public Task<IReadOnlyDictionary<string, string>?> PromptAsync(
             IReadOnlyDictionary<string, string> unresolvedVariables,
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<IReadOnlyDictionary<string, string>>(
+            return Task.FromResult<IReadOnlyDictionary<string, string>?>(
                 new Dictionary<string, string>());
         }
+    }
+
+    private sealed class NullPromptService : IVariablePromptService
+    {
+        public Task<IReadOnlyDictionary<string, string>?> PromptAsync(
+            IReadOnlyDictionary<string, string> unresolvedVariables,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyDictionary<string, string>?>(null);
     }
 }

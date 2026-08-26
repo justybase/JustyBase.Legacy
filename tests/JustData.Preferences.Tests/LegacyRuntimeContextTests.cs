@@ -46,6 +46,25 @@ public sealed class LegacyRuntimeContextTests
     }
 
     [Fact]
+    public void Built_in_global_variables_are_refreshed_before_replacement()
+    {
+        var context = new LegacySessionVariableContext();
+        context.SetGlobalVariable("&yesterday_id", "stale");
+        context.SetGlobalVariable("&yesterday", "stale");
+        context.SetGlobalVariable("&last_working_id", "stale");
+        context.SetGlobalVariable("&last_working", "stale");
+        context.SetGlobalVariable("&now", "stale");
+
+        context.ReplaceGlobalVariables(string.Empty);
+
+        Assert.Equal(DateTime.Today.AddDays(-1).ToString("yyyyMMdd"), context.GlobalVariables["&yesterday_id"]);
+        Assert.Equal($"'{DateTime.Today.AddDays(-1):yyyy-MM-dd}'", context.GlobalVariables["&yesterday"]);
+        Assert.NotEqual("stale", context.GlobalVariables["&last_working_id"]);
+        Assert.NotEqual("stale", context.GlobalVariables["&last_working"]);
+        Assert.NotEqual("stale", context.GlobalVariables["&now"]);
+    }
+
+    [Fact]
     public void Database_catalog_reads_are_independent_snapshots()
     {
         IApplicationSettingsContext settings = Substitute.For<IApplicationSettingsContext>();

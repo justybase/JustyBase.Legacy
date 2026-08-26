@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0.18] - 2026-08-26
+
+### Added
+- Support for `declare &variable = SQL_RESULT[...]` with substitution in identifiers and SQL string literals.
+
+### Fixed
+- Nested preprocessing SQL now follows the risk gate, cancellation, retained-connection, and affected-row execution paths.
+- Built-in date and time variables are refreshed before SQL preprocessing.
+
 ## [1.1.0.6] - 2026-08-02
 
 ### Fixed

@@ -57,77 +57,257 @@ namespace JustyBaseLegacy.UI
         readonly Dictionary<string, string> _knownParams = new Dictionary<string, string>();
         private static readonly Regex _containsLetter = ContainsAZRegex();
 
-        private async Task<(string sql, string filepath, ExportOptions exportOptions)> PrepareSQLAsync(string originalQuery)
+        private async Task<(string sql, string filepath, ExportOptions exportOptions)> PrepareSQLAsync(
+            string originalQuery,
+            EditorDocumentViewModel document)
         {
-            bool cancelled = false;
-
-            var request = new PreprocessRequest(
-                SqlText: originalQuery,
-                ConnectionName: SelectedConnectionName,
-                DatabaseName: SelectedDatabase,
-                DocumentKey: ActiveEditorTabPage?.Text ?? string.Empty,
-                KnownParameters: new Dictionary<string, string>(_knownParams, StringComparer.OrdinalIgnoreCase),
-                AllowPrompts: true);
-
-            // Adapter that shows the WinForms Prompt dialog, applies quote-wrapping,
-            // and updates UI state. Returns null if user cancels.
-            IVariablePromptService promptService = new PromptAdapter(async (unresolved, ct) =>
+            string connectionName = document.ConnectionName;
+            string databaseName = document.DatabaseName;
+            if (!_sqlExecutionSessionRegistry.TryStart(
+                    document.Id,
+                    connectionName,
+                    out ISqlExecutionSession preparationSession))
             {
-                var strParams = new Dictionary<string, string>();
-                foreach (var entry in unresolved)
-                    strParams[entry.Value] = _knownParams.TryGetValue(entry.Key, out var known) ? known : "";
-
-                var r = Prompt.ShowDialog(strParams, "Please enter value", out var values);
-                if (r != DialogResult.OK)
-                {
-                    cancelled = true;
-                    return null;
-                }
-
-                var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                int i = 0;
-                foreach (var entry in unresolved)
-                {
-                    string val = values[i];
-                    if (_containsLetter.IsMatch(val) && !val.StartsWith('\''))
-                        val = "'" + val + "'";
-                    result[entry.Key] = val;
-                    _knownParams[entry.Key] = val;
-                    string globalKey = '&' + entry.Value[1..];
-                    _sessionVariableRuntimeContext.SetGlobalVariable(globalKey, val);
-                    i++;
-                }
-                VariablesRefresh();
-                return result;
-            });
-
-            var result = await _sqlPreprocessingService.PreprocessAsync(request, promptService);
-
-            if (cancelled)
-                return (string.Empty, null, ExportOptions.noInfo);
-
-            // Sync session/global variables from the result
-            string tabName = ActiveEditorTabPage?.Text ?? string.Empty;
-            _sessionVariableRuntimeContext.SetSessionVariables(tabName, result.UpdatedSessionVariables);
-            foreach (var kvp in result.UpdatedGlobalVariables)
-                _sessionVariableRuntimeContext.SetGlobalVariable(kvp.Key, kvp.Value);
-
-            // Sync known parameters
-            foreach (var kvp in result.UpdatedKnownParameters)
-                _knownParams[kvp.Key] = kvp.Value;
-
-            // Handle export directive
-            string? fPath = null;
-            ExportOptions eo = ExportOptions.noInfo;
-            if (result.ExportOptionDirective is not null)
-            {
-                fPath = result.ExportFilePath;
-                eo = result.ExportOptionDirective.Equals("csv", StringComparison.OrdinalIgnoreCase)
-                    ? ExportOptions.csv
-                    : ExportOptions.xlsx;
+                throw new InvalidOperationException(
+                    "A SQL command is already running for this document.");
             }
 
-            return (result.ProcessedSql, fPath, eo);
+            var preparation = new SqlResultPreparationContext(
+                document.Id,
+                connectionName,
+                databaseName,
+                document.KeepConnectionOpen,
+                preparationSession);
+
+            try
+            {
+                // Global values such as &now are refreshed by the runtime
+                // context when its replacement path is invoked. Refresh that
+                // state before taking the immutable snapshot for preprocessing.
+                _ = _sessionVariableRuntimeContext.ReplaceGlobalVariables(string.Empty);
+
+                var knownParameters = new Dictionary<string, string>(
+                    _knownParams,
+                    StringComparer.OrdinalIgnoreCase);
+                foreach (var pair in _sessionVariableRuntimeContext.GlobalVariables)
+                    knownParameters[pair.Key] = pair.Value;
+
+                var request = new PreprocessRequest(
+                    SqlText: originalQuery,
+                    ConnectionName: connectionName,
+                    DatabaseName: databaseName,
+                    DocumentKey: document.Title,
+                    KnownParameters: knownParameters,
+                    AllowPrompts: true);
+
+                // Adapter that shows the WinForms Prompt dialog, applies
+                // quote-wrapping, and returns null when the user cancels.
+                IVariablePromptService promptService = new PromptAdapter(async (unresolved, ct) =>
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var strParams = new Dictionary<string, string>();
+                    foreach (var entry in unresolved)
+                        strParams[entry.Value] = _knownParams.TryGetValue(entry.Key, out var known) ? known : "";
+
+                    var r = Prompt.ShowDialog(strParams, "Please enter value", out var values);
+                    if (r != DialogResult.OK)
+                        return null;
+
+                    var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    int i = 0;
+                    foreach (var entry in unresolved)
+                    {
+                        string val = values[i];
+                        if (_containsLetter.IsMatch(val) && !val.StartsWith('\''))
+                            val = "'" + val + "'";
+                        result[entry.Key] = val;
+                        _knownParams[entry.Key] = val;
+                        string globalKey = '&' + entry.Value[1..];
+                        _sessionVariableRuntimeContext.SetGlobalVariable(globalKey, val);
+                        i++;
+                    }
+                    VariablesRefresh();
+                    return result;
+                });
+
+                var result = await _sqlPreprocessingService.PreprocessAsync(
+                    request,
+                    promptService,
+                    cancellationToken: CancellationToken.None,
+                    sqlCommandEvaluator: command => EvaluateSqlResultAsync(preparation, command));
+
+                ThrowIfPreparationCancelled(preparation);
+                RetainPreparationConnection(preparation);
+
+                // Sync session/global variables from the result.
+                _sessionVariableRuntimeContext.SetSessionVariables(
+                    document.Title,
+                    result.UpdatedSessionVariables);
+                foreach (var kvp in result.UpdatedGlobalVariables)
+                    _sessionVariableRuntimeContext.SetGlobalVariable(kvp.Key, kvp.Value);
+
+                // Sync known parameters.
+                foreach (var kvp in result.UpdatedKnownParameters)
+                    _knownParams[kvp.Key] = kvp.Value;
+
+                // Handle export directive.
+                string? fPath = null;
+                ExportOptions eo = ExportOptions.noInfo;
+                if (result.ExportOptionDirective is not null)
+                {
+                    fPath = result.ExportFilePath;
+                    eo = result.ExportOptionDirective.Equals("csv", StringComparison.OrdinalIgnoreCase)
+                        ? ExportOptions.csv
+                        : ExportOptions.xlsx;
+                }
+
+                return (result.ProcessedSql, fPath, eo);
+            }
+            finally
+            {
+                _sqlExecutionSessionRegistry.Complete(document.Id);
+            }
+        }
+
+        private async Task<object?> EvaluateSqlResultAsync(
+            SqlResultPreparationContext preparation,
+            SqlPreprocessCommand command)
+        {
+            ThrowIfPreparationCancelled(preparation, command.CancellationToken);
+
+            string? driverName = _generalDbService.DriverName(preparation.ConnectionName);
+            if (!RiskySqlCommand(command.Sql, driverName))
+            {
+                throw new OperationCanceledException(
+                    "Nested SQL preprocessing command was rejected.",
+                    command.CancellationToken);
+            }
+
+            IGeneralDb? database = preparation.Database;
+            if (database is null)
+            {
+                if (!_connectionSessions.TryGetValue(preparation.ConnectionName, out database))
+                {
+                    database = _generalDbService.GetGeneralDb(
+                        _databaseRuntimeContext,
+                        _loggerLoud,
+                        _importExportTasks,
+                        preparation.ConnectionName,
+                        out _);
+                }
+            }
+            if (database is null)
+            {
+                throw new InvalidOperationException(
+                    $"The selected database connection '{preparation.ConnectionName}' is not available.");
+            }
+
+            preparation.Database = database;
+            if (!_connectionSessions.ContainsKey(preparation.ConnectionName))
+            {
+                database.Username = _generalDbService.UserName(preparation.ConnectionName);
+                _connectionSessions.Set(preparation.ConnectionName, database);
+            }
+            preparation.Session.SetProviderAbort(() => database.AbortAsync("x"));
+
+            if (preparation.Connection is null)
+            {
+                if (preparation.KeepConnectionOpen
+                    && _sqlExecutionSessionRegistry.TryGetRetainedConnection(
+                        preparation.DocumentId,
+                        preparation.ConnectionName,
+                        preparation.DatabaseName,
+                        out DbConnection? retained)
+                    && retained is not null)
+                {
+                    preparation.Connection = retained;
+                    preparation.UsesRetainedConnection = true;
+                }
+                else
+                {
+                    preparation.Connection = string.IsNullOrWhiteSpace(preparation.DatabaseName)
+                        ? database.GetConnection()
+                        : database.GetConnection(preparation.DatabaseName);
+                }
+
+                preparation.Session.SetConnection(
+                    preparation.Connection,
+                    ownsConnection: !preparation.UsesRetainedConnection);
+            }
+
+            DbConnection connection = preparation.Connection
+                ?? throw new InvalidOperationException("The SQL preprocessing connection was not initialized.");
+            if (connection.State != ConnectionState.Open)
+            {
+                await Task.Run(
+                    () => connection.Open(),
+                    command.CancellationToken).ConfigureAwait(false);
+            }
+            ThrowIfPreparationCancelled(preparation, command.CancellationToken);
+
+            using DbCommand dbCommand = connection.CreateCommand();
+            dbCommand.CommandText = command.Sql;
+            dbCommand.CommandTimeout = _applicationSettingsContext.Config.CommandTimeout;
+            preparation.Session.SetCommand(dbCommand, ownsCommand: false);
+
+            object? result = command.Kind == SqlPreprocessCommandKind.NonQuery
+                ? await Task.Run(
+                    () => (object?)dbCommand.ExecuteNonQuery(),
+                    command.CancellationToken).ConfigureAwait(false)
+                : await Task.Run(
+                    dbCommand.ExecuteScalar,
+                    command.CancellationToken).ConfigureAwait(false);
+
+            ThrowIfPreparationCancelled(preparation, command.CancellationToken);
+            return result;
+        }
+
+        private void RetainPreparationConnection(SqlResultPreparationContext preparation)
+        {
+            ThrowIfPreparationCancelled(preparation);
+            if (!preparation.KeepConnectionOpen
+                || preparation.Connection is null
+                || preparation.Connection.State != ConnectionState.Open)
+            {
+                return;
+            }
+
+            if (!preparation.UsesRetainedConnection)
+            {
+                _sqlExecutionSessionRegistry.RetainConnection(
+                    preparation.DocumentId,
+                    preparation.ConnectionName,
+                    preparation.DatabaseName,
+                    preparation.Connection);
+                preparation.UsesRetainedConnection = true;
+                preparation.Session.SetConnection(preparation.Connection, ownsConnection: false);
+            }
+        }
+
+        private static void ThrowIfPreparationCancelled(
+            SqlResultPreparationContext preparation,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (preparation.Session.IsCancelling)
+                throw new OperationCanceledException(cancellationToken);
+        }
+
+        private sealed class SqlResultPreparationContext(
+            EditorDocumentId documentId,
+            string connectionName,
+            string databaseName,
+            bool keepConnectionOpen,
+            ISqlExecutionSession session)
+        {
+            public EditorDocumentId DocumentId { get; } = documentId;
+            public string ConnectionName { get; } = connectionName;
+            public string DatabaseName { get; } = databaseName;
+            public bool KeepConnectionOpen { get; } = keepConnectionOpen;
+            public ISqlExecutionSession Session { get; } = session;
+            public IGeneralDb? Database { get; set; }
+            public DbConnection? Connection { get; set; }
+            public bool UsesRetainedConnection { get; set; }
         }
 
         /// <summary>
@@ -549,7 +729,7 @@ namespace JustyBaseLegacy.UI
 
             string sqlText = SelectSqlTextForExecution(editor, mode);
             (string preparedSql, string preparedFilePath, ExportOptions directiveOutput) =
-                await PrepareSQLAsync(sqlText);
+                await PrepareSQLAsync(sqlText, document);
             if (string.IsNullOrWhiteSpace(preparedSql))
                 return;
 

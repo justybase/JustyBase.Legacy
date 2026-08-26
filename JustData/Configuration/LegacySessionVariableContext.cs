@@ -101,6 +101,16 @@ public sealed class LegacySessionVariableContext :
 
     public string ReplaceGlobalVariables(string query)
     {
+        DateTime yesterday = DateTime.Today.AddDays(-1);
+        DateTime previousWorkDay = DateTimeAddons.PreviousWorkDay(DateTime.Today);
+        if (_globalVariables.ContainsKey("&yesterday_id"))
+            _globalVariables["&yesterday_id"] = yesterday.ToString("yyyyMMdd");
+        if (_globalVariables.ContainsKey("&yesterday"))
+            _globalVariables["&yesterday"] = $"'{yesterday:yyyy-MM-dd}'";
+        if (_globalVariables.ContainsKey("&last_working_id"))
+            _globalVariables["&last_working_id"] = previousWorkDay.ToString("yyyyMMdd");
+        if (_globalVariables.ContainsKey("&last_working"))
+            _globalVariables["&last_working"] = $"'{previousWorkDay:yyyy-MM-dd}'";
         _globalVariables["&now"] = $"'{DateTimeAddons.PreviousWorkDay(DateTime.Now):yyyy-MM-dd HH:mm:ss.fff}'";
         foreach (var item in _globalVariables.OrderByDescending(item => item.Key.Length))
         {
