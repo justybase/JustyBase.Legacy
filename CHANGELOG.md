@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0.19] - 2026-08-27
+
+### Fixed
+- Restore the Windows runtime and ReadyToRun packages before creating the self-contained release installer.
+
 ## [1.1.0.18] - 2026-08-26
 
 ### Added
