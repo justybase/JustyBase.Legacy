@@ -85,7 +85,7 @@ namespace JustyBaseLegacy.UI
                 "Result formatting, limits, filters and command timeouts.",
                 "▦",
                 tabResults,
-                "results format formatting date integer decimal rows limit warning timeout filter pin scale tabs"));
+                "results format formatting preset date integer decimal rows limit warning timeout filter pin scale tabs"));
 
             _tabEmbeddedFim = new TabPage("Embedded AI")
             {
@@ -852,15 +852,34 @@ namespace JustyBaseLegacy.UI
         private void BuildResultCards()
         {
             ResetPage(tabResults, out _, out Panel cards);
-            AddPreferenceCard(cards, "Formatting", "Choose the display formats used in the results grid.", 236, body =>
+            AddPreferenceCard(cards, "Formatting", "Choose the display formats used in the results grid.", 306, body =>
             {
+                AddField(body, "Format preset", CreateNumberFormatPresetSelector(), "Sets both format fields; edit them independently below.");
                 AddField(body, "Date format", cbDateFormat);
                 AddField(body, "Integer format", cbIntFormat);
                 AddField(body, "Decimal format", cbDecimalFormat);
-                var links = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = false };
+                var links = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Top,
+                    AutoSize = false,
+                    Height = Math.Max(30, formatsHelpBt.Height + 6),
+                    WrapContents = false,
+                    Padding = Padding.Empty
+                };
+                var previewButton = new Button
+                {
+                    Name = "numberFormatPreviewButton",
+                    Text = "Preview",
+                    AutoSize = false,
+                    Width = 88,
+                    Height = formatsHelpBt.Height,
+                    UseVisualStyleBackColor = false
+                };
+                previewButton.Click += NumberFormatPreviewButton_Click;
+                AddFullRow(body, previewButton);
                 links.Controls.Add(formatsHelpBt);
                 links.Controls.Add(htFiltersHelp);
-                body.Controls.Add(links, 0, body.RowCount++);
+                AddFullRow(body, links);
             });
             AddPreferenceCard(cards, "Result limits & timeouts", "Limit result sizes and set the command timeout. Numeric values use rows or seconds as shown.", 190, body =>
             {

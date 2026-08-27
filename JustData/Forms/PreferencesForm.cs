@@ -87,6 +87,7 @@ namespace JustyBaseLegacy.UI
             DoubleBuffered = true;
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
             InitializeComponent();
+            InitializeNumberFormatControls();
             _colorize = colorTheme;
             BuildModernLayout();
             EnsureEmbeddedFimPanel();
@@ -332,6 +333,8 @@ namespace JustyBaseLegacy.UI
                 int n = cbDecimalFormat.Items.IndexOf(_config.DecimalFormat);
                 cbDecimalFormat.SelectedIndex = n;
             }
+
+            UpdateNumberFormatPresetSelection();
 
 
 

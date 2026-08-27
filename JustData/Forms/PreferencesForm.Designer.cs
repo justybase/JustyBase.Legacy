@@ -1382,7 +1382,6 @@
             // cbDecimalFormat
             // 
             cbDecimalFormat.FormattingEnabled = true;
-            cbDecimalFormat.Items.AddRange(new object[] { "N2", "N3", "N4", "F2", "F3", "F4", "G", "E", "0.00", "%#0.00", "#0.0e0", "# 'degrees'" });
             cbDecimalFormat.Location = new System.Drawing.Point(147, 82);
             cbDecimalFormat.Name = "cbDecimalFormat";
             cbDecimalFormat.Size = new System.Drawing.Size(190, 23);
@@ -1392,7 +1391,6 @@
             // cbIntFormat
             // 
             cbIntFormat.FormattingEnabled = true;
-            cbIntFormat.Items.AddRange(new object[] { "N0", "G", "0000", "# 'degrees'" });
             cbIntFormat.Location = new System.Drawing.Point(147, 53);
             cbIntFormat.Name = "cbIntFormat";
             cbIntFormat.Size = new System.Drawing.Size(190, 23);

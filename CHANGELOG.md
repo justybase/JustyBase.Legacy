@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0.20] - 2026-08-27
+
+### Added
+- Number format presets and a modal preview for integer and decimal formats in Preferences.
+- Independent editing remains available for custom .NET numeric format strings.
+
 ## [1.1.0.19] - 2026-08-27
 
 ### Fixed
