@@ -98,7 +98,9 @@ public sealed class SqlAuthoringViewModel : ObservableObject, IDisposable
         string sqlText,
         string connectionName = "",
         TimeSpan? debounce = null,
-        int knownLineCount = -1)
+        int knownLineCount = -1,
+        string databaseName = "",
+        int caretOffset = -1)
     {
         ThrowIfDisposed();
         sqlText ??= string.Empty;
@@ -140,7 +142,9 @@ public sealed class SqlAuthoringViewModel : ObservableObject, IDisposable
                 version,
                 cancellation.Token,
                 knownLineCount: lineCount,
-                invocation: SqlLintInvocation.Live);
+                invocation: SqlLintInvocation.Live,
+                databaseName: databaseName,
+                caretOffset: caretOffset);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -153,11 +157,11 @@ public sealed class SqlAuthoringViewModel : ObservableObject, IDisposable
 
 
 
-    public Task LintOnSaveAsync(string sqlText, string connectionName = "", int knownLineCount = -1) =>
+    public Task LintOnSaveAsync(string sqlText, string connectionName = "", int knownLineCount = -1, string databaseName = "") =>
 
         LintOnSave
 
-            ? LintNowAsync(sqlText, connectionName, SqlLintInvocation.Save, knownLineCount)
+            ? LintNowAsync(sqlText, connectionName, SqlLintInvocation.Save, knownLineCount, databaseName)
 
             : Task.CompletedTask;
 
@@ -171,7 +175,11 @@ public sealed class SqlAuthoringViewModel : ObservableObject, IDisposable
 
         SqlLintInvocation invocation = SqlLintInvocation.Manual,
 
-        int knownLineCount = -1)
+        int knownLineCount = -1,
+
+        string databaseName = "",
+
+        int caretOffset = -1)
 
     {
 
@@ -197,7 +205,11 @@ public sealed class SqlAuthoringViewModel : ObservableObject, IDisposable
 
                 knownLineCount,
 
-                invocation);
+                invocation,
+
+                databaseName,
+
+                caretOffset);
 
         }
 
@@ -229,7 +241,9 @@ public sealed class SqlAuthoringViewModel : ObservableObject, IDisposable
 
         string connectionName = "",
 
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+
+        string databaseName = "")
 
     {
 
@@ -237,7 +251,7 @@ public sealed class SqlAuthoringViewModel : ObservableObject, IDisposable
 
         return _useCase.CompleteAsync(
 
-            new SqlCompletionRequest(_documentId, sqlText ?? string.Empty, caretOffset, connectionName),
+            new SqlCompletionRequest(_documentId, sqlText ?? string.Empty, caretOffset, connectionName, databaseName),
 
             cancellationToken);
 
@@ -253,7 +267,9 @@ public sealed class SqlAuthoringViewModel : ObservableObject, IDisposable
 
         string connectionName = "",
 
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+
+        string databaseName = "")
 
     {
 
@@ -261,7 +277,7 @@ public sealed class SqlAuthoringViewModel : ObservableObject, IDisposable
 
         return _useCase.GetSignatureHelpAsync(
 
-            new SqlSignatureHelpRequest(_documentId, sqlText ?? string.Empty, caretOffset, connectionName),
+            new SqlSignatureHelpRequest(_documentId, sqlText ?? string.Empty, caretOffset, connectionName, databaseName),
 
             cancellationToken);
 
@@ -277,7 +293,9 @@ public sealed class SqlAuthoringViewModel : ObservableObject, IDisposable
 
         string connectionName = "",
 
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+
+        string databaseName = "")
 
     {
 
@@ -285,7 +303,7 @@ public sealed class SqlAuthoringViewModel : ObservableObject, IDisposable
 
         return _useCase.GetCodeActionsAsync(
 
-            new SqlCodeActionRequest(_documentId, sqlText ?? string.Empty, diagnostic, connectionName),
+            new SqlCodeActionRequest(_documentId, sqlText ?? string.Empty, diagnostic, connectionName, databaseName),
 
             cancellationToken);
 
@@ -379,7 +397,11 @@ public sealed class SqlAuthoringViewModel : ObservableObject, IDisposable
 
         int knownLineCount = -1,
 
-        SqlLintInvocation invocation = SqlLintInvocation.Live)
+        SqlLintInvocation invocation = SqlLintInvocation.Live,
+
+        string databaseName = "",
+
+        int caretOffset = -1)
 
     {
 
@@ -401,7 +423,11 @@ public sealed class SqlAuthoringViewModel : ObservableObject, IDisposable
 
                 KnownLineCount: knownLineCount,
 
-                Invocation: invocation),
+                Invocation: invocation,
+
+                DatabaseName: databaseName,
+
+                CaretOffset: caretOffset),
 
             cancellationToken);
 

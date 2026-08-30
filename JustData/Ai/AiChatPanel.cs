@@ -9,7 +9,7 @@ namespace JustyBaseLegacy.UI.Ai;
 
 /// <summary>
 /// WinForms AI chat panel: conversation (WebView2 + Markdig), provider/backend
-/// selectors, composer with attachments, tool-confirmation cards and session list.
+/// selector, composer with attachments, tool-confirmation cards and session list.
 /// </summary>
 public sealed class AiChatPanel : UserControl
 {
@@ -63,9 +63,13 @@ public sealed class AiChatPanel : UserControl
         {
             if (e.PropertyName is nameof(ChatViewModel.IsStreaming)
                 or nameof(ChatViewModel.IsInitializing)
+                or nameof(ChatViewModel.IsModelLoading)
+                or nameof(ChatViewModel.IsModelReady)
                 or nameof(ChatViewModel.StatusMessage)
                 or nameof(ChatViewModel.InputText)
                 or nameof(ChatViewModel.IsConnected)
+                or nameof(ChatViewModel.SelectedBackendId)
+                or nameof(ChatViewModel.FailedBackendId)
                 or nameof(ChatViewModel.IsCodexSignedIn)
                 or nameof(ChatViewModel.CodexAccountLabel)
                 or nameof(ChatViewModel.IsCopilotSignedIn)
@@ -156,7 +160,7 @@ public sealed class AiChatPanel : UserControl
         header.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         header.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
 
-        var backendLabel = MakeLabel("Backend:");
+        var backendLabel = MakeLabel("Provider:");
         backendLabel.Margin = labelMargin;
         backendLabel.Anchor = AnchorStyles.Right;
         header.Controls.Add(backendLabel, 0, 0);
@@ -623,6 +627,16 @@ public sealed class AiChatPanel : UserControl
         _copilotAccountLabel!.Text = _viewModel.CopilotAccountLabel;
         _copilotButton!.Text = _viewModel.IsCopilotSignedIn ? "Copilot sign out" : "Copilot sign in";
 
+        var selectedProvider = _viewModel.SelectedBackendId;
+        var showCodexControls = string.Equals(selectedProvider, "codex", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(_viewModel.FailedBackendId, "codex", StringComparison.OrdinalIgnoreCase);
+        var showCopilotControls = string.Equals(selectedProvider, "copilot", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(_viewModel.FailedBackendId, "copilot", StringComparison.OrdinalIgnoreCase);
+        _codexButton!.Visible = showCodexControls;
+        _accountLabel.Visible = showCodexControls;
+        _copilotButton!.Visible = showCopilotControls;
+        _copilotAccountLabel.Visible = showCopilotControls;
+
         if (_inputBox is not null
             && !string.Equals(_inputBox.Text, _viewModel.InputText, StringComparison.Ordinal))
         {
@@ -635,7 +649,9 @@ public sealed class AiChatPanel : UserControl
         // disabled so repeated Enter presses cannot queue ghost sends.
         var inputDisabled = _viewModel.IsInitializing;
         _inputBox!.Enabled = !inputDisabled;
-        _sendButton!.Enabled = !inputDisabled;
+        _sendButton!.Enabled = !inputDisabled
+            && (!_viewModel.IsConnected || _viewModel.IsModelReady);
+        _backendCombo!.Enabled = !_viewModel.IsStreaming && !inputDisabled;
 
         // Backends.
         if (_backendCombo!.Items.Count == 0)
@@ -655,7 +671,8 @@ public sealed class AiChatPanel : UserControl
             _suppressSessionSync = false;
         }
 
-        // Models (refresh list, keep selection).
+        // Models are provider-scoped. Never retain a selected value that is not in
+        // the current provider's list.
         var modelChanged = _modelCombo!.Items.Cast<string>().SequenceEqual(_viewModel.AvailableModels) == false;
         if (modelChanged)
         {
@@ -663,10 +680,21 @@ public sealed class AiChatPanel : UserControl
             _modelCombo.Items.Clear();
             foreach (var model in _viewModel.AvailableModels)
                 _modelCombo.Items.Add(model);
-            if (!string.IsNullOrWhiteSpace(_viewModel.SelectedModel))
+            if (_viewModel.AvailableModels.Contains(_viewModel.SelectedModel, StringComparer.OrdinalIgnoreCase))
                 _modelCombo.SelectedItem = _viewModel.SelectedModel;
             _suppressSessionSync = false;
         }
+        else if (!Equals(_modelCombo.SelectedItem, _viewModel.SelectedModel))
+        {
+            _suppressSessionSync = true;
+            _modelCombo.SelectedItem = _viewModel.AvailableModels.Contains(
+                _viewModel.SelectedModel,
+                StringComparer.OrdinalIgnoreCase)
+                ? _viewModel.SelectedModel
+                : null;
+            _suppressSessionSync = false;
+        }
+        _modelCombo.Enabled = _viewModel.IsModelReady;
 
         _effortCombo!.Enabled = _viewModel.ShowReasoningEffort;
         if (_viewModel.ShowReasoningEffort)

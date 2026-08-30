@@ -6,6 +6,7 @@ using AppBase.Data.Core.Enums;
 using AppBase.Data.Core.Interfaces;
 using AppBase.Services;
 using JustData.Application.Schema;
+using JustData.Application.Settings;
 using JustyBase.Ai.Ports;
 using JustyBase.NetezzaSqlParser.Linter;
 using System.ComponentModel;
@@ -14,7 +15,7 @@ using System.Data.Common;
 namespace JustyBaseLegacy.UI.Ai;
 
 /// <summary>Maps the host config onto the shared <see cref="ChatSettings"/> port.</summary>
-public sealed class LegacyChatSettingsStore : IChatSettingsStore
+public sealed class LegacyChatSettingsStore : IChatSettingsStore, IChatProviderModelSettingsStore
 {
     private readonly IApplicationSettingsContext _settings;
 
@@ -33,13 +34,60 @@ public sealed class LegacyChatSettingsStore : IChatSettingsStore
         (_settings as IApplicationSettingsPersistence)?.SaveConfig();
     }
 
+    public string? GetModelForProvider(string providerId)
+    {
+        var config = _settings.Config;
+        return providerId.Trim().ToLowerInvariant() switch
+        {
+            "codex" => FirstConfigured(config.AiChatCodexModel, config.AiChatDefaultModel),
+            "copilot" => FirstConfigured(config.AiChatCopilotModel, config.AiChatDefaultModel),
+            "openai-compatible" => FirstConfigured(config.AiChatOpenAiCompatibleModel, config.AiChatDefaultModel),
+            "embedded" => config.EmbeddedChatModelId,
+            _ => config.AiChatDefaultModel
+        };
+    }
+
+    public void SetModelForProvider(string providerId, string modelId)
+    {
+        if (string.IsNullOrWhiteSpace(modelId))
+            return;
+
+        var config = _settings.Config;
+        switch (providerId.Trim().ToLowerInvariant())
+        {
+            case "codex":
+                config.AiChatCodexModel = modelId.Trim();
+                break;
+            case "copilot":
+                config.AiChatCopilotModel = modelId.Trim();
+                break;
+            case "openai-compatible":
+                config.AiChatOpenAiCompatibleModel = modelId.Trim();
+                break;
+            case "embedded":
+                config.EmbeddedChatModelId = modelId.Trim();
+                break;
+            default:
+                return;
+        }
+
+        (_settings as IApplicationSettingsPersistence)?.SaveConfig();
+    }
+
+    private static string? FirstConfigured(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+
     private static ChatSettings Map(IApplicationConfig config)
     {
+        var backendId = NormalizeBackendId(config.AiChatBackendId);
+        if (string.IsNullOrWhiteSpace(backendId) && config.EnableEmbeddedChatAi)
+            backendId = "embedded";
+
         return new ChatSettings
         {
             EnableAiChat = config.EnableAiChat,
             ChatSessions = config.ChatSessions,
-            AiChatBackendId = NormalizeBackendId(config.AiChatBackendId),
+            AiChatBackendId = backendId,
             AiChatOpenAiCompatibleEndpoint = config.AiChatOpenAiCompatibleEndpoint,
             AiChatOpenAiCompatibleApiKey = config.AiChatOpenAiCompatibleApiKey,
             AiChatDefaultModel = config.AiChatDefaultModel,
@@ -54,7 +102,11 @@ public sealed class LegacyChatSettingsStore : IChatSettingsStore
             AiChatMaxRetries = config.AiChatMaxRetries,
             AiChatPreset = config.AiChatPreset,
             AiChatPresetIsCustom = config.AiChatPresetIsCustom,
-            EnableEmbeddedChatAi = config.EnableEmbeddedChatAi,
+            // Embedded Chat is selected through the single provider setting. Treat the
+            // legacy flag as enabled for an embedded provider so old configurations do
+            // not require the user to discover a second activation switch.
+            EnableEmbeddedChatAi = string.Equals(NormalizeBackendId(config.AiChatBackendId), "embedded", StringComparison.OrdinalIgnoreCase)
+                || (string.IsNullOrWhiteSpace(config.AiChatBackendId) && config.EnableEmbeddedChatAi),
             EmbeddedChatModelId = config.EmbeddedChatModelId,
             EmbeddedChatGpuLayers = config.EmbeddedChatGpuLayers,
             EmbeddedChatCtxSize = config.EmbeddedChatCtxSize,
@@ -99,12 +151,12 @@ public sealed class LegacyChatSettingsStore : IChatSettingsStore
         if (string.IsNullOrWhiteSpace(backendId))
             return string.Empty;
 
-        return backendId.Trim() switch
+        return backendId.Trim().ToLowerInvariant() switch
         {
-            "Embedded (local)" => "embedded",
-            "OpenAI Compatible" => "openai-compatible",
-            "Codex (ChatGPT)" => "codex",
-            "GitHub Copilot" => "copilot",
+            "embedded (local)" => "embedded",
+            "openai compatible" => "openai-compatible",
+            "codex (chatgpt)" => "codex",
+            "github copilot" => "copilot",
             _ => backendId
         };
     }

@@ -1,7 +1,10 @@
 using AppBase.Common;
 using AppBase.Common.Configuration;
+using AppBase.Common.Interfaces;
 using JustData.Application.Settings;
+using JustyBaseLegacy.UI.Ai;
 using JustyBaseLegacy.UI.Configuration;
+using NSubstitute;
 using System.Text.Json;
 
 namespace JustData.Preferences.Tests;
@@ -138,5 +141,62 @@ public sealed class LegacyPreferencesCharacterizationTests
         Assert.Equal(36_000, snapshot.Values.SqlResults.LongQueryWarning);
         Assert.Equal(600_000, snapshot.Values.SqlResults.EstimatedWarning);
         Assert.Equal(120_000, snapshot.Values.SqlResults.EstimatedWarningInterval);
+    }
+
+    [Fact]
+    public void Ai_chat_provider_models_round_trip_without_collapsing_into_one_default()
+    {
+        var config = new ApplicationConfig
+        {
+            AiChatBackendId = "copilot",
+            AiChatDefaultModel = "legacy-default",
+            AiChatCodexModel = "codex-model",
+            AiChatCopilotModel = "copilot-model",
+            AiChatOpenAiCompatibleModel = "local-server-model",
+            EmbeddedChatModelId = "qwen3.5-4b"
+        };
+
+        var snapshot = LegacyApplicationSettingsMapper.ToSnapshot(config);
+        var mapped = LegacyApplicationSettingsMapper.ToLegacy(snapshot.ToDraft());
+
+        Assert.Equal("copilot", mapped.AiChatBackendId);
+        Assert.Equal("legacy-default", mapped.AiChatDefaultModel);
+        Assert.Equal("codex-model", mapped.AiChatCodexModel);
+        Assert.Equal("copilot-model", mapped.AiChatCopilotModel);
+        Assert.Equal("local-server-model", mapped.AiChatOpenAiCompatibleModel);
+        Assert.Equal("qwen3.5-4b", mapped.EmbeddedChatModelId);
+    }
+
+    [Fact]
+    public void Legacy_chat_settings_store_reads_and_writes_the_model_for_the_selected_provider()
+    {
+        var config = new ApplicationConfig
+        {
+            AiChatBackendId = "",
+            EnableEmbeddedChatAi = true,
+            AiChatDefaultModel = "legacy-default",
+            AiChatCodexModel = "codex-model",
+            AiChatCopilotModel = "copilot-model",
+            AiChatOpenAiCompatibleModel = "local-server-model",
+            EmbeddedChatModelId = "qwen3.5-4b"
+        };
+        var context = Substitute.For<IApplicationSettingsContext, IApplicationSettingsPersistence>();
+        context.Config.Returns(config);
+
+        var store = new LegacyChatSettingsStore(context);
+
+        Assert.Equal("embedded", store.Settings.AiChatBackendId);
+        Assert.True(store.Settings.EnableEmbeddedChatAi);
+        Assert.Equal("codex-model", store.GetModelForProvider("codex"));
+        Assert.Equal("copilot-model", store.GetModelForProvider("copilot"));
+        Assert.Equal("local-server-model", store.GetModelForProvider("openai-compatible"));
+        Assert.Equal("qwen3.5-4b", store.GetModelForProvider("embedded"));
+
+        store.SetModelForProvider("codex", "codex-new-model");
+        store.SetModelForProvider("embedded", "qwen-new-model");
+
+        Assert.Equal("codex-new-model", config.AiChatCodexModel);
+        Assert.Equal("qwen-new-model", config.EmbeddedChatModelId);
+        ((IApplicationSettingsPersistence)context).Received(2).SaveConfig();
     }
 }

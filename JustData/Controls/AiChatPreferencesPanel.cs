@@ -7,8 +7,8 @@ using JustyBase.Ai.Embedded.Download;
 namespace JustyBaseLegacy.UI.Controls;
 
 /// <summary>
-/// Preferences tab for the shared AI chat pipeline: backend, OpenAI-compatible
-/// endpoint/key, defaults, request tuning and the embedded llama.cpp chat model.
+/// Preferences tab for the shared AI chat pipeline: one chat switch, provider
+/// selection, common conversation defaults and provider-specific options.
 /// </summary>
 public sealed class AiChatPreferencesPanel : UserControl
 {
@@ -24,7 +24,9 @@ public sealed class AiChatPreferencesPanel : UserControl
     private ComboBox? _backend;
     private TextBox? _endpoint;
     private TextBox? _apiKey;
-    private TextBox? _defaultModel;
+    private TextBox? _codexModel;
+    private TextBox? _copilotModel;
+    private TextBox? _openAiModel;
     private ComboBox? _defaultMode;
     private TextBox? _reasoningEffort;
     private CheckBox? _autoConnect;
@@ -34,7 +36,6 @@ public sealed class AiChatPreferencesPanel : UserControl
     private NumericUpDown? _timeoutMs;
     private NumericUpDown? _maxRetries;
     private TextBox? _promptOverride;
-    private CheckBox? _enableEmbedded;
     private ComboBox? _embeddedModel;
     private NumericUpDown? _embeddedGpuLayers;
     private NumericUpDown? _embeddedCtxSize;
@@ -43,6 +44,12 @@ public sealed class AiChatPreferencesPanel : UserControl
     private Button? _embeddedCancel;
     private ProgressBar? _embeddedProgress;
     private Label? _embeddedStatus;
+    private GroupBox? _codexOptions;
+    private GroupBox? _copilotOptions;
+    private GroupBox? _openAiOptions;
+    private GroupBox? _embeddedOptions;
+    private GroupBox? _reasoningOptions;
+    private GroupBox? _generationOptions;
     private CancellationTokenSource? _embeddedDownloadCts;
     private bool _isDisposing;
 
@@ -74,87 +81,93 @@ public sealed class AiChatPreferencesPanel : UserControl
             }
         };
 
-        AddSectionHeader(root, "General — defaults for new chat sessions");
-        _enableChat = AddCheckBox(root, "Enable AI Chat", "Master switch for the AI Chat panel.", "aiChatEnable");
-        _backend = AddCombo(root, "Backend", "Where AI requests are sent: Codex (ChatGPT), GitHub Copilot, OpenAI Compatible or Embedded (local). You can also switch instantly in the AI Chat panel header.", "aiChatBackend");
-        _backend.Items.AddRange(new object[]
+        AddCard(root, "AI Chat", "Choose whether the chat is available and where requests are sent.", body =>
         {
-            new ComboOption("codex", "Codex (ChatGPT)"),
-            new ComboOption("copilot", "GitHub Copilot"),
-            new ComboOption("openai-compatible", "OpenAI Compatible"),
-            new ComboOption("embedded", "Embedded (local)")
+            _enableChat = AddCheckBox(body, "Enable AI Chat", "Master switch for the AI Chat panel.", "aiChatEnable");
+            _backend = AddCombo(body, "Provider", "Select Codex, GitHub Copilot, an OpenAI-compatible local server or the embedded local model.", "aiChatBackend");
+            _backend.Items.AddRange(new object[]
+            {
+                new ComboOption("codex", "Codex (ChatGPT)"),
+                new ComboOption("copilot", "GitHub Copilot"),
+                new ComboOption("openai-compatible", "OpenAI-compatible server"),
+                new ComboOption("embedded", "Embedded model (local)")
+            });
+            _backend.DisplayMember = "Name";
+            _backend.SelectedIndexChanged += (_, _) =>
+            {
+                if (!_loading)
+                    UpdateProviderOptions();
+            };
         });
-        _backend.DisplayMember = "Name";
-        _backend.SelectedIndexChanged += (_, _) =>
-        {
-            if (_loading)
-                return;
 
-            // Picking "Embedded (local)" as the backend is the same decision as enabling it.
-            if (string.Equals(GetSelectedId(_backend), "embedded", StringComparison.OrdinalIgnoreCase))
-            {
-                _enableEmbedded!.Checked = true;
-            }
-        };
-        _endpoint = AddTextBox(root, "OpenAI-compatible endpoint", "Base URL, e.g. http://localhost:1234/v1", "aiChatEndpoint");
-        _apiKey = AddTextBox(root, "API key (optional)", "Bearer token for the OpenAI-compatible endpoint", "aiChatApiKey");
-        _apiKey.UseSystemPasswordChar = true;
-        _defaultModel = AddTextBox(root, "Default model", "Model used for new chats with Codex / Copilot / OpenAI-compatible. The local model is chosen in the Embedded section below.", "aiChatDefaultModel");
-        _defaultMode = AddCombo(root, "Default mode", "Expert / SQL Fix / Simple — prompt style for new chats.", "aiChatDefaultMode");
-        _defaultMode.Items.AddRange(new object[]
+        AddCard(root, "Conversation defaults", "These options apply to every provider.", body =>
         {
-            new ComboOption("expert", "Expert"),
-            new ComboOption("sqlfix", "SQL Fix"),
-            new ComboOption("simple", "Simple")
+            _defaultMode = AddCombo(body, "Default mode", "Expert / SQL Fix / Simple — prompt style for new chats.", "aiChatDefaultMode");
+            _defaultMode.Items.AddRange(new object[]
+            {
+                new ComboOption("expert", "Expert"),
+                new ComboOption("sqlfix", "SQL Fix"),
+                new ComboOption("simple", "Simple")
+            });
+            _defaultMode.DisplayMember = "Name";
+            _autoConnect = AddCheckBox(body, "Auto-connect on start", "Connect to the selected provider when the app starts.", "aiChatAutoConnect");
+            _historyLimit = AddNumeric(body, "History limit (messages)", 1, 100, "aiChatHistoryLimit");
+            _promptOverride = AddMultiline(body, "System prompt override", "Optional text prepended to the mode prompt.", "aiChatPromptOverride");
         });
-        _defaultMode.DisplayMember = "Name";
-        _reasoningEffort = AddTextBox(root, "Reasoning effort (Codex / Copilot / Embedded)", "low / medium / high — for Codex, Copilot and the Embedded model (Qwen3-style thinking).", "aiChatReasoningEffort");
-        _autoConnect = AddCheckBox(root, "Auto-connect on start", "Connect to the selected backend when the app starts.", "aiChatAutoConnect");
-        _historyLimit = AddNumeric(root, "History limit (messages)", 1, 100, "aiChatHistoryLimit");
-        _temperature = AddNumeric(root, "Temperature", 0, 20, "aiChatTemperature");
-        _temperature.DecimalPlaces = 1;
-        _temperature.Increment = 0.1m;
-        _maxTokens = AddNumeric(root, "Max tokens", 64, 32768, "aiChatMaxTokens");
-        _timeoutMs = AddNumeric(root, "Request timeout (ms)", 1000, 600000, "aiChatTimeoutMs");
-        _timeoutMs.Increment = 1000;
-        _maxRetries = AddNumeric(root, "Max retries", 0, 5, "aiChatMaxRetries");
-        _promptOverride = AddMultiline(root, "System prompt override", "Optional text prepended to the mode prompt.", "aiChatPromptOverride");
 
-        AddSectionHeader(root, "Embedded AI (local) — used when Backend = Embedded (local)");
-        _enableEmbedded = AddCheckBox(root, "Enable Embedded AI (Chat)",
-            "Master switch for the bundled llama.cpp model. Enabling it also selects Backend = Embedded (local); disabling it falls back to Codex.",
-            "aiChatEnableEmbedded");
-        _enableEmbedded.CheckedChanged += (_, _) =>
+        _codexOptions = AddCard(root, "Codex", "Sign in to ChatGPT in the AI Chat panel. The model list is loaded from Codex when connected.", body =>
         {
-            if (_loading)
-                return;
+            _codexModel = AddTextBox(body, "Default model", "Model used when a new Codex chat starts. Auto is recommended.", "aiChatCodexModel");
+        });
 
-            if (_enableEmbedded.Checked)
-            {
-                SelectId(_backend!, "embedded");
-            }
-            else if (string.Equals(GetSelectedId(_backend!), "embedded", StringComparison.OrdinalIgnoreCase))
-            {
-                SelectId(_backend!, "codex");
-            }
-        };
-        _embeddedModel = AddCombo(root, "Embedded model", "GGUF chat model id — downloaded on first use when the Embedded backend connects.", "aiChatEmbeddedModel");
-        _embeddedModel.SelectedIndexChanged += (_, _) =>
+        _copilotOptions = AddCard(root, "GitHub Copilot", "Sign in to GitHub Copilot in the AI Chat panel. The model list is loaded from Copilot when connected.", body =>
         {
-            if (_loading)
-                return;
+            _copilotModel = AddTextBox(body, "Default model", "Model used when a new Copilot chat starts. Auto is recommended.", "aiChatCopilotModel");
+        });
 
-            UpdateEmbeddedDownloadStatus();
-        };
-        _embeddedGpuLayers = AddNumeric(root, "Embedded GPU layers", 0, 999, "aiChatEmbeddedGpuLayers");
-        _embeddedCtxSize = AddNumeric(root, "Embedded context size", 512, 131072, "aiChatEmbeddedContextSize");
-        _embeddedCtxSize.Increment = 512;
-        _preferVulkan = AddCheckBox(root, "Prefer Vulkan for llama-server", "Use the Vulkan llama.cpp build when available.", "aiChatPreferVulkan");
-        AddEmbeddedDownloadControls(root);
+        _openAiOptions = AddCard(root, "OpenAI-compatible server", "Use a local or remote server exposing the OpenAI /v1 API.", body =>
+        {
+            _endpoint = AddTextBox(body, "Endpoint", "Base URL, e.g. http://localhost:1234/v1", "aiChatEndpoint");
+            _apiKey = AddTextBox(body, "API key (optional)", "Bearer token for the OpenAI-compatible endpoint", "aiChatApiKey");
+            _apiKey.UseSystemPasswordChar = true;
+            _openAiModel = AddTextBox(body, "Default model", "Model id returned by the configured endpoint.", "aiChatOpenAiCompatibleModel");
+        });
 
-        AddNote(root, "Changes to Backend take effect on the next start. To switch right away, open the AI Chat panel (Settings → Dock windows → AI Chat) and pick the backend in its header.");
+        _embeddedOptions = AddCard(root, "Embedded model (local)", "Run a downloaded GGUF model through the bundled llama-server. Selecting this provider is the only activation needed for local chat.", body =>
+        {
+            _embeddedModel = AddCombo(body, "Model", "GGUF chat model id — downloaded on first use when the Embedded provider connects.", "aiChatEmbeddedModel");
+            _embeddedModel.SelectedIndexChanged += (_, _) =>
+            {
+                if (!_loading)
+                    UpdateEmbeddedDownloadStatus();
+            };
+            _embeddedGpuLayers = AddNumeric(body, "GPU layers", 0, 999, "aiChatEmbeddedGpuLayers");
+            _embeddedCtxSize = AddNumeric(body, "Context size (tokens)", 512, 131072, "aiChatEmbeddedContextSize");
+            _embeddedCtxSize.Increment = 512;
+            _preferVulkan = AddCheckBox(body, "Prefer Vulkan", "Use the Vulkan llama.cpp build when available.", "aiChatPreferVulkan");
+            AddEmbeddedDownloadControls(body);
+        });
+
+        _reasoningOptions = AddCard(root, "Reasoning", "Available for Codex, Copilot and Embedded models; not used by OpenAI-compatible servers.", body =>
+        {
+            _reasoningEffort = AddTextBox(body, "Reasoning effort", "low / medium / high — plus off for the Embedded model.", "aiChatReasoningEffort");
+        });
+
+        _generationOptions = AddCard(root, "Generation and connection", "Used by OpenAI-compatible and Embedded providers.", body =>
+        {
+            _temperature = AddNumeric(body, "Temperature", 0, 20, "aiChatTemperature");
+            _temperature.DecimalPlaces = 1;
+            _temperature.Increment = 0.1m;
+            _maxTokens = AddNumeric(body, "Max tokens", 64, 32768, "aiChatMaxTokens");
+            _timeoutMs = AddNumeric(body, "Request timeout (ms)", 1000, 600000, "aiChatTimeoutMs");
+            _timeoutMs.Increment = 1000;
+            _maxRetries = AddNumeric(body, "Max retries", 0, 5, "aiChatMaxRetries");
+        });
+
+        AddNote(root, "Provider changes made here are saved with Preferences. To switch immediately, use the Provider list in the AI Chat panel.");
 
         Controls.Add(root);
+        UpdateProviderOptions();
     }
 
     public void LoadFromConfig(IApplicationConfig? source = null)
@@ -164,14 +177,16 @@ public sealed class AiChatPreferencesPanel : UserControl
         {
             var config = source ?? _settings.Config;
             _enableChat!.Checked = config.EnableAiChat;
-            SelectId(_backend!, config.AiChatBackendId);
+            SelectId(_backend!, NormalizeProviderId(config.AiChatBackendId, config.EnableEmbeddedChatAi));
             if (_backend.SelectedIndex < 0 && _backend.Items.Count > 0)
             {
                 _backend.SelectedIndex = 0;
             }
             _endpoint!.Text = config.AiChatOpenAiCompatibleEndpoint;
             _apiKey!.Text = config.AiChatOpenAiCompatibleApiKey ?? string.Empty;
-            _defaultModel!.Text = config.AiChatDefaultModel;
+            _codexModel!.Text = FirstConfigured(config.AiChatCodexModel, config.AiChatDefaultModel);
+            _copilotModel!.Text = FirstConfigured(config.AiChatCopilotModel, config.AiChatDefaultModel);
+            _openAiModel!.Text = FirstConfigured(config.AiChatOpenAiCompatibleModel, config.AiChatDefaultModel);
             SelectId(_defaultMode!, config.AiChatDefaultMode);
             if (_defaultMode.SelectedIndex < 0 && _defaultMode.Items.Count > 0)
             {
@@ -185,7 +200,6 @@ public sealed class AiChatPreferencesPanel : UserControl
             _timeoutMs!.Value = Math.Clamp(config.AiChatRequestTimeoutMs, 1000, 600000);
             _maxRetries!.Value = Math.Clamp(config.AiChatMaxRetries, 0, 5);
             _promptOverride!.Text = config.AiChatSystemPromptOverride;
-            _enableEmbedded!.Checked = config.EnableEmbeddedChatAi;
             _embeddedGpuLayers!.Value = Math.Clamp(config.EmbeddedChatGpuLayers, 0, 999);
             _embeddedCtxSize!.Value = Math.Clamp(config.EmbeddedChatCtxSize, 512, 131072);
             _preferVulkan!.Checked = config.LlamaServerPreferVulkan;
@@ -206,6 +220,7 @@ public sealed class AiChatPreferencesPanel : UserControl
                 .FirstOrDefault(model => string.Equals(model.Id, config.EmbeddedChatModelId, StringComparison.OrdinalIgnoreCase));
             _embeddedModel.SelectedItem = selectedModel ?? config.EmbeddedChatModelId;
             UpdateEmbeddedDownloadStatus();
+            UpdateProviderOptions();
         }
         finally
         {
@@ -219,10 +234,14 @@ public sealed class AiChatPreferencesPanel : UserControl
     public void ApplyCurrentSettingsTo(IApplicationConfig config)
     {
         config.EnableAiChat = _enableChat!.Checked;
-        config.AiChatBackendId = GetSelectedId(_backend!) ?? config.AiChatBackendId;
+        var providerId = GetSelectedId(_backend!) ?? NormalizeProviderId(config.AiChatBackendId, config.EnableEmbeddedChatAi);
+        config.AiChatBackendId = providerId;
         config.AiChatOpenAiCompatibleEndpoint = _endpoint!.Text.Trim();
         config.AiChatOpenAiCompatibleApiKey = string.IsNullOrWhiteSpace(_apiKey!.Text) ? null : _apiKey.Text.Trim();
-        config.AiChatDefaultModel = _defaultModel!.Text.Trim();
+        config.AiChatCodexModel = _codexModel!.Text.Trim();
+        config.AiChatCopilotModel = _copilotModel!.Text.Trim();
+        config.AiChatOpenAiCompatibleModel = _openAiModel!.Text.Trim();
+        config.AiChatDefaultModel = GetLegacyDefaultModel(config, providerId);
         config.AiChatDefaultMode = GetSelectedId(_defaultMode!) ?? "expert";
         config.AiChatDefaultReasoningEffort = _reasoningEffort!.Text.Trim();
         config.AiChatAutoConnect = _autoConnect!.Checked;
@@ -232,7 +251,7 @@ public sealed class AiChatPreferencesPanel : UserControl
         config.AiChatRequestTimeoutMs = (int)_timeoutMs!.Value;
         config.AiChatMaxRetries = (int)_maxRetries!.Value;
         config.AiChatSystemPromptOverride = _promptOverride!.Text;
-        config.EnableEmbeddedChatAi = _enableEmbedded!.Checked;
+        config.EnableEmbeddedChatAi = string.Equals(providerId, "embedded", StringComparison.OrdinalIgnoreCase);
         config.EmbeddedChatModelId = _embeddedModel!.SelectedItem is ModelDescriptor descriptor
             ? descriptor.Id
             : _embeddedModel.Text.Trim();
@@ -376,6 +395,22 @@ public sealed class AiChatPreferencesPanel : UserControl
     private bool CanUpdateDownloadUi
         => !_isDisposing && !IsDisposed && !Disposing;
 
+    private void UpdateProviderOptions()
+    {
+        var providerId = GetSelectedId(_backend) ?? string.Empty;
+        var isCodex = string.Equals(providerId, "codex", StringComparison.OrdinalIgnoreCase);
+        var isCopilot = string.Equals(providerId, "copilot", StringComparison.OrdinalIgnoreCase);
+        var isOpenAi = string.Equals(providerId, "openai-compatible", StringComparison.OrdinalIgnoreCase);
+        var isEmbedded = string.Equals(providerId, "embedded", StringComparison.OrdinalIgnoreCase);
+
+        _codexOptions!.Visible = isCodex;
+        _copilotOptions!.Visible = isCopilot;
+        _openAiOptions!.Visible = isOpenAi;
+        _embeddedOptions!.Visible = isEmbedded;
+        _reasoningOptions!.Visible = isCodex || isCopilot || isEmbedded;
+        _generationOptions!.Visible = isOpenAi || isEmbedded;
+    }
+
     private void UpdateEmbeddedDownloadStatus()
     {
         if (CanUpdateDownloadUi && _embeddedStatus is not null && _chatBootstrap is not null)
@@ -395,8 +430,36 @@ public sealed class AiChatPreferencesPanel : UserControl
         base.Dispose(disposing);
     }
 
-    private static string? GetSelectedId(ComboBox combo)
-        => combo.SelectedItem is ComboOption option ? option.Id : combo.SelectedItem as string;
+    private static string? GetSelectedId(ComboBox? combo)
+        => combo?.SelectedItem is ComboOption option ? option.Id : combo?.SelectedItem as string;
+
+    private static string NormalizeProviderId(string? providerId, bool legacyEmbeddedEnabled = false)
+    {
+        if (string.IsNullOrWhiteSpace(providerId))
+            return legacyEmbeddedEnabled ? "embedded" : "codex";
+
+        return providerId.Trim().ToLowerInvariant() switch
+        {
+            "ollama" or "lmstudio" => "openai-compatible",
+            "embedded (local)" => "embedded",
+            "openai compatible" => "openai-compatible",
+            "codex (chatgpt)" => "codex",
+            "github copilot" => "copilot",
+            _ => providerId.Trim()
+        };
+    }
+
+    private static string FirstConfigured(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+
+    private static string GetLegacyDefaultModel(IApplicationConfig config, string providerId)
+        => providerId.Trim().ToLowerInvariant() switch
+        {
+            "codex" => FirstConfigured(config.AiChatCodexModel, config.AiChatDefaultModel),
+            "copilot" => FirstConfigured(config.AiChatCopilotModel, config.AiChatDefaultModel),
+            "openai-compatible" => FirstConfigured(config.AiChatOpenAiCompatibleModel, config.AiChatDefaultModel),
+            _ => config.AiChatDefaultModel
+        };
 
     private static void SelectId(ComboBox combo, string? id)
     {
@@ -404,6 +467,53 @@ public sealed class AiChatPreferencesPanel : UserControl
             .OfType<ComboOption>()
             .FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase));
         combo.SelectedItem = option;
+    }
+
+    private static GroupBox AddCard(
+        TableLayoutPanel root,
+        string title,
+        string description,
+        Action<TableLayoutPanel> content)
+    {
+        var card = new GroupBox
+        {
+            Text = title,
+            AutoSize = true,
+            Dock = DockStyle.Top,
+            Padding = new Padding(10, 20, 10, 10),
+            Margin = new Padding(4, 6, 4, 6)
+        };
+        var body = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 2,
+            Padding = Padding.Empty,
+            ColumnStyles =
+            {
+                new ColumnStyle(SizeType.AutoSize),
+                new ColumnStyle(SizeType.Percent, 100)
+            }
+        };
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            var note = new Label
+            {
+                Text = description,
+                AutoSize = true,
+                ForeColor = SystemColors.GrayText,
+                MaximumSize = new Size(640, 0),
+                Margin = new Padding(4, 0, 4, 8)
+            };
+            body.Controls.Add(note, 0, body.RowCount);
+            body.SetColumnSpan(note, 2);
+        }
+
+        content(body);
+        card.Controls.Add(body);
+        root.Controls.Add(card, 0, root.RowCount);
+        root.SetColumnSpan(card, 2);
+        return card;
     }
 
     private static CheckBox AddCheckBox(TableLayoutPanel root, string label, string tooltip, string automationId)

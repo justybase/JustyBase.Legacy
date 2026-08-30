@@ -125,6 +125,67 @@ public sealed class PreferencesUiTests : IDisposable
 
     [Fact]
     [Trait("Category", "UI")]
+    public void Preferences_AIChat_has_one_master_switch_and_a_provider_selector()
+    {
+        Directory.CreateDirectory(_configDirectory);
+        string configPath = Path.Combine(_configDirectory, "config.json");
+        File.WriteAllText(configPath, "{\"EnableAiChat\":true,\"AiChatBackendId\":\"\",\"EnableEmbeddedChatAi\":true}");
+        UiTestHelpers.KillExistingInstances();
+        using FlaUI.Core.Application application = FlaUI.Core.Application.Launch(new ProcessStartInfo
+        {
+            FileName = Path.Combine(AppContext.BaseDirectory, "JustyBaseLegacy.exe"),
+            Arguments = $"--ui-test-preferences \"{_configDirectory}\"",
+            UseShellExecute = false
+        });
+        using UIA3Automation automation = new();
+        bool completed = false;
+
+        try
+        {
+            var window = application.GetMainWindow(automation, TimeSpan.FromSeconds(20));
+            Assert.NotNull(window);
+
+            var aiNavigation = UiTestHelpers.WaitFor(
+                () => window.FindFirstDescendant(cf => cf.ByAutomationId("navigationtabAiChat"))?.AsButton(),
+                "the AI Chat preferences navigation button");
+            aiNavigation.InvokePattern.Invoke();
+
+            var enableChat = UiTestHelpers.WaitFor(
+                () => window.FindFirstDescendant(cf => cf.ByAutomationId("aiChatEnable"))?.AsCheckBox(),
+                "the AI Chat master switch");
+            var provider = UiTestHelpers.WaitFor(
+                () => window.FindFirstDescendant(cf => cf.ByAutomationId("aiChatBackend"))?.AsComboBox(),
+                "the AI Chat provider selector");
+
+            Assert.NotNull(enableChat);
+            Assert.NotNull(provider);
+            Assert.Single(window.FindAllDescendants(cf => cf.ByAutomationId("aiChatEnable")));
+            Assert.Null(window.FindFirstDescendant(cf => cf.ByAutomationId("aiChatEnableEmbedded")));
+
+            var save = UiTestHelpers.WaitFor(
+                () => window.FindFirstDescendant(cf => cf.ByAutomationId("btSave2"))?.AsButton(),
+                "the preferences save button");
+            save.InvokePattern.Invoke();
+            using Process process = Process.GetProcessById(application.ProcessId);
+            Assert.True(process.WaitForExit(20_000), "The preferences test process did not exit.");
+            completed = true;
+
+            using JsonDocument config = JsonDocument.Parse(File.ReadAllText(configPath));
+            Assert.Equal("embedded", config.RootElement.GetProperty("AiChatBackendId").GetString());
+            Assert.True(config.RootElement.GetProperty("EnableEmbeddedChatAi").GetBoolean());
+        }
+        finally
+        {
+            if (!completed)
+            {
+                try { application.Kill(); }
+                catch (InvalidOperationException) { }
+            }
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "UI")]
     public void Preferences_NumberFormatPresets_keep_individual_values_and_preview_current_selection()
     {
         Directory.CreateDirectory(_configDirectory);

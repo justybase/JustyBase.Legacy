@@ -162,6 +162,9 @@ public sealed class ApplicationConfig : IApplicationConfig
     public string AiChatOpenAiCompatibleEndpoint { get; set; } = "http://localhost:1234/v1";
     public string? AiChatOpenAiCompatibleApiKey { get; set; }
     public string AiChatDefaultModel { get; set; } = "gpt-5.6-luna";
+    public string AiChatCodexModel { get; set; } = "";
+    public string AiChatCopilotModel { get; set; } = "";
+    public string AiChatOpenAiCompatibleModel { get; set; } = "";
     public string AiChatDefaultReasoningEffort { get; set; } = "low";
     public string AiChatDefaultMode { get; set; } = "expert";
     public bool AiChatAutoConnect { get; set; }

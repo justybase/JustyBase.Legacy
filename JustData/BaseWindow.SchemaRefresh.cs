@@ -324,6 +324,27 @@ namespace JustyBaseLegacy.UI
                     pagePicture.DatabaseTypeName = _generalDbService.DriverName(selConnName);
                 }
             }
+
+            RefreshActiveDocumentDiagnostics(selConnName);
+        }
+
+        private void RefreshActiveDocumentDiagnostics(string connectionName)
+        {
+            if (CurrentTB is not { } editor
+                || !_documentIdsByEditor.TryGetValue(editor, out var documentId)
+                || _editorWorkspaceViewModel.Documents.FirstOrDefault(document => document.Id == documentId) is not { } document)
+            {
+                return;
+            }
+
+            document.ConnectionName = connectionName;
+            document.DatabaseName = CurrentUpper?.SelectedDatabase ?? string.Empty;
+            _ = document.SqlAuthoring.ScheduleLintAsync(
+                document.Text,
+                document.ConnectionName,
+                knownLineCount: editor.LinesCount,
+                databaseName: document.DatabaseName,
+                caretOffset: editor.SelectionStart);
         }
         private void CollapseDatabaseMenuItem_Click(object sender, EventArgs e)
         {

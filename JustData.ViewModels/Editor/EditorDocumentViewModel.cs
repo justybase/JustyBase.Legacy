@@ -187,7 +187,9 @@ public sealed class EditorDocumentViewModel : ObservableObject, IDisposable
 
         Text = text;
         IsDirty = true;
-        _ = SqlAuthoring.ScheduleLintAsync(Text, ConnectionName, knownLineCount: knownLineCount);
+        _ = SqlAuthoring.ScheduleLintAsync(
+            Text, ConnectionName, knownLineCount: knownLineCount, databaseName: DatabaseName,
+            caretOffset: CaretOffset);
     }
 
     public void SetLoadedText(string text)
@@ -197,7 +199,9 @@ public sealed class EditorDocumentViewModel : ObservableObject, IDisposable
         IsDirty = false;
         ExternalChangePending = false;
         int knownLineCount = SqlPerformancePolicy.CountLines(Text);
-        _ = SqlAuthoring.ScheduleLintAsync(Text, ConnectionName, knownLineCount: knownLineCount);
+        _ = SqlAuthoring.ScheduleLintAsync(
+            Text, ConnectionName, knownLineCount: knownLineCount, databaseName: DatabaseName,
+            caretOffset: CaretOffset);
     }
 
     public void MarkSaved()
@@ -206,7 +210,8 @@ public sealed class EditorDocumentViewModel : ObservableObject, IDisposable
         IsDirty = false;
         ExternalChangePending = false;
         if (SqlAuthoring.LintOnSave)
-            _ = SqlAuthoring.LintOnSaveAsync(Text, ConnectionName, SqlPerformancePolicy.CountLines(Text));
+            _ = SqlAuthoring.LintOnSaveAsync(
+                Text, ConnectionName, SqlPerformancePolicy.CountLines(Text), DatabaseName);
     }
 
     /// <summary>Copies the active editor's selection into document state.</summary>

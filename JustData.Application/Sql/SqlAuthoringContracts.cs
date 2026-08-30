@@ -9,7 +9,9 @@ public sealed record SqlLintRequest(
     string ConnectionName = "",
     bool IncludeQuickFixes = true,
     int KnownLineCount = -1,
-    SqlLintInvocation Invocation = SqlLintInvocation.Live);
+    SqlLintInvocation Invocation = SqlLintInvocation.Live,
+    string DatabaseName = "",
+    int CaretOffset = -1);
 
 public sealed record SqlLintResult(
     EditorDocumentId DocumentId,
@@ -20,7 +22,8 @@ public sealed record SqlCompletionRequest(
     EditorDocumentId DocumentId,
     string SqlText,
     int CaretOffset,
-    string ConnectionName = "");
+    string ConnectionName = "",
+    string DatabaseName = "");
 
 public sealed record SqlCompletionItem(
     string Label,
@@ -44,7 +47,8 @@ public sealed record SqlSignatureHelpRequest(
     EditorDocumentId DocumentId,
     string SqlText,
     int CaretOffset,
-    string ConnectionName = "");
+    string ConnectionName = "",
+    string DatabaseName = "");
 
 public sealed record SqlTextEdit(int StartOffset, int Length, string NewText);
 
@@ -59,7 +63,8 @@ public sealed record SqlCodeActionRequest(
     EditorDocumentId DocumentId,
     string SqlText,
     SqlDiagnostic Diagnostic,
-    string ConnectionName = "");
+    string ConnectionName = "",
+    string DatabaseName = "");
 
 public interface ISqlAuthoringUseCase
 {

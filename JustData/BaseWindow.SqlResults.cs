@@ -622,7 +622,8 @@ namespace JustyBaseLegacy.UI
                     document.Text,
                     document.ConnectionName,
                     JustyBase.NetezzaSqlParser.Authoring.SqlLintInvocation.Manual,
-                    JustyBase.NetezzaSqlParser.Authoring.SqlPerformancePolicy.CountLines(document.Text));
+                    JustyBase.NetezzaSqlParser.Authoring.SqlPerformancePolicy.CountLines(document.Text),
+                    document.DatabaseName);
             }
             catch (OperationCanceledException)
             {

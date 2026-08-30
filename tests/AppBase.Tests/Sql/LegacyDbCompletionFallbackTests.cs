@@ -97,6 +97,26 @@ public sealed class LegacyDbCompletionFallbackTests : IDisposable
     }
 
     [Fact]
+    public void GetCompletions_without_database_owners_still_suggests_databases_and_schemas()
+    {
+        _context.DatabaseOwners.Returns(new Dictionary<string, Dictionary<string, Dictionary<string, string>>>());
+
+        var databaseItems = _sut.GetCompletions("JUST").ToList();
+        var schemaItems = _sut.GetCompletions("JUST_DATA.").ToList();
+
+        Assert.Contains(databaseItems, item => item.ToString() == "JUST_DATA");
+        Assert.Contains(schemaItems, item => item.ToString() == "ADMIN");
+    }
+
+    [Fact]
+    public void GetCompletions_does_not_use_global_selection_for_another_netezza_database()
+    {
+        var items = _sut.GetCompletions("ADMIN.", ConnectionName, "OTHER_DB").ToList();
+
+        Assert.Empty(items);
+    }
+
+    [Fact]
     public void ResetCache_clears_instance_caches()
     {
         _sut.ResetCache();

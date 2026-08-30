@@ -387,6 +387,9 @@ public sealed class AiChatSettings
     public string AiChatOpenAiCompatibleEndpoint { get; set; } = "http://localhost:1234/v1";
     public string? AiChatOpenAiCompatibleApiKey { get; set; }
     public string AiChatDefaultModel { get; set; } = "gpt-5.6-luna";
+    public string AiChatCodexModel { get; set; } = string.Empty;
+    public string AiChatCopilotModel { get; set; } = string.Empty;
+    public string AiChatOpenAiCompatibleModel { get; set; } = string.Empty;
     public string AiChatDefaultReasoningEffort { get; set; } = "low";
     public string AiChatDefaultMode { get; set; } = "expert";
     public bool AiChatAutoConnect { get; set; }
@@ -412,6 +415,9 @@ public sealed class AiChatSettings
         AiChatOpenAiCompatibleEndpoint = AiChatOpenAiCompatibleEndpoint,
         AiChatOpenAiCompatibleApiKey = AiChatOpenAiCompatibleApiKey,
         AiChatDefaultModel = AiChatDefaultModel,
+        AiChatCodexModel = AiChatCodexModel,
+        AiChatCopilotModel = AiChatCopilotModel,
+        AiChatOpenAiCompatibleModel = AiChatOpenAiCompatibleModel,
         AiChatDefaultReasoningEffort = AiChatDefaultReasoningEffort,
         AiChatDefaultMode = AiChatDefaultMode,
         AiChatAutoConnect = AiChatAutoConnect,

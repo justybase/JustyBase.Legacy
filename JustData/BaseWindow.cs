@@ -1506,7 +1506,8 @@ namespace JustyBaseLegacy.UI
                 driver,
                 conName,
                 selectedDatabase,
-                IsEnabledMode)
+                IsEnabledMode,
+                () => RefreshActiveDocumentDiagnostics(SelectedConnectionName))
             {
                 Dock = DockStyle.Fill
             };

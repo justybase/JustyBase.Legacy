@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using JustData.Application.Settings;
 using JustyBase.Ai.Chat;
 using JustyBase.Ai.Models;
 using JustyBase.Ai.Ports;
@@ -21,6 +22,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     private readonly IChatSettingsStore _settingsStore;
     private readonly IUiDispatcher _dispatcher;
     private readonly ISimpleLogger _logger;
+    private readonly IChatProviderModelSettingsStore? _providerModelSettings;
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
     private readonly SemaphoreSlim _backendSwitchGate = new(1, 1);
     private CancellationTokenSource? _codexLoginCts;
@@ -30,6 +32,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     private int _modelsRefreshVersion;
     private bool _constructed;
     private bool _disposed;
+    private bool _suppressBackendSelection;
     private readonly Action<string, string> _copilotVerificationHandler;
 
     public ChatViewModel(
@@ -44,6 +47,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         _settingsStore = settingsStore;
         _dispatcher = dispatcher;
         _logger = logger;
+        _providerModelSettings = settingsStore as IChatProviderModelSettingsStore;
 
         _controller.SessionChanged += (_, _) => RaiseUi(() =>
         {
@@ -82,10 +86,8 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         }
 
         var settings = _settingsStore.Settings;
-        SelectedBackendId = settings.AiChatBackendId;
-        SelectedModel = string.IsNullOrWhiteSpace(settings.AiChatDefaultModel)
-            ? "gpt-5.6-luna"
-            : settings.AiChatDefaultModel;
+        SelectedBackendId = NormalizeBackendId(settings.AiChatBackendId);
+        SelectedModel = GetPreferredModel(SelectedBackendId);
         SelectedReasoningEffort = string.IsNullOrWhiteSpace(settings.AiChatDefaultReasoningEffort)
             ? "low"
             : settings.AiChatDefaultReasoningEffort;
@@ -100,9 +102,9 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         RefreshCodexCommand.Execute(null);
         RefreshCopilotCommand.Execute(null);
 
-        // The embedded model list is a pure disk probe — populate the dropdown right
-        // away so downloaded models are visible even before the backend connects.
-        _ = RefreshModelsAsync();
+        // Do not probe models until a provider is active. Before connection the service
+        // cannot identify a provider and its local discovery path may return unrelated
+        // local models for a selected Codex/Copilot provider.
         _constructed = true;
     }
 
@@ -150,6 +152,10 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial bool IsInitializing { get; set; }
 
+    /// <summary>True while the model list for the active provider is being refreshed.</summary>
+    [ObservableProperty]
+    public partial bool IsModelLoading { get; set; }
+
     [ObservableProperty]
     public partial string StatusMessage { get; set; } = "Initializing...";
 
@@ -194,8 +200,20 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial bool IsEmbeddedBackend { get; set; }
 
+    /// <summary>Provider whose last switch failed and may still need authentication.</summary>
+    [ObservableProperty]
+    public partial string? FailedBackendId { get; set; }
+
     /// <summary>Reasoning effort is available for Codex, Copilot and the embedded llama-server (Qwen3-style thinking).</summary>
     public bool ShowReasoningEffort => IsCodexBackend || IsCopilotBackend || IsEmbeddedBackend;
+
+    /// <summary>True only when the selected model belongs to the active provider.</summary>
+    public bool IsModelReady
+        => IsConnected
+            && !IsInitializing
+            && !IsModelLoading
+            && !string.IsNullOrWhiteSpace(_chatService.ActiveBackendId)
+            && AvailableModels.Contains(SelectedModel, StringComparer.OrdinalIgnoreCase);
 
     public List<ChatAttachment> PendingAttachments { get; } = [];
 
@@ -221,9 +239,20 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         RaiseUi(() =>
         {
             IsInitializing = true;
+            IsModelLoading = true;
+            AvailableModels.Clear();
+            AvailableReasoningEfforts.Clear();
+            SelectedModel = string.Empty;
+            OnPropertyChanged(nameof(AvailableModels));
+            OnPropertyChanged(nameof(AvailableReasoningEfforts));
+            OnPropertyChanged(nameof(IsModelReady));
             StatusMessage = "Preparing the AI provider — first launch of the embedded model may take a few seconds…";
         });
 
+        // A manual provider switch can happen while auto-connect is still probing a
+        // backend. Keep both paths serialized so the service cannot finish on one
+        // provider while the UI is already showing another one.
+        await _backendSwitchGate.WaitAsync();
         try
         {
             var settings = _settingsStore.Settings;
@@ -235,30 +264,46 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
                 ? await _chatService.SwitchBackendAsync(configured)
                 : await _chatService.InitializeAsync();
 
+            var actualBackendId = success
+                ? _chatService.ActiveBackendId
+                : _chatService.IsConnected ? _chatService.ActiveBackendId : null;
+            var connected = success || (actualBackendId is not null && _chatService.IsConnected);
+
             RaiseUi(() =>
             {
-                IsConnected = success;
-                IsCodexBackend = success
-                    && string.Equals(_chatService.ActiveBackendId, "codex", StringComparison.OrdinalIgnoreCase);
-                IsCopilotBackend = success
-                    && string.Equals(_chatService.ActiveBackendId, "copilot", StringComparison.OrdinalIgnoreCase);
-                IsEmbeddedBackend = success
-                    && string.Equals(_chatService.ActiveBackendId, "embedded", StringComparison.OrdinalIgnoreCase);
+                IsConnected = connected;
+                ApplyActiveBackendState(connected ? actualBackendId : null);
                 StatusMessage = success
-                    ? $"Connected to {GetBackendDisplayName(_chatService.ActiveBackendId)}"
+                    ? $"Connected to {GetBackendDisplayName(actualBackendId)}"
                     : $"Not connected: {_chatService.ConnectionError}";
             });
             RefreshCodexAccountState();
             RefreshCopilotAccountState();
 
-            if (success)
+            if (connected && actualBackendId is not null)
             {
-                await RefreshModelsAsync();
+                SetSelectedBackendSilently(actualBackendId);
+                _settingsStore.Update(s =>
+                {
+                    s.AiChatBackendId = actualBackendId;
+                    s.EnableEmbeddedChatAi = string.Equals(actualBackendId, "embedded", StringComparison.OrdinalIgnoreCase);
+                });
+                await RefreshModelsAsync(actualBackendId);
+            }
+            else
+            {
+                ClearModelLists();
             }
         }
         finally
         {
-            RaiseUi(() => IsInitializing = false);
+            RaiseUi(() =>
+            {
+                IsInitializing = false;
+                if (!IsModelLoading)
+                    OnPropertyChanged(nameof(IsModelReady));
+            });
+            _backendSwitchGate.Release();
         }
     }
 
@@ -267,6 +312,8 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     {
         if (string.IsNullOrWhiteSpace(backendId))
             return;
+
+        var requestedBackendId = NormalizeBackendId(backendId);
 
         var switchCts = new CancellationTokenSource();
         var previousSwitchCts = Interlocked.Exchange(ref _backendSwitchCts, switchCts);
@@ -278,30 +325,71 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
             if (switchCts.IsCancellationRequested)
                 return;
 
-            RaiseUi(() => StatusMessage = "Switching backend...");
-            var success = await _chatService.SwitchBackendAsync(backendId);
+            FailedBackendId = null;
+
+            // EmbeddedChatBackend uses the same provider decision as its activation gate.
+            // Persist it before the switch so selecting Embedded from the chat header can
+            // start the local server even when the legacy flag was previously false.
+            _settingsStore.Update(settings =>
+            {
+                settings.AiChatBackendId = requestedBackendId;
+                settings.EnableEmbeddedChatAi = string.Equals(requestedBackendId, "embedded", StringComparison.OrdinalIgnoreCase);
+            });
+
+            RaiseUi(() =>
+            {
+                IsModelLoading = true;
+                SelectedModel = string.Empty;
+                AvailableModels.Clear();
+                AvailableReasoningEfforts.Clear();
+                OnPropertyChanged(nameof(AvailableModels));
+                OnPropertyChanged(nameof(AvailableReasoningEfforts));
+                OnPropertyChanged(nameof(IsModelReady));
+                StatusMessage = "Switching provider...";
+            });
+            var success = await _chatService.SwitchBackendAsync(requestedBackendId);
             if (switchCts.IsCancellationRequested)
                 return;
 
             if (success)
             {
+                FailedBackendId = null;
+                var activeBackendId = _chatService.ActiveBackendId;
                 IsConnected = true;
-                IsCodexBackend = string.Equals(backendId, "codex", StringComparison.OrdinalIgnoreCase);
-                IsCopilotBackend = string.Equals(backendId, "copilot", StringComparison.OrdinalIgnoreCase);
-                IsEmbeddedBackend = string.Equals(backendId, "embedded", StringComparison.OrdinalIgnoreCase);
-                StatusMessage = $"Connected to {GetBackendDisplayName(backendId)}";
+                ApplyActiveBackendState(activeBackendId);
+                SetSelectedBackendSilently(activeBackendId);
+                StatusMessage = $"Connected to {GetBackendDisplayName(activeBackendId)}";
 
-                await RefreshModelsAsync();
-                _settingsStore.Update(s => s.AiChatBackendId = backendId);
+                await RefreshModelsAsync(activeBackendId);
+                _settingsStore.Update(s =>
+                {
+                    s.AiChatBackendId = activeBackendId ?? requestedBackendId;
+                    s.EnableEmbeddedChatAi = string.Equals(s.AiChatBackendId, "embedded", StringComparison.OrdinalIgnoreCase);
+                });
             }
             else
             {
-                IsConnected = false;
-                IsCodexBackend = false;
-                IsCopilotBackend = false;
-                IsEmbeddedBackend = false;
+                // LocalChatService preserves its previous active backend when a switch
+                // fails (for example, Codex is not signed in). Mirror that actual state
+                // instead of displaying a provider/model combination that never became active.
+                var activeBackendId = _chatService.IsConnected ? _chatService.ActiveBackendId : null;
+                IsConnected = activeBackendId is not null && _chatService.IsConnected;
+                ApplyActiveBackendState(activeBackendId);
+                SetSelectedBackendSilently(activeBackendId);
+                FailedBackendId = requestedBackendId;
+                if (activeBackendId is not null)
+                {
+                    _settingsStore.Update(s =>
+                    {
+                        s.AiChatBackendId = activeBackendId;
+                        s.EnableEmbeddedChatAi = string.Equals(activeBackendId, "embedded", StringComparison.OrdinalIgnoreCase);
+                    });
+                }
                 StatusMessage = $"Failed: {_chatService.ConnectionError}";
-                ClearModelLists();
+                if (activeBackendId is not null && IsConnected)
+                    await RefreshModelsAsync(activeBackendId);
+                else
+                    ClearModelLists();
             }
 
             RaiseUi(RefreshCodexAccountState);
@@ -316,12 +404,24 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
             _logger.TrackError(ex, isCrash: false);
             if (!switchCts.IsCancellationRequested)
             {
-                IsConnected = false;
-                IsCodexBackend = false;
-                IsCopilotBackend = false;
-                IsEmbeddedBackend = false;
+                var activeBackendId = _chatService.IsConnected ? _chatService.ActiveBackendId : null;
+                IsConnected = activeBackendId is not null && _chatService.IsConnected;
+                ApplyActiveBackendState(activeBackendId);
+                SetSelectedBackendSilently(activeBackendId);
+                FailedBackendId = requestedBackendId;
+                if (activeBackendId is not null)
+                {
+                    _settingsStore.Update(s =>
+                    {
+                        s.AiChatBackendId = activeBackendId;
+                        s.EnableEmbeddedChatAi = string.Equals(activeBackendId, "embedded", StringComparison.OrdinalIgnoreCase);
+                    });
+                }
                 StatusMessage = $"Failed: {ex.Message}";
-                ClearModelLists();
+                if (activeBackendId is not null && IsConnected)
+                    await RefreshModelsAsync(activeBackendId);
+                else
+                    ClearModelLists();
             }
         }
         finally
@@ -335,10 +435,27 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedBackendIdChanged(string value)
     {
+        if (!_constructed || _suppressBackendSelection || string.IsNullOrWhiteSpace(value))
+            return;
+
+        ClearModelLists();
+        _ = SwitchBackendCommand.ExecuteAsync(value);
+    }
+
+    partial void OnSelectedModelChanged(string value)
+    {
+        OnPropertyChanged(nameof(IsModelReady));
         if (!_constructed || string.IsNullOrWhiteSpace(value))
             return;
 
-        _ = SwitchBackendCommand.ExecuteAsync(value);
+        var providerId = _chatService.ActiveBackendId;
+        if (string.IsNullOrWhiteSpace(providerId)
+            || !AvailableModels.Contains(value, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _providerModelSettings?.SetModelForProvider(providerId, value);
     }
 
     [RelayCommand]
@@ -353,6 +470,26 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         if (!IsConnected && !await EnsureConnectedAsync())
         {
             StatusMessage = $"AI provider not connected: {_chatService.ConnectionError}";
+            return;
+        }
+
+        SyncEmbeddedModelSelectionFromSettings();
+
+        // The embedded provider owns first-use download/bootstrapping. Its
+        // model list may still describe the previous discovery result when
+        // Preferences changes EmbeddedChatModelId while this panel is open, so
+        // let the provider validate and prepare the selected catalog model
+        // before applying the ordinary downloaded-model membership check.
+        if (IsEmbeddedBackend)
+        {
+            if (!await EnsureEmbeddedModelReadyAsync())
+                return;
+        }
+        else if (!IsModelReady)
+        {
+            StatusMessage = IsModelLoading
+                ? "Loading models for the selected provider..."
+                : "Select a valid model for the selected provider before sending.";
             return;
         }
 
@@ -371,6 +508,21 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         if (!string.IsNullOrWhiteSpace(prompt))
         {
             InputText = string.Empty;
+        }
+    }
+
+    private void SyncEmbeddedModelSelectionFromSettings()
+    {
+        if (!IsEmbeddedBackend || _providerModelSettings is null)
+            return;
+
+        var configuredModel = _providerModelSettings.GetModelForProvider("embedded");
+        if (!string.IsNullOrWhiteSpace(configuredModel)
+            && !string.Equals(SelectedModel, configuredModel, StringComparison.OrdinalIgnoreCase))
+        {
+            // Preferences can be saved while the chat panel remains open. Keep the
+            // request model aligned with the model that the embedded server will load.
+            SelectedModel = configuredModel;
         }
     }
 
@@ -497,7 +649,8 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
             if (account?.IsAuthenticated == true)
             {
                 StatusMessage = "Signed in to ChatGPT.";
-                await RefreshModelsAsync();
+                if (string.Equals(_chatService.ActiveBackendId, "codex", StringComparison.OrdinalIgnoreCase))
+                    await RefreshModelsAsync("codex");
                 return;
             }
         }
@@ -595,7 +748,8 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
             if (GetAccountBool(account, "IsAuthenticated"))
             {
                 StatusMessage = "Signed in to GitHub Copilot.";
-                await RefreshModelsAsync();
+                if (string.Equals(_chatService.ActiveBackendId, "copilot", StringComparison.OrdinalIgnoreCase))
+                    await RefreshModelsAsync("copilot");
                 return;
             }
         }
@@ -685,72 +839,201 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task RefreshModelsAsync()
+    private async Task<bool> EnsureEmbeddedModelReadyAsync()
     {
-        var refreshVersion = Interlocked.Increment(ref _modelsRefreshVersion);
-        var activeBackendId = _chatService.ActiveBackendId;
-        AvailableModels.Clear();
-        AvailableReasoningEfforts.Clear();
+        RaiseUi(() =>
+        {
+            IsModelLoading = true;
+            OnPropertyChanged(nameof(IsModelReady));
+            StatusMessage = "Loading the selected embedded model...";
+        });
+
         try
         {
-            var models = await _chatService.GetAvailableModelsAsync();
-
-            // An older probe may finish after a backend switch. Never let its result
-            // put the previous backend's models back into the combo.
-            if (refreshVersion != Volatile.Read(ref _modelsRefreshVersion)
-                || !string.Equals(activeBackendId, _chatService.ActiveBackendId, StringComparison.OrdinalIgnoreCase))
+            var success = await _chatService.SwitchBackendAsync("embedded");
+            var active = NormalizeBackendId(_chatService.ActiveBackendId);
+            if (!success || !string.Equals(active, "embedded", StringComparison.OrdinalIgnoreCase))
             {
+                StatusMessage = $"Embedded model could not be loaded: {_chatService.ConnectionError}";
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.TrackError(ex, isCrash: false);
+            StatusMessage = $"Embedded model could not be loaded: {ex.Message}";
+            return false;
+        }
+        finally
+        {
+            RaiseUi(() =>
+            {
+                IsModelLoading = false;
+                OnPropertyChanged(nameof(IsModelReady));
+            });
+        }
+    }
+
+    private string GetPreferredModel(string? providerId)
+    {
+        var normalized = NormalizeBackendId(providerId);
+        var configured = _providerModelSettings?.GetModelForProvider(normalized);
+        if (!string.IsNullOrWhiteSpace(configured))
+            return configured;
+
+        return normalized.Equals("embedded", StringComparison.OrdinalIgnoreCase)
+            ? _settingsStore.Settings.EmbeddedChatModelId
+            : _settingsStore.Settings.AiChatDefaultModel;
+    }
+
+    private bool SupportsReasoning(string? providerId)
+        => string.Equals(providerId, "codex", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(providerId, "copilot", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(providerId, "embedded", StringComparison.OrdinalIgnoreCase);
+
+    private bool IsCurrentModelRefresh(int refreshVersion, string activeBackendId)
+        => refreshVersion == Volatile.Read(ref _modelsRefreshVersion)
+            && string.Equals(activeBackendId, NormalizeBackendId(_chatService.ActiveBackendId), StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeBackendId(string? backendId)
+    {
+        if (string.IsNullOrWhiteSpace(backendId))
+            return string.Empty;
+
+        return backendId.Trim().ToLowerInvariant() switch
+        {
+            "ollama" or "lmstudio" or "openai compatible" => "openai-compatible",
+            "embedded (local)" => "embedded",
+            "codex (chatgpt)" => "codex",
+            "github copilot" => "copilot",
+            _ => backendId.Trim()
+        };
+    }
+
+    private void SetSelectedBackendSilently(string? backendId)
+    {
+        if (string.IsNullOrWhiteSpace(backendId))
+            return;
+
+        _suppressBackendSelection = true;
+        try
+        {
+            SelectedBackendId = NormalizeBackendId(backendId);
+        }
+        finally
+        {
+            _suppressBackendSelection = false;
+        }
+    }
+
+    private void ApplyActiveBackendState(string? backendId)
+    {
+        IsCodexBackend = IsConnected && string.Equals(backendId, "codex", StringComparison.OrdinalIgnoreCase);
+        IsCopilotBackend = IsConnected && string.Equals(backendId, "copilot", StringComparison.OrdinalIgnoreCase);
+        IsEmbeddedBackend = IsConnected && string.Equals(backendId, "embedded", StringComparison.OrdinalIgnoreCase);
+        OnPropertyChanged(nameof(IsModelReady));
+    }
+
+    private async Task RefreshModelsAsync(string? expectedBackendId = null)
+    {
+        var activeBackendId = NormalizeBackendId(expectedBackendId ?? _chatService.ActiveBackendId);
+        if (string.IsNullOrWhiteSpace(activeBackendId))
+        {
+            ClearModelLists();
+            return;
+        }
+
+        var refreshVersion = Interlocked.Increment(ref _modelsRefreshVersion);
+        RaiseUi(() =>
+        {
+            IsModelLoading = true;
+            AvailableModels.Clear();
+            AvailableReasoningEfforts.Clear();
+            SelectedModel = string.Empty;
+            OnPropertyChanged(nameof(AvailableModels));
+            OnPropertyChanged(nameof(AvailableReasoningEfforts));
+            OnPropertyChanged(nameof(IsModelReady));
+        });
+
+        try
+        {
+            var models = (await _chatService.GetAvailableModelsAsync().ConfigureAwait(false))
+                .Where(model => !string.IsNullOrWhiteSpace(model))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (!IsCurrentModelRefresh(refreshVersion, activeBackendId))
                 return;
-            }
 
-            foreach (var model in models)
+            var preferredModel = GetPreferredModel(activeBackendId);
+            var selectedModel = models.FirstOrDefault(model =>
+                string.Equals(model, preferredModel, StringComparison.OrdinalIgnoreCase))
+                ?? models.FirstOrDefault()
+                ?? string.Empty;
+
+            List<string> efforts = [];
+            if (!string.IsNullOrWhiteSpace(selectedModel) && SupportsReasoning(activeBackendId))
             {
-                if (!AvailableModels.Contains(model, StringComparer.OrdinalIgnoreCase))
-                    AvailableModels.Add(model);
-            }
-
-            if (AvailableModels.Count == 0 && !string.IsNullOrWhiteSpace(SelectedModel))
-            {
-                AvailableModels.Add(SelectedModel);
-            }
-
-            if (AvailableModels.Count > 0
-                && !AvailableModels.Contains(SelectedModel, StringComparer.OrdinalIgnoreCase))
-            {
-                SelectedModel = AvailableModels[0];
-            }
-
-            if (ShowReasoningEffort)
-            {
-                var efforts = await _chatService.GetAvailableReasoningEffortsAsync(SelectedModel);
-
-                if (refreshVersion != Volatile.Read(ref _modelsRefreshVersion)
-                    || !string.Equals(activeBackendId, _chatService.ActiveBackendId, StringComparison.OrdinalIgnoreCase))
+                try
                 {
-                    return;
+                    efforts = (await _chatService.GetAvailableReasoningEffortsAsync(selectedModel).ConfigureAwait(false))
+                        .Where(effort => !string.IsNullOrWhiteSpace(effort))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
                 }
+                catch (Exception ex)
+                {
+                    // Reasoning controls are optional; retain the usable model list if this probe fails.
+                    _logger.TrackError(ex, isCrash: false);
+                }
+            }
 
+            if (!IsCurrentModelRefresh(refreshVersion, activeBackendId))
+                return;
+
+            await _dispatcher.InvokeAsync(() =>
+            {
+                if (!IsCurrentModelRefresh(refreshVersion, activeBackendId))
+                    return;
+
+                AvailableModels.Clear();
+                AvailableModels.AddRange(models);
                 AvailableReasoningEfforts.Clear();
-                foreach (var effort in efforts)
-                    AvailableReasoningEfforts.Add(effort);
-
-                if (AvailableReasoningEfforts.Count == 0 && !string.IsNullOrWhiteSpace(SelectedReasoningEffort))
-                    AvailableReasoningEfforts.Add(SelectedReasoningEffort);
+                AvailableReasoningEfforts.AddRange(efforts);
+                SelectedModel = selectedModel;
 
                 if (AvailableReasoningEfforts.Count > 0
                     && !AvailableReasoningEfforts.Contains(SelectedReasoningEffort, StringComparer.OrdinalIgnoreCase))
                 {
                     SelectedReasoningEffort = AvailableReasoningEfforts[0];
                 }
-            }
+
+                if (!string.IsNullOrWhiteSpace(selectedModel))
+                    _providerModelSettings?.SetModelForProvider(activeBackendId, selectedModel);
+
+                OnPropertyChanged(nameof(AvailableModels));
+                OnPropertyChanged(nameof(AvailableReasoningEfforts));
+                OnPropertyChanged(nameof(IsModelReady));
+            }).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             _logger.TrackError(ex, isCrash: false);
-            StatusMessage = $"Failed to load models: {ex.Message}";
+            RaiseUi(() => StatusMessage = $"Failed to load models: {ex.Message}");
         }
-
-        RaiseUi(() => OnPropertyChanged(nameof(AvailableModels)));
+        finally
+        {
+            if (refreshVersion == Volatile.Read(ref _modelsRefreshVersion))
+            {
+                RaiseUi(() =>
+                {
+                    IsModelLoading = false;
+                    OnPropertyChanged(nameof(IsModelReady));
+                });
+            }
+        }
     }
 
     private void ClearModelLists()
@@ -758,10 +1041,13 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         Interlocked.Increment(ref _modelsRefreshVersion);
         AvailableModels.Clear();
         AvailableReasoningEfforts.Clear();
+        SelectedModel = string.Empty;
+        IsModelLoading = false;
         RaiseUi(() =>
         {
             OnPropertyChanged(nameof(AvailableModels));
             OnPropertyChanged(nameof(AvailableReasoningEfforts));
+            OnPropertyChanged(nameof(IsModelReady));
         });
     }
 

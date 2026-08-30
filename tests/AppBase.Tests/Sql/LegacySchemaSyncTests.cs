@@ -1,4 +1,5 @@
 using AppBase.Common;
+using AppBase.Common.Configuration;
 using AppBase.Common.Enums;
 using AppBase.Common.Interfaces;
 using AppBase.Data;
@@ -106,6 +107,113 @@ public sealed class LegacySchemaSyncTests
         Assert.NotNull(view.Columns);
         Assert.Empty(view.Columns);
         Assert.True(provider.HasTables());
+    }
+
+    [Fact]
+    public void SyncConnection_uses_owner_when_catalog_schema_is_empty()
+    {
+        _tables[ConnectionName] = new Dictionary<int, NetezzaTableInfo>
+        {
+            [42] = new()
+            {
+                DATABASE_ID = 7,
+                TABLE_NAME = "DIMEMPLOYEE",
+                TABLE_DESC = "",
+                TABLE_OWNER = "ADMIN",
+                TABLE_SCHEMA = "",
+                TABLE_OBJECT_OWNER = "ADMIN",
+                TABLE_KIND = TypeInDatabase.table,
+                FIRST_COLUMN_ID = 0,
+                COLUMN_COUNT = 0
+            }
+        };
+
+        var context = Substitute.For<INetezzaCompletionContext>();
+        context.DatabaseSchemaLookup.Returns(new Dictionary<string, Dictionary<string, Dictionary<string, (string owner, int tableId)>>>
+        {
+            [ConnectionName] = new()
+            {
+                ["JUST_DATA"] = new() { ["DIMEMPLOYEE"] = ("ADMIN", 42) }
+            }
+        });
+        context.ColumnTablesDictionary.Returns(new Dictionary<string, List<NetezzaColumnInfoRow>>());
+
+        var provider = new InMemorySchemaProvider();
+        var snapshot = LegacySchemaSync.SyncConnection(provider, context, CreateCatalog(), ConnectionName);
+
+        Assert.Equal("ADMIN", Assert.Single(snapshot.Tables).Schema);
+        Assert.True(provider.TableExists("JUST_DATA", "ADMIN", "DIMEMPLOYEE"));
+    }
+
+    [Fact]
+    public void SyncConnection_uses_database_name_mapped_from_table_database_id()
+    {
+        _tables[ConnectionName] = new Dictionary<int, NetezzaTableInfo>
+        {
+            [42] = new()
+            {
+                DATABASE_ID = 7,
+                TABLE_NAME = "DIMDATE",
+                TABLE_DESC = "",
+                TABLE_OWNER = "ADMIN",
+                TABLE_SCHEMA = "ADMIN",
+                TABLE_OBJECT_OWNER = "ADMIN",
+                TABLE_KIND = TypeInDatabase.table,
+                FIRST_COLUMN_ID = 0,
+                COLUMN_COUNT = 0
+            }
+        };
+
+        var context = Substitute.For<INetezzaCompletionContext>();
+        context.DatabaseDictionary.Returns(new Dictionary<string, Dictionary<int, DatabaseInfo>>
+        {
+            [ConnectionName] = new() { [7] = new(7, "JUST_DATA", "ADMIN", "ADMIN") }
+        });
+        context.DatabaseSchemaLookup.Returns(new Dictionary<string, Dictionary<string, Dictionary<string, (string owner, int tableId)>>>
+        {
+            [ConnectionName] = new() { ["SYSTEM"] = new() { ["DIMDATE"] = ("ADMIN", 42) } }
+        });
+        context.ColumnTablesDictionary.Returns(new Dictionary<string, List<NetezzaColumnInfoRow>>());
+
+        var provider = new InMemorySchemaProvider();
+        LegacySchemaSync.SyncConnection(provider, context, CreateCatalog(), ConnectionName);
+
+        Assert.True(provider.TableExists("JUST_DATA", "ADMIN", "DIMDATE"));
+        Assert.False(provider.TableExists("SYSTEM", "ADMIN", "DIMDATE"));
+    }
+
+    [Fact]
+    public void SyncConnection_uses_table_cache_without_lookup_or_owner_cache()
+    {
+        _tables[ConnectionName] = new Dictionary<int, NetezzaTableInfo>
+        {
+            [42] = new()
+            {
+                DATABASE_ID = 7,
+                TABLE_NAME = "DIMPRODUCT",
+                TABLE_DESC = "",
+                TABLE_OWNER = "ADMIN",
+                TABLE_SCHEMA = "",
+                TABLE_OBJECT_OWNER = "ADMIN",
+                TABLE_KIND = TypeInDatabase.table,
+                COLUMN_COUNT = 0
+            }
+        };
+
+        var context = Substitute.For<INetezzaCompletionContext>();
+        context.DatabaseDictionary.Returns(new Dictionary<string, Dictionary<int, DatabaseInfo>>
+        {
+            [ConnectionName] = new() { [7] = new(7, "JUST_DATA", "ADMIN", "ADMIN") }
+        });
+        context.DatabaseSchemaLookup.Returns(
+            new Dictionary<string, Dictionary<string, Dictionary<string, (string owner, int tableId)>>>());
+        context.DatabaseOwners.Returns(new Dictionary<string, Dictionary<string, Dictionary<string, string>>>());
+
+        var provider = new InMemorySchemaProvider();
+        var snapshot = LegacySchemaSync.SyncConnection(provider, context, CreateCatalog(), ConnectionName);
+
+        Assert.Single(snapshot.Tables);
+        Assert.True(provider.TableExists("JUST_DATA", "ADMIN", "DIMPRODUCT"));
     }
 
     [Fact]

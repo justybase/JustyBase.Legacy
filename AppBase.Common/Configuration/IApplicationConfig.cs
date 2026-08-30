@@ -111,6 +111,9 @@ public interface IApplicationConfig : IColorConfig, IEditorConfig
     string AiChatOpenAiCompatibleEndpoint { get; set; }
     string? AiChatOpenAiCompatibleApiKey { get; set; }
     string AiChatDefaultModel { get; set; }
+    string AiChatCodexModel { get; set; }
+    string AiChatCopilotModel { get; set; }
+    string AiChatOpenAiCompatibleModel { get; set; }
     string AiChatDefaultReasoningEffort { get; set; }
     string AiChatDefaultMode { get; set; }
     bool AiChatAutoConnect { get; set; }

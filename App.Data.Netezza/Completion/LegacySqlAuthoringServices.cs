@@ -26,6 +26,7 @@ public sealed class LegacySqlAuthoringServices : IDisposable
     private readonly object _lintLock = new();
     private readonly Dictionary<string, CancellationTokenSource> _lintCtsByDocument = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> _lintGenerationByDocument = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, HashSet<string>> _lintParsingUrisByDocument = new(StringComparer.Ordinal);
     private bool _disposed;
 
     public LegacySqlAuthoringServices(NetezzaSqlCompletionServices completionServices)
@@ -105,13 +106,38 @@ public sealed class LegacySqlAuthoringServices : IDisposable
         CancellationToken cancellationToken = default,
         int knownLineCount = -1,
         SqlLintInvocation invocation = SqlLintInvocation.Live,
-        SqlDialect dialect = SqlDialect.Netezza)
+        SqlDialect dialect = SqlDialect.Netezza,
+        string? databaseName = null,
+        int caretOffset = -1)
+        => _completionServices.WithAuthoringGateAsync(
+            () => LintAsyncUnderAuthoringGate(
+                sql,
+                documentUri,
+                cancellationToken,
+                knownLineCount,
+                invocation,
+                dialect,
+                databaseName,
+                caretOffset),
+            cancellationToken);
+
+    internal Task<IReadOnlyList<LintIssue>> LintAsyncUnderAuthoringGate(
+        string sql,
+        string documentUri,
+        CancellationToken cancellationToken = default,
+        int knownLineCount = -1,
+        SqlLintInvocation invocation = SqlLintInvocation.Live,
+        SqlDialect dialect = SqlDialect.Netezza,
+        string? databaseName = null,
+        int caretOffset = -1)
     {
         sql ??= string.Empty;
         int lineCount = SqlPerformancePolicy.ResolveLineCountForLintGate(sql, knownLineCount);
         if (SqlPerformancePolicy.ShouldSkipLint(invocation, lineCount, sql.Length))
             return Task.FromResult<IReadOnlyList<LintIssue>>([]);
 
+        string lintDocumentUri = BuildLintDocumentUri(documentUri, dialect, databaseName);
+        RegisterLintParsingUri(documentUri, lintDocumentUri);
         return Task.Run(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -132,16 +158,17 @@ public sealed class LegacySqlAuthoringServices : IDisposable
                 var config = new LintConfig(
                     Sql: sql,
                     Schema: _completionServices.SchemaProvider,
-                    DocumentUri: documentUri,
+                    DocumentUri: lintDocumentUri,
                     MetadataEpoch: schemaEpoch,
                     CancellationToken: cancellationToken,
-                    Dialect: dialect);
-                ParsingCoordinator.GetOrCreate(documentUri, dialect).Parse(sql);
+                    Dialect: dialect,
+                    ActiveDatabase: databaseName);
+                ParsingCoordinator.GetOrCreate(lintDocumentUri, dialect).Parse(sql);
                 result = lintEngine.RunIncrementalLint(config);
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            return (IReadOnlyList<LintIssue>)result.Issues;
+            return (IReadOnlyList<LintIssue>)FilterLiveIssues(sql, result.Issues, invocation, caretOffset);
         }, cancellationToken);
     }
 
@@ -174,7 +201,8 @@ public sealed class LegacySqlAuthoringServices : IDisposable
         if (completionContext is not null && applicationSettingsContext is not null && !string.IsNullOrEmpty(connectionName))
         {
             if (dialect == SqlDialect.Netezza)
-                _completionServices.EnsureSchemaForConnection(completionContext, connectionName);
+                _completionServices.EnsureSchemaForConnection(
+                    completionContext, connectionName, completionContext.SelectedDatabase);
             ApplyDisabledRules(applicationSettingsContext.Config.DisabledLintRules);
         }
 
@@ -184,16 +212,21 @@ public sealed class LegacySqlAuthoringServices : IDisposable
         var capturedEditor = editor;
         var capturedColors = colors;
         var capturedUri = documentUri;
-        var schemaEpoch = _completionServices.SchemaProvider.MetadataEpoch;
+        RegisterLintParsingUri(
+            capturedUri,
+            BuildLintDocumentUri(capturedUri, dialect, completionContext?.SelectedDatabase));
 
         _ = RunLintAsync(
             sql,
             capturedEditor,
             capturedColors,
             capturedUri,
-            schemaEpoch,
             generation,
             dialect,
+            connectionName,
+            completionContext,
+            completionContext?.SelectedDatabase,
+            editor.SelectionStart,
             cancellationToken);
     }
 
@@ -286,9 +319,12 @@ public sealed class LegacySqlAuthoringServices : IDisposable
         FastColoredTextBox editor,
         FctbColors colors,
         string documentUri,
-        int schemaEpoch,
         long generation,
         SqlDialect dialect,
+        string? connectionName,
+        INetezzaCompletionContext? completionContext,
+        string? databaseName,
+        int caretOffset,
         CancellationToken cancellationToken)
         => Task.Run(async () =>
         {
@@ -296,51 +332,71 @@ public sealed class LegacySqlAuthoringServices : IDisposable
             if (!await TryDebounceAsync(debounceMs, cancellationToken).ConfigureAwait(false))
                 return;
 
-            if (cancellationToken.IsCancellationRequested || _disposed || !IsSchemaEpochCurrent(schemaEpoch) || !IsLintGenerationCurrent(documentUri, generation))
-                return;
-
             try
             {
-                LintEngine lintEngine = GetLintEngine(dialect);
-                var config = new LintConfig(
-                    Sql: sql,
-                    Schema: _completionServices.SchemaProvider,
-                    DocumentUri: documentUri,
-                    MetadataEpoch: schemaEpoch,
-                    CancellationToken: cancellationToken,
-                    Dialect: dialect);
-
-                int length = sql.Length;
-                int lineCount = SqlPerformancePolicy.ResolveLineCountForLintGate(sql);
-                LintResult result;
-                if (SqlPerformancePolicy.ShouldSkipLint(SqlLintInvocation.Live, lineCount, length))
+                await _completionServices.WithAuthoringGateAsync(async () =>
                 {
-                    result = new LintResult([], 0, 0, 0, false);
-                }
-                else if (SqlPerformancePolicy.ShouldRunCheapLintOnly(lineCount, length))
-                {
-                    var cheapIssues = lintEngine.RunCheapRules(sql);
-                    result = new LintResult(cheapIssues, lintEngine.Queue.CheapRules.Count, 0, 0, false);
-                }
-                else
-                {
-                    ParsingCoordinator.GetOrCreate(documentUri, dialect).Parse(sql);
-                    result = lintEngine.RunIncrementalLint(config);
-                }
+                    if (cancellationToken.IsCancellationRequested || _disposed || !IsLintGenerationCurrent(documentUri, generation))
+                        return true;
 
-                if (cancellationToken.IsCancellationRequested || _disposed || !IsSchemaEpochCurrent(schemaEpoch) || !IsLintGenerationCurrent(documentUri, generation))
-                    return;
+                    if (dialect == SqlDialect.Netezza
+                        && completionContext is not null
+                        && !string.IsNullOrEmpty(connectionName))
+                    {
+                        _completionServices.EnsureSchemaForConnectionUnderAuthoringGate(
+                            completionContext, connectionName, databaseName);
+                    }
 
-                editor.BeginInvoke(() =>
-                {
-                    if (cancellationToken.IsCancellationRequested || _disposed || editor.IsDisposed || !IsSchemaEpochCurrent(schemaEpoch) || !IsLintGenerationCurrent(documentUri, generation))
-                        return;
-                    if (!string.Equals(editor.Text, sql, StringComparison.Ordinal))
-                        return;
+                    int schemaEpoch = _completionServices.SchemaProvider.MetadataEpoch;
+                    LintEngine lintEngine = GetLintEngine(dialect);
+                    var config = new LintConfig(
+                        Sql: sql,
+                        Schema: _completionServices.SchemaProvider,
+                        DocumentUri: BuildLintDocumentUri(documentUri, dialect, databaseName),
+                        MetadataEpoch: schemaEpoch,
+                        CancellationToken: cancellationToken,
+                        Dialect: dialect,
+                        ActiveDatabase: databaseName);
 
-                    ApplyLintMarkers(editor, colors, result.Issues);
-                    LintCompleted?.Invoke(documentUri, result.Issues);
-                });
+                    int length = sql.Length;
+                    int lineCount = SqlPerformancePolicy.ResolveLineCountForLintGate(sql);
+                    LintResult result;
+                    if (SqlPerformancePolicy.ShouldSkipLint(SqlLintInvocation.Live, lineCount, length))
+                    {
+                        result = new LintResult([], 0, 0, 0, false);
+                    }
+                    else if (SqlPerformancePolicy.ShouldRunCheapLintOnly(lineCount, length))
+                    {
+                        var cheapIssues = lintEngine.RunCheapRules(sql);
+                        result = new LintResult(cheapIssues, lintEngine.Queue.CheapRules.Count, 0, 0, false);
+                    }
+                    else
+                    {
+                        ParsingCoordinator.GetOrCreate(
+                            config.DocumentUri, dialect).Parse(sql);
+                        result = lintEngine.RunIncrementalLint(config);
+                    }
+
+                    result = result with
+                    {
+                        Issues = FilterLiveIssues(sql, result.Issues, SqlLintInvocation.Live, caretOffset)
+                    };
+
+                    if (cancellationToken.IsCancellationRequested || _disposed || !IsSchemaEpochCurrent(schemaEpoch) || !IsLintGenerationCurrent(documentUri, generation))
+                        return true;
+
+                    editor.BeginInvoke(() =>
+                    {
+                        if (cancellationToken.IsCancellationRequested || _disposed || editor.IsDisposed || !IsSchemaEpochCurrent(schemaEpoch) || !IsLintGenerationCurrent(documentUri, generation))
+                            return;
+                        if (!string.Equals(editor.Text, sql, StringComparison.Ordinal))
+                            return;
+
+                        ApplyLintMarkers(editor, colors, result.Issues);
+                        LintCompleted?.Invoke(documentUri, result.Issues);
+                    });
+                    return true;
+                }, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _disposed)
             {
@@ -358,6 +414,55 @@ public sealed class LegacySqlAuthoringServices : IDisposable
             return _lintGenerationByDocument.TryGetValue(documentUri, out var current)
                    && current == generation;
         }
+    }
+
+    private void RegisterLintParsingUri(string documentUri, string lintDocumentUri)
+    {
+        lock (_lintLock)
+        {
+            if (!_lintParsingUrisByDocument.TryGetValue(documentUri, out var uris))
+            {
+                uris = new HashSet<string>(StringComparer.Ordinal);
+                _lintParsingUrisByDocument[documentUri] = uris;
+            }
+
+            uris.Add(lintDocumentUri);
+        }
+    }
+
+    private static string BuildLintDocumentUri(string documentUri, SqlDialect dialect, string? databaseName) =>
+        $"{documentUri}|dialect:{dialect}|database:{databaseName ?? string.Empty}";
+
+    private static IReadOnlyList<LintIssue> FilterLiveIssues(
+        string sql,
+        IReadOnlyList<LintIssue> issues,
+        SqlLintInvocation invocation,
+        int caretOffset)
+    {
+        if (invocation != SqlLintInvocation.Live || issues.Count == 0)
+            return issues;
+
+        int end = Math.Clamp(caretOffset < 0 ? sql.Length : caretOffset, 0, sql.Length);
+        string prefix = sql[..end].TrimEnd();
+        if (prefix.Length == 0 || !prefix.Contains('.'))
+            return issues;
+
+        int start = prefix.Length - 1;
+        while (start >= 0 && (char.IsLetterOrDigit(prefix[start])
+            || prefix[start] is '_' or '"' or '[' or ']' or '.'))
+            start--;
+        start++;
+        string fragment = prefix[start..];
+        // Only a trailing dot is an unambiguously incomplete qualifier. A
+        // complete-looking name such as JUST_DATA.NO_SUCH_TABLE must remain a
+        // real diagnostic in live linting.
+        if (!fragment.EndsWith(".", StringComparison.Ordinal))
+            return issues;
+
+        return issues.Where(issue =>
+            issue.RuleId is not ("PAR001" or "SQL006" or "SQL007")
+            || issue.StartOffset < start
+            || issue.StartOffset > end + 1).ToArray();
     }
 
     private void CancelLintRuns()
@@ -392,6 +497,7 @@ public sealed class LegacySqlAuthoringServices : IDisposable
         if (string.IsNullOrEmpty(documentUri))
             return;
 
+        string[] scopedUris;
         lock (_lintLock)
         {
             if (_lintCtsByDocument.TryGetValue(documentUri, out var cts))
@@ -402,9 +508,18 @@ public sealed class LegacySqlAuthoringServices : IDisposable
             }
 
             _lintGenerationByDocument.Remove(documentUri);
+            scopedUris = _lintParsingUrisByDocument.TryGetValue(documentUri, out var uris)
+                ? uris.ToArray()
+                : [];
+            _lintParsingUrisByDocument.Remove(documentUri);
         }
 
-        ParsingCoordinator.Release(documentUri);
+        _completionServices.WithAuthoringGate(() =>
+        {
+            foreach (string scopedUri in scopedUris)
+                ParsingCoordinator.Release(scopedUri);
+            ParsingCoordinator.Release(documentUri);
+        });
     }
 
     private (CancellationToken Token, long Generation) RenewLintCancellation(string documentUri)
@@ -461,6 +576,7 @@ public sealed class LegacySqlAuthoringServices : IDisposable
     {
         _completionServices.SchemaInvalidated -= CancelLintRuns;
 
+        string[] scopedUris;
         lock (_lintLock)
         {
             if (_disposed)
@@ -476,11 +592,22 @@ public sealed class LegacySqlAuthoringServices : IDisposable
 
             _lintCtsByDocument.Clear();
             _lintGenerationByDocument.Clear();
+            scopedUris = _lintParsingUrisByDocument.Values
+                .SelectMany(uris => uris)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            _lintParsingUrisByDocument.Clear();
             foreach (var lintEngine in _lintEngines.Values)
                 lintEngine.Dispose();
             _lintEngines.Clear();
             _semanticTokenClassifiers.Clear();
-            _completionServices.ParsingCoordinator.Release("legacy-lint-shared");
         }
+
+        _completionServices.WithAuthoringGate(() =>
+        {
+            foreach (string scopedUri in scopedUris)
+                _completionServices.ParsingCoordinator.Release(scopedUri);
+            _completionServices.ParsingCoordinator.Release("legacy-lint-shared");
+        });
     }
 }

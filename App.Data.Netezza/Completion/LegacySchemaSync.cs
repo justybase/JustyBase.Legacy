@@ -22,12 +22,13 @@ public static class LegacySchemaSync
         InMemorySchemaProvider schemaProvider,
         INetezzaCompletionContext completionContext,
         INetezzaSchemaTableCatalog schemaTables,
-        string connectionName)
+        string connectionName,
+        string? databaseName = null)
     {
         if (schemaProvider is null || completionContext is null || schemaTables is null || string.IsNullOrEmpty(connectionName))
             return NetezzaSchemaSnapshot.Empty;
 
-        var snapshot = BuildSnapshot(completionContext, schemaTables, [connectionName]);
+        var snapshot = BuildSnapshot(completionContext, schemaTables, [connectionName], databaseName);
         NetezzaSchemaProviderAdapter.Apply(schemaProvider, snapshot);
         return snapshot;
     }
@@ -40,12 +41,12 @@ public static class LegacySchemaSync
         INetezzaCompletionContext completionContext,
         INetezzaSchemaTableCatalog schemaTables)
     {
-        if (schemaProvider is null || completionContext?.DatabaseSchemaLookup is null || schemaTables is null)
+        if (schemaProvider is null || completionContext is null || schemaTables is null)
             return;
 
         NetezzaSchemaProviderAdapter.Apply(
             schemaProvider,
-            BuildSnapshot(completionContext, schemaTables, completionContext.DatabaseSchemaLookup.Keys));
+            BuildSnapshot(completionContext, schemaTables, schemaTables.TablesByConnection.Keys, null));
     }
 
     public static void SyncSelectedConnection(
@@ -62,34 +63,55 @@ public static class LegacySchemaSync
     private static NetezzaSchemaSnapshot BuildSnapshot(
         INetezzaCompletionContext completionContext,
         INetezzaSchemaTableCatalog schemaTables,
-        IEnumerable<string> connectionNames)
+        IEnumerable<string> connectionNames,
+        string? requestedDatabaseName)
     {
         var tables = new List<NetezzaSchemaTable>();
 
         foreach (var connectionName in connectionNames)
         {
-            if (!completionContext.DatabaseSchemaLookup.TryGetValue(connectionName, out var databases)
-                || !schemaTables.TablesByConnection.TryGetValue(connectionName, out var tablesById))
+            if (!schemaTables.TablesByConnection.TryGetValue(connectionName, out var tablesById))
                 continue;
 
+            completionContext.DatabaseDictionary.TryGetValue(connectionName, out var databasesById);
             completionContext.ColumnTablesDictionary.TryGetValue(connectionName, out var columnsByIndex);
+            completionContext.DatabaseSchemaLookup.TryGetValue(connectionName, out var lookupByDatabase);
 
-            foreach (var (databaseName, tableLookup) in databases)
+            foreach (var (tableId, tableInfo) in tablesById)
             {
-                foreach (var (tableName, (_, tableId)) in tableLookup)
+                string? catalogDatabaseName = null;
+                if (databasesById is not null
+                    && databasesById.TryGetValue(tableInfo.DATABASE_ID, out var databaseInfo))
                 {
-                    if (!tablesById.TryGetValue(tableId, out var tableInfo))
-                        continue;
-
-                    tables.Add(new NetezzaSchemaTable(
-                        tableName,
-                        tableInfo.TABLE_SCHEMA,
-                        databaseName,
-                        Kind: tableInfo.TABLE_KIND == TypeInDatabase.view ? NetezzaObjectKind.View : NetezzaObjectKind.Table,
-                        IsView: tableInfo.TABLE_KIND == TypeInDatabase.view,
-                        Columns: BuildColumns(tableInfo, columnsByIndex),
-                        Description: string.IsNullOrEmpty(tableInfo.TABLE_DESC) ? null : tableInfo.TABLE_DESC));
+                    catalogDatabaseName = databaseInfo.DatabaseName;
                 }
+                else if (lookupByDatabase is not null)
+                {
+                    catalogDatabaseName = lookupByDatabase
+                        .Where(pair => pair.Value.Values.Any(value => value.tableId == tableId))
+                        .Select(pair => pair.Key)
+                        .FirstOrDefault();
+                }
+
+                string canonicalDatabaseName = !string.IsNullOrWhiteSpace(catalogDatabaseName)
+                    ? catalogDatabaseName
+                    : requestedDatabaseName ?? string.Empty;
+
+                // Some Netezza catalog variants expose the namespace only as
+                // TABLE_OWNER and leave TABLE_SCHEMA empty. Keep the parser and
+                // legacy completion projections consistent in that case.
+                string schema = string.IsNullOrWhiteSpace(tableInfo.TABLE_SCHEMA)
+                    ? tableInfo.TABLE_OWNER
+                    : tableInfo.TABLE_SCHEMA;
+
+                tables.Add(new NetezzaSchemaTable(
+                    tableInfo.TABLE_NAME,
+                    schema,
+                    canonicalDatabaseName,
+                    Kind: tableInfo.TABLE_KIND == TypeInDatabase.view ? NetezzaObjectKind.View : NetezzaObjectKind.Table,
+                    IsView: tableInfo.TABLE_KIND == TypeInDatabase.view,
+                    Columns: BuildColumns(tableInfo, columnsByIndex),
+                    Description: string.IsNullOrEmpty(tableInfo.TABLE_DESC) ? null : tableInfo.TABLE_DESC));
             }
         }
 
@@ -98,7 +120,7 @@ public static class LegacySchemaSync
 
     private static NetezzaSchemaColumn[] BuildColumns(
         NetezzaTableInfo tableInfo,
-        List<NetezzaColumnInfoRow> columnsByIndex)
+        List<NetezzaColumnInfoRow>? columnsByIndex)
     {
         if (columnsByIndex is null
             || tableInfo.COLUMN_COUNT <= 0

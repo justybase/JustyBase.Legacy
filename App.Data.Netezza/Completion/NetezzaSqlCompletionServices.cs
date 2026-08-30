@@ -22,6 +22,10 @@ namespace AppBase.Data.Completion;
 public sealed class NetezzaSqlCompletionServices
 {
     private readonly INetezzaSchemaTableCatalog _schemaTables;
+    // SchemaProvider is shared by the Legacy editor services. A request can
+    // replace the complete projection while another request is parsing, so
+    // schema replacement and the dependent analysis must use one gate.
+    private readonly SemaphoreSlim _authoringGate = new(1, 1);
     private string _schemaSyncedForConnection;
 
     public InMemorySchemaProvider SchemaProvider { get; } = new();
@@ -34,28 +38,94 @@ public sealed class NetezzaSqlCompletionServices
         _schemaTables = schemaTables ?? throw new ArgumentNullException(nameof(schemaTables));
     }
 
-    public NzCompletionEngine CreateEngine(string documentUri, SqlDialect dialect = SqlDialect.Netezza)
+    public NzCompletionEngine CreateEngine(
+        string documentUri,
+        SqlDialect dialect = SqlDialect.Netezza,
+        string? activeDatabase = null)
     {
         var engine = new NzCompletionEngine(
             SchemaProvider,
             ParsingCoordinator,
             DialectRuntime.AuthoringCatalog(dialect),
-            dialect);
+            dialect,
+            activeDatabase);
         engine.SetDocumentUri(documentUri);
         return engine;
     }
 
-    public void EnsureSchemaForConnection(INetezzaCompletionContext completionContext, string connectionName)
+    internal async Task<T> WithAuthoringGateAsync<T>(
+        Func<Task<T>> action,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        await _authoringGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await action().ConfigureAwait(false);
+        }
+        finally
+        {
+            _authoringGate.Release();
+        }
+    }
+
+    internal T WithAuthoringGate<T>(Func<T> action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        _authoringGate.Wait();
+        try
+        {
+            return action();
+        }
+        finally
+        {
+            _authoringGate.Release();
+        }
+    }
+
+    internal void WithAuthoringGate(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        _authoringGate.Wait();
+        try
+        {
+            action();
+        }
+        finally
+        {
+            _authoringGate.Release();
+        }
+    }
+
+    public void EnsureSchemaForConnection(
+        INetezzaCompletionContext completionContext,
+        string connectionName,
+        string? databaseName = null)
+        => WithAuthoringGate(() => EnsureSchemaForConnectionCore(
+            completionContext, connectionName, databaseName));
+
+    internal void EnsureSchemaForConnectionUnderAuthoringGate(
+        INetezzaCompletionContext completionContext,
+        string connectionName,
+        string? databaseName = null)
+        => EnsureSchemaForConnectionCore(completionContext, connectionName, databaseName);
+
+    private void EnsureSchemaForConnectionCore(
+        INetezzaCompletionContext completionContext,
+        string connectionName,
+        string? databaseName)
     {
         if (completionContext is null || string.IsNullOrEmpty(connectionName))
             return;
 
-        if (string.Equals(_schemaSyncedForConnection, connectionName, StringComparison.OrdinalIgnoreCase)
+        string syncKey = $"NZ:{connectionName}:{databaseName ?? string.Empty}";
+        if (string.Equals(_schemaSyncedForConnection, syncKey, StringComparison.OrdinalIgnoreCase)
             && SchemaProvider.HasTables())
             return;
 
-        MetadataSnapshot = LegacySchemaSync.SyncConnection(SchemaProvider, completionContext, _schemaTables, connectionName);
-        _schemaSyncedForConnection = connectionName;
+        MetadataSnapshot = LegacySchemaSync.SyncConnection(
+            SchemaProvider, completionContext, _schemaTables, connectionName, databaseName);
+        _schemaSyncedForConnection = syncKey;
     }
 
     /// <summary>
@@ -388,10 +458,13 @@ public sealed class NetezzaSqlCompletionServices
 
     public void InvalidateSchema()
     {
-        _schemaSyncedForConnection = null;
-        SchemaProvider.Clear();
-        MetadataSnapshot = NetezzaSchemaSnapshot.Empty;
-        SchemaProvider.BumpMetadataEpoch();
-        SchemaInvalidated?.Invoke();
+        WithAuthoringGate(() =>
+        {
+            _schemaSyncedForConnection = null;
+            SchemaProvider.Clear();
+            MetadataSnapshot = NetezzaSchemaSnapshot.Empty;
+            SchemaProvider.BumpMetadataEpoch();
+            SchemaInvalidated?.Invoke();
+        });
     }
 }

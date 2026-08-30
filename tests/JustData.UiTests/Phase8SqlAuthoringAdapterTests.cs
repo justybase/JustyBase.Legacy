@@ -1,7 +1,14 @@
 using AppBase.Data.Completion;
+using AppBase.Common.Enums;
+using AppBase.Common.Interfaces;
+using AppBase.Data.Core.Core;
 using AppBase.Data.Core.Interfaces;
+using AppBase.Data.Core.Models;
+using AppBase.Common.Configuration;
 using JustData.Application.Editor;
 using JustData.Application.Sql;
+using JustyBase.Netezza.Models;
+using JustyBase.NetezzaSqlParser.Visitor;
 using JustyBaseLegacy.UI.Sql;
 using NSubstitute;
 
@@ -70,6 +77,58 @@ public sealed class Phase8SqlAuthoringAdapterTests
         Assert.Contains(items, item => item.Label.Equals("SELECT", StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(signature);
         Assert.Contains(signature.Signatures, item => item.Label.StartsWith("COUNT(", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Netezza_authoring_uses_request_database_for_completion_and_lint()
+    {
+        var catalog = Substitute.For<INetezzaSchemaTableCatalog>();
+        catalog.TablesByConnection.Returns(new Dictionary<string, Dictionary<int, NetezzaTableInfo>>
+        {
+            ["nz"] = new()
+            {
+                [1] = new()
+                {
+                    DATABASE_ID = 10, TABLE_NAME = "LOCAL_TABLE", TABLE_DESC = "",
+                    TABLE_OWNER = "ADMIN", TABLE_SCHEMA = "ADMIN", TABLE_OBJECT_OWNER = "ADMIN",
+                    TABLE_KIND = TypeInDatabase.table, COLUMN_COUNT = 0
+                },
+                [2] = new()
+                {
+                    DATABASE_ID = 20, TABLE_NAME = "FOREIGN_TABLE", TABLE_DESC = "",
+                    TABLE_OWNER = "ADMIN", TABLE_SCHEMA = "ADMIN", TABLE_OBJECT_OWNER = "ADMIN",
+                    TABLE_KIND = TypeInDatabase.table, COLUMN_COUNT = 0
+                }
+            }
+        });
+
+        var context = Substitute.For<INetezzaCompletionContext>();
+        context.SelectedConnectionName.Returns("nz");
+        context.SelectedDatabase.Returns("JUST_DATA");
+        context.DatabaseDictionary.Returns(new Dictionary<string, Dictionary<int, DatabaseInfo>>
+        {
+            ["nz"] = new()
+            {
+                [10] = new(10, "JUST_DATA", "ADMIN", "ADMIN"),
+                [20] = new(20, "OTHER_DB", "ADMIN", "ADMIN")
+            }
+        });
+
+        var completion = new NetezzaSqlCompletionServices(catalog);
+        var db = Substitute.For<IGeneralDbService>();
+        db.DriverName("nz").Returns("NetezzaSQL");
+        using var legacy = new LegacySqlAuthoringServices(completion, db);
+        var useCase = new NetezzaSqlAuthoringUseCase(completion, legacy, db, context);
+
+        const string completionSql = "SELECT * FROM JUST_DATA.ADMIN.";
+        var items = await useCase.CompleteAsync(
+            new SqlCompletionRequest(EditorDocumentId.New(), completionSql, completionSql.Length, "nz", "JUST_DATA"));
+        var lint = await useCase.LintAsync(
+            new SqlLintRequest(EditorDocumentId.New(), "SELECT * FROM ADMIN.LOCAL_TABLE", "nz", DatabaseName: "JUST_DATA"));
+
+        Assert.Contains(items, item => item.Label == "LOCAL_TABLE");
+        Assert.DoesNotContain(items, item => item.Label == "FOREIGN_TABLE");
+        Assert.DoesNotContain(lint.Diagnostics, diagnostic => diagnostic.Code is "SQL006" or "SQL007");
     }
 
     [Fact]

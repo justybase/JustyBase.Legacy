@@ -110,10 +110,10 @@ namespace JustyBaseLegacy.UI
             tabControls.TabPages.Add(_tabAiChat);
             _preferenceSections.Add(new PreferenceSection(
                 "AI Chat",
-                "Remote (Codex / OpenAI-compatible) and local embedded AI chat.",
+                "Enable AI Chat, choose one provider, and configure only the options that apply to it.",
                 "✆",
                 _tabAiChat,
-                "ai chat codex openai compatible embedded llama gguf model backend endpoint api key gpt temperature tokens timeout retries"));
+                "ai chat provider codex copilot openai compatible local embedded llama gguf model endpoint api key temperature tokens timeout retries"));
 
             foreach (PreferenceSection section in _preferenceSections)
             {

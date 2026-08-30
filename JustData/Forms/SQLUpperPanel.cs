@@ -33,6 +33,8 @@ namespace JustyBaseLegacy.UI.DbForms
         private readonly ICodeActionProvider _codeActionProvider;
         private readonly INetezzaCompletionContext _completionContext;
         private readonly Action<string> _setSelectedConnectionName;
+        private readonly Action? _databaseSelectionChanged;
+        private bool _databaseSelectionNotificationsEnabled;
         private readonly IGeneralDbService _generalDbService;
         private readonly IConnectionSessionRegistry _connectionSessions;
         private readonly INetezzaSchemaTableCatalog _schemaTables;
@@ -73,7 +75,8 @@ namespace JustyBaseLegacy.UI.DbForms
             string driver,
             string selectedConnection,
             string selectedDatabase,
-            bool isEnabledMode)
+            bool isEnabledMode,
+            Action? databaseSelectionChanged = null)
         {
             _generalDbService = generalDbService;
             _connectionSessions = connectionSessions ?? throw new ArgumentNullException(nameof(connectionSessions));
@@ -82,6 +85,7 @@ namespace JustyBaseLegacy.UI.DbForms
             _codeActionProvider = codeActionProvider ?? throw new ArgumentNullException(nameof(codeActionProvider));
             _completionContext = completionContext;
             _setSelectedConnectionName = setSelectedConnectionName;
+            _databaseSelectionChanged = databaseSelectionChanged;
             _logger = logger;
             _editorUi = editorUi ?? throw new ArgumentNullException(nameof(editorUi));
             _colorTheme = colorTheme;
@@ -223,6 +227,7 @@ namespace JustyBaseLegacy.UI.DbForms
 
             tsbKeepConnection.Checked = (!_applicationSettingsContext.Config.CloseConnectionByDefault);
             KeepConnectionOpen = tsbKeepConnection.Checked;
+            _databaseSelectionNotificationsEnabled = true;
         }
 
         private SqlIndenting _sqlIndenting;
@@ -388,6 +393,9 @@ namespace JustyBaseLegacy.UI.DbForms
             {
                 db.ResetDbName(SelectedConnectionName, SelectedDatabase);
             }
+
+            if (_databaseSelectionNotificationsEnabled)
+                _databaseSelectionChanged?.Invoke();
         }
         private async void cbConnections_SelectedIndexChanged(object sender, EventArgs e)
         {
@@ -400,6 +408,19 @@ namespace JustyBaseLegacy.UI.DbForms
                 {
                     _selectedConnectionName = newConnectionName;
                     _setSelectedConnectionName(newConnectionName);
+                    var defaultDatabase = _generalDbService.DBname(newConnectionName);
+                    // Do not display a database from the previous connection while
+                    // the schema refresh for this connection is still in progress.
+                    cbDatabases.Items.Clear();
+                    if (!string.IsNullOrWhiteSpace(defaultDatabase))
+                    {
+                        cbDatabases.Items.Add(string.Intern(defaultDatabase));
+                        SelectedDatabase = defaultDatabase;
+                    }
+                    else
+                    {
+                        SelectedDatabase = string.Empty;
+                    }
                     _netezzaSqlCompletionServices.InvalidateSchema();
                     await _editorUi.CbConnectionsSelectedIndexChanged((o) => SetEnabledConnectionsDatabases(o));
                     if (!IsDisposed && !Disposing)

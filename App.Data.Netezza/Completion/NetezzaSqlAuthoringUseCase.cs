@@ -1,5 +1,6 @@
 using JustData.Application.Editor;
 using JustData.Application.Sql;
+using AppBase.Common.Interfaces;
 using AppBase.Data.Core.Interfaces;
 using JustyBase.NetezzaSqlParser.Completion;
 using JustyBase.NetezzaSqlParser.Dialects;
@@ -13,59 +14,97 @@ public sealed class NetezzaSqlAuthoringUseCase : ISqlAuthoringUseCase
     private readonly NetezzaSqlCompletionServices _completionServices;
     private readonly LegacySqlAuthoringServices _authoringServices;
     private readonly SqlDialectResolver _dialectResolver;
+    private readonly INetezzaCompletionContext? _completionContext;
 
     public NetezzaSqlAuthoringUseCase(
         NetezzaSqlCompletionServices completionServices,
         LegacySqlAuthoringServices authoringServices)
-        : this(completionServices, authoringServices, null)
+        : this(completionServices, authoringServices, null, null)
     {
     }
 
     public NetezzaSqlAuthoringUseCase(
         NetezzaSqlCompletionServices completionServices,
         LegacySqlAuthoringServices authoringServices,
-        IGeneralDbService? generalDbService)
+        IGeneralDbService? generalDbService,
+        INetezzaCompletionContext? completionContext = null)
     {
         _completionServices = completionServices;
         _authoringServices = authoringServices;
         _dialectResolver = new SqlDialectResolver(generalDbService);
+        _completionContext = completionContext;
     }
 
     public async Task<SqlLintResult> LintAsync(
         SqlLintRequest request,
         CancellationToken cancellationToken = default)
     {
-        IReadOnlyList<LintIssue> issues = await _authoringServices
-            .LintAsync(
-                request.SqlText,
-                request.DocumentId.ToString(),
-                cancellationToken,
-                request.KnownLineCount,
-                request.Invocation,
-                _dialectResolver.Resolve(request.ConnectionName))
-            .ConfigureAwait(false);
-        return new SqlLintResult(
-            request.DocumentId,
-            issues.Select(issue => MapDiagnostic(issue, _dialectResolver.Resolve(request.ConnectionName))).ToArray());
+        string databaseName = ResolveDatabaseName(request.ConnectionName, request.DatabaseName);
+        SqlDialect dialect = _dialectResolver.Resolve(request.ConnectionName);
+        return await _completionServices.WithAuthoringGateAsync(async () =>
+        {
+            if (dialect == SqlDialect.Netezza && _completionContext is not null)
+            {
+                _completionServices.EnsureSchemaForConnectionUnderAuthoringGate(
+                    _completionContext, request.ConnectionName, databaseName);
+            }
+
+            IReadOnlyList<LintIssue> issues = await _authoringServices
+                .LintAsyncUnderAuthoringGate(
+                    request.SqlText,
+                    request.DocumentId.ToString(),
+                    cancellationToken,
+                    request.KnownLineCount,
+                    request.Invocation,
+                    dialect,
+                    databaseName,
+                    request.CaretOffset)
+                .ConfigureAwait(false);
+            return new SqlLintResult(
+                request.DocumentId,
+                issues.Select(issue => MapDiagnostic(issue, dialect)).ToArray());
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     public Task<IReadOnlyList<SqlCompletionItem>> CompleteAsync(
         SqlCompletionRequest request,
         CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
         var dialect = _dialectResolver.Resolve(request.ConnectionName);
-        var engine = _completionServices.CreateEngine(request.DocumentId.ToString(), dialect);
-        IReadOnlyList<SqlCompletionItem> items = engine
-            .GetCompletions(request.SqlText ?? string.Empty, request.CaretOffset)
-            .Select(item => new SqlCompletionItem(
-                item.Label,
-                item.Label,
-                item.Detail,
-                Kind: item.Kind.ToString()))
-            .ToArray();
-        return Task.FromResult(items);
+        string databaseName = ResolveDatabaseName(request.ConnectionName, request.DatabaseName);
+        return _completionServices.WithAuthoringGateAsync(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (dialect == SqlDialect.Netezza && _completionContext is not null)
+            {
+                _completionServices.EnsureSchemaForConnectionUnderAuthoringGate(
+                    _completionContext, request.ConnectionName, databaseName);
+            }
+
+            var engine = _completionServices.CreateEngine(
+                request.DocumentId.ToString(), dialect, databaseName);
+            IReadOnlyList<SqlCompletionItem> items = engine
+                .GetCompletions(request.SqlText ?? string.Empty, request.CaretOffset)
+                .Select(item => new SqlCompletionItem(
+                    item.Label,
+                    item.Label,
+                    item.Detail,
+                    Kind: item.Kind.ToString()))
+                .ToArray();
+            return Task.FromResult(items);
+        }, cancellationToken);
     }
+
+    private string ResolveDatabaseName(string connectionName, string? requestedDatabaseName) =>
+        !string.IsNullOrWhiteSpace(requestedDatabaseName)
+            ? requestedDatabaseName
+            : _completionContext is not null
+                && string.Equals(_dialectResolver.Resolve(connectionName), SqlDialect.Netezza)
+                && (string.IsNullOrWhiteSpace(connectionName)
+                    || string.Equals(connectionName, _completionContext.SelectedConnectionName,
+                        StringComparison.OrdinalIgnoreCase))
+                ? _completionContext.SelectedDatabase
+                : string.Empty;
 
     public Task<SqlSignatureHelp?> GetSignatureHelpAsync(
         SqlSignatureHelpRequest request,

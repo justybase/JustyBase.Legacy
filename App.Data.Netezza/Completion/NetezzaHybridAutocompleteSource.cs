@@ -153,18 +153,6 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
             yield break;
         }
 
-        if (_dialect == SqlDialect.Netezza)
-            _completionServices.EnsureSchemaForConnection(_completionContext, activeConnectionName);
-        else if (_connectionSessions.TryGetValue(activeConnectionName, out IGeneralDb? database))
-        {
-            if (database.DatabaseType == DatabaseTypeEnum.DB2)
-                _completionServices.EnsureDb2Schema(database, activeConnectionName, activeDatabaseName);
-            else if (database.DatabaseType == DatabaseTypeEnum.MsSqlDb)
-                _completionServices.EnsureMsSqlSchema(database, activeConnectionName, activeDatabaseName);
-            else if (database.DatabaseType == DatabaseTypeEnum.Postgres)
-                _completionServices.EnsurePostgresSchema(database, activeConnectionName);
-        }
-
         List<AutocompleteItem> engineItems = GetSqlCompletions(
             text,
             activeConnectionName,
@@ -231,7 +219,7 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         return CompletionItemAppearance.Apply(item, CompletionIconKind.Keyword, "Keyword");
     }
 
-    private IEnumerable<AutocompleteItem> GetSqlCompletions(
+    private IReadOnlyList<AutocompleteItem> GetSqlCompletions(
         string fragmentText,
         string activeConnectionName,
         string activeDatabaseName)
@@ -239,18 +227,35 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         var tb = _menu.Fragment.tb;
         var sql = tb.Text;
         var cursorOffset = tb.PlaceToPosition(_menu.Fragment.End);
-        // The parser engine already caches tokenization and parsing through the
-        // shared DocumentParsingCoordinator. Do not cache the mapped FCTB list:
-        // AliasHints and HintWithTable are intentionally mutated asynchronously
-        // by AutocompleteClass and must be reflected immediately.
-        foreach (var item in BuildSqlCompletions(
-                     fragmentText,
-                     sql,
-                     cursorOffset,
-                     tb.LinesCount,
-                     activeConnectionName,
-                     activeDatabaseName))
-            yield return item;
+        return _completionServices.WithAuthoringGate(() =>
+        {
+            if (_dialect == SqlDialect.Netezza)
+            {
+                _completionServices.EnsureSchemaForConnectionUnderAuthoringGate(
+                    _completionContext, activeConnectionName, activeDatabaseName);
+            }
+            else if (_connectionSessions.TryGetValue(activeConnectionName, out IGeneralDb? database))
+            {
+                if (database.DatabaseType == DatabaseTypeEnum.DB2)
+                    _completionServices.EnsureDb2Schema(database, activeConnectionName, activeDatabaseName);
+                else if (database.DatabaseType == DatabaseTypeEnum.MsSqlDb)
+                    _completionServices.EnsureMsSqlSchema(database, activeConnectionName, activeDatabaseName);
+                else if (database.DatabaseType == DatabaseTypeEnum.Postgres)
+                    _completionServices.EnsurePostgresSchema(database, activeConnectionName);
+            }
+
+            // The parser engine already caches tokenization and parsing through
+            // the shared DocumentParsingCoordinator. Do not cache the mapped
+            // FCTB list: AliasHints and HintWithTable are intentionally mutated
+            // asynchronously by AutocompleteClass and must be reflected immediately.
+            return BuildSqlCompletions(
+                fragmentText,
+                sql,
+                cursorOffset,
+                tb.LinesCount,
+                activeConnectionName,
+                activeDatabaseName).ToList();
+        });
     }
 
     private IEnumerable<AutocompleteItem> BuildSqlCompletions(
@@ -299,10 +304,10 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
             _schemaProvider,
             _dialect,
             _dialect == SqlDialect.Netezza ? _wordListProvider : null,
-            _dialect == SqlDialect.Netezza
+                _dialect == SqlDialect.Netezza
                 ? (engineItems, candidateSql) =>
                     SqlCompletionMergePolicy.ShouldRunLegacyPath(engineItems, candidateSql)
-                    || (text.Contains('.') && engineItems.Count == 0)
+                    || IsPotentialDatabasePath(text)
                 : null,
             _completionServices.ParsingCoordinator,
             _documentId.ToString(),
@@ -331,6 +336,12 @@ public sealed class NetezzaHybridAutocompleteSource : IEnumerable<AutocompleteIt
         foreach (var item in YieldSupplementalAliasHints(engineItems, emittedLabels))
             yield return item;
     }
+
+    private static bool IsPotentialDatabasePath(string text)
+        => !string.IsNullOrWhiteSpace(text)
+            && text.Contains('.', StringComparison.Ordinal)
+            && text.All(character => char.IsLetterOrDigit(character)
+                || character is '_' or '.' or '"');
 
     public static (string Sql, int CursorOffset) SliceSqlForEngine(
         string sql,

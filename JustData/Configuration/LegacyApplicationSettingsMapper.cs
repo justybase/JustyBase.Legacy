@@ -94,6 +94,9 @@ public static class LegacyApplicationSettingsMapper
         destination.AiChatOpenAiCompatibleEndpoint = source.AiChatOpenAiCompatibleEndpoint;
         destination.AiChatOpenAiCompatibleApiKey = source.AiChatOpenAiCompatibleApiKey;
         destination.AiChatDefaultModel = source.AiChatDefaultModel;
+        destination.AiChatCodexModel = source.AiChatCodexModel;
+        destination.AiChatCopilotModel = source.AiChatCopilotModel;
+        destination.AiChatOpenAiCompatibleModel = source.AiChatOpenAiCompatibleModel;
         destination.AiChatDefaultReasoningEffort = source.AiChatDefaultReasoningEffort;
         destination.AiChatDefaultMode = source.AiChatDefaultMode;
         destination.AiChatAutoConnect = source.AiChatAutoConnect;
@@ -466,6 +469,9 @@ public static class LegacyApplicationSettingsMapper
         target.AiChatOpenAiCompatibleEndpoint = source.AiChatOpenAiCompatibleEndpoint;
         target.AiChatOpenAiCompatibleApiKey = source.AiChatOpenAiCompatibleApiKey;
         target.AiChatDefaultModel = source.AiChatDefaultModel;
+        target.AiChatCodexModel = source.AiChatCodexModel;
+        target.AiChatCopilotModel = source.AiChatCopilotModel;
+        target.AiChatOpenAiCompatibleModel = source.AiChatOpenAiCompatibleModel;
         target.AiChatDefaultReasoningEffort = source.AiChatDefaultReasoningEffort;
         target.AiChatDefaultMode = source.AiChatDefaultMode;
         target.AiChatAutoConnect = source.AiChatAutoConnect;
@@ -492,6 +498,9 @@ public static class LegacyApplicationSettingsMapper
         target.AiChatOpenAiCompatibleEndpoint = source.AiChatOpenAiCompatibleEndpoint;
         target.AiChatOpenAiCompatibleApiKey = source.AiChatOpenAiCompatibleApiKey;
         target.AiChatDefaultModel = source.AiChatDefaultModel;
+        target.AiChatCodexModel = source.AiChatCodexModel;
+        target.AiChatCopilotModel = source.AiChatCopilotModel;
+        target.AiChatOpenAiCompatibleModel = source.AiChatOpenAiCompatibleModel;
         target.AiChatDefaultReasoningEffort = source.AiChatDefaultReasoningEffort;
         target.AiChatDefaultMode = source.AiChatDefaultMode;
         target.AiChatAutoConnect = source.AiChatAutoConnect;

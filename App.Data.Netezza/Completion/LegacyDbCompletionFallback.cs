@@ -67,14 +67,6 @@ public sealed class LegacyDbCompletionFallback
         _completionContext.DatabaseSchemaLookup.TryGetValue(selectedConnectionName, out var databaseSchemaDictionarySelected);
         _completionContext.ColumnTablesDictionary.TryGetValue(selectedConnectionName, out var selectedColumns);
 
-        _completionContext.DatabaseOwners.TryGetValue(selectedConnectionName, out var ownersForSelectedConnection);
-        if (ownersForSelectedConnection is null)
-            yield break;
-
-        ownersForSelectedConnection.TryGetValue(_completionContext.SelectedDatabase, out var ownersForSelectedConnectionSelectedDatabase);
-        if (ownersForSelectedConnectionSelectedDatabase is null)
-            yield break;
-
         if (!text.EndsWith('.'))
         {
             foreach (var item in selectedDatabaseList)
@@ -108,13 +100,19 @@ public sealed class LegacyDbCompletionFallback
             yield break;
         }
 
+        _completionContext.DatabaseOwners.TryGetValue(selectedConnectionName, out var ownersForSelectedConnection);
+        ownersForSelectedConnection ??= new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+        ownersForSelectedConnection.TryGetValue(_completionContext.SelectedDatabase, out var ownersForSelectedConnectionSelectedDatabase);
+        ownersForSelectedConnectionSelectedDatabase ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
         if (databasesTablesSelected is null || selectedColumns is null || databaseSchemaDictionarySelected is null)
             yield break;
 
         string firstWord = text[..firstDotIndex];
         string textUpToLastDot = text[..lastDotIndex];
         string end = text[(lastDotIndex + 1)..];
-        bool isFirstWordDatabase = ownersForSelectedConnection?.ContainsKey(firstWord) == true;
+        bool isFirstWordDatabase = selectedDatabaseList.Contains(firstWord, StringComparer.OrdinalIgnoreCase)
+            || databaseSchemaDictionarySelected.ContainsKey(firstWord);
 
         if (dotCount == 1)
         {
@@ -160,6 +158,15 @@ public sealed class LegacyDbCompletionFallback
                 yield return item;
             yield break;
         }
+
+        // The Netezza fallback predates request-scoped authoring and reads the
+        // selected Legacy context internally. Never answer a request for a
+        // different tab connection/database with that global selection: the
+        // neutral engine has already received the request-scoped database and
+        // may still be able to provide the result.
+        if (!string.Equals(connectionName, _completionContext.SelectedConnectionName, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(databaseName, _completionContext.SelectedDatabase, StringComparison.OrdinalIgnoreCase))
+            yield break;
 
         foreach (AutocompleteItem item in GetCompletions(text))
             yield return item;
@@ -345,11 +352,22 @@ public sealed class LegacyDbCompletionFallback
         List<NetezzaColumnInfoRow> selectedColumns,
         string selectedConnectionName)
     {
-        if (isFirstWordDatabase && ownersForSelectedConnection?.TryGetValue(firstWord, out var owners) == true)
+        if (isFirstWordDatabase && ownersForSelectedConnection.TryGetValue(firstWord, out var owners))
         {
             foreach (var owner in owners.Keys)
                 yield return CompletionItemAppearance.Apply(
                     new MethodAutocompleteItem2($"{firstWord}.{owner}"), CompletionIconKind.Schema, "Schema");
+        }
+        else if (isFirstWordDatabase && databaseSchemaDictionarySelected.TryGetValue(firstWord, out var databaseTables))
+        {
+            foreach (var owner in databaseTables.Values
+                         .Select(table => table.owner)
+                         .Where(owner => !string.IsNullOrWhiteSpace(owner))
+                         .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                yield return CompletionItemAppearance.Apply(
+                    new MethodAutocompleteItem2($"{firstWord}.{owner}"), CompletionIconKind.Schema, "Schema");
+            }
         }
         else if (ownersForSelectedConnectionSelectedDatabase?.ContainsKey(firstWord) == true
                  && databaseSchemaDictionarySelected.TryGetValue(_completionContext.SelectedDatabase, out var dbTables))
@@ -404,7 +422,8 @@ public sealed class LegacyDbCompletionFallback
         {
             IEnumerable<(string hint, string description)> popCandidate;
 
-            if (ownersForSelectedConnection[firstWord].ContainsKey(secondWord))
+            if (ownersForSelectedConnection.TryGetValue(firstWord, out var owners)
+                && owners.ContainsKey(secondWord))
             {
                 popCandidate = tmp.Where(arg => arg.Key.Contains(end, StringComparison.OrdinalIgnoreCase)
                         && arg.Value.owner.Equals(secondWord, StringComparison.OrdinalIgnoreCase))
