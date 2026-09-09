@@ -77,6 +77,25 @@ public sealed class NetezzaCompletionMapperTests
     }
 
     [Fact]
+    public void Relation_completion_prioritizes_schema_after_quoted_relation_prefix()
+    {
+        var table = CompletionItemAppearance.Apply(
+            new MethodAutocompleteItem2("Order Details"),
+            CompletionIconKind.Table,
+            "Table");
+        var schema = CompletionItemAppearance.Apply(
+            new MethodAutocompleteItem2("Sales Data"),
+            CompletionIconKind.Schema,
+            "Schema");
+
+        const string sql = "SELECT * FROM \"Sales Data\".";
+        IReadOnlyList<AutocompleteItem> result = FctbCompletionMapper
+            .PrioritizeSchemasForRelationContext([table, schema], sql, sql.Length);
+
+        Assert.Equal(["Sales Data", "Order Details"], result.Select(item => item.ToString()));
+    }
+
+    [Fact]
     public void Qualified_relation_completion_orders_tables_views_nicknames_then_other_objects()
     {
         var other = CompletionItemAppearance.Apply(
@@ -430,6 +449,79 @@ public sealed class NetezzaCompletionMapperTests
         Assert.Equal("Product identifier", item.DescriptionText);
         Assert.Equal("INTEGER", item.ToolTipTitle);
         Assert.Equal("Product identifier", item.ToolTipText);
+    }
+
+    [Fact]
+    public void MapEngineItems_resolves_alias_metadata_for_quoted_relation_names()
+    {
+        var schema = new InMemorySchemaProvider();
+        schema.AddTable(new TableInfo(
+            "Order Details",
+            "Sales Data",
+            "DB1",
+            Columns: [new ColumnInfo("ID", DataType: "INTEGER")]));
+        schema.AddTable(new TableInfo(
+            "Other Orders",
+            "Sales Data",
+            "DB1",
+            Columns: [new ColumnInfo("ID", DataType: "VARCHAR(20)")]));
+        var metadata = new NetezzaSchemaSnapshot([
+            new NetezzaSchemaTable(
+                "Order Details",
+                "Sales Data",
+                "DB1",
+                Columns: [new NetezzaSchemaColumn("ID", "INTEGER")]),
+            new NetezzaSchemaTable(
+                "Other Orders",
+                "Sales Data",
+                "DB1",
+                Columns: [new NetezzaSchemaColumn("ID", "VARCHAR(20)")])]);
+
+        var item = Assert.Single(FctbCompletionMapper.MapEngineItems(
+            [new CompletionItem("ID", CompletionKind.Column, "od.ID")],
+            "od.",
+            schema,
+            metadata,
+            sql: "SELECT * FROM \"Sales Data\".\"Order Details\" od JOIN \"Other Orders\" oo ON od.ID = oo.ID WHERE od."));
+
+        Assert.Equal("INTEGER", item.ToolTipTitle);
+    }
+
+    [Fact]
+    public void MapEngineItems_resolves_alias_metadata_for_escaped_quotes_and_periods()
+    {
+        var schema = new InMemorySchemaProvider();
+        schema.AddTable(new TableInfo(
+            "Order.Details",
+            "Sales\"Data",
+            "DB1",
+            Columns: [new ColumnInfo("ID", DataType: "INTEGER")]));
+        schema.AddTable(new TableInfo(
+            "Other.Orders",
+            "Sales\"Data",
+            "DB1",
+            Columns: [new ColumnInfo("ID", DataType: "VARCHAR(20)")]));
+        var metadata = new NetezzaSchemaSnapshot([
+            new NetezzaSchemaTable(
+                "Order.Details",
+                "Sales\"Data",
+                "DB1",
+                Columns: [new NetezzaSchemaColumn("ID", "INTEGER")]),
+            new NetezzaSchemaTable(
+                "Other.Orders",
+                "Sales\"Data",
+                "DB1",
+                Columns: [new NetezzaSchemaColumn("ID", "VARCHAR(20)")])]);
+
+        const string sql = "SELECT * FROM \"Sales\"\"Data\".\"Order.Details\" od JOIN \"Other.Orders\" oo ON od.ID = oo.ID WHERE od.";
+        var item = Assert.Single(FctbCompletionMapper.MapEngineItems(
+            [new CompletionItem("ID", CompletionKind.Column, "od.ID")],
+            "od.",
+            schema,
+            metadata,
+            sql));
+
+        Assert.Equal("INTEGER", item.ToolTipTitle);
     }
 
     [Fact]

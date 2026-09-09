@@ -15,11 +15,14 @@ namespace AppBase.Data.Completion;
 public static class FctbCompletionMapper
 {
     private const int MaxDoubleDotTables = 500;
-    private static readonly Regex RelationAliasRegex = new(
-        @"\b(?:FROM|JOIN)\s+(?<relation>[A-Za-z_][\w$]*(?:\s*\.\s*(?:\.\s*)?[A-Za-z_][\w$]*){0,2})(?:\s+(?:AS\s+)?(?<alias>[A-Za-z_][\w$]*))?",
+    private const string QuotedIdentifierPattern = "\"(?:\"\"|[^\"])*\"";
+    private const string IdentifierPattern = "(?:" + QuotedIdentifierPattern + "|[A-Za-z_][\\w$]*)";
+    private static readonly Regex RelationStartRegex = new(
+        @"\b(?:FROM|JOIN)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex RelationCompletionContextRegex = new(
-        @"(?:\b(?:FROM|JOIN|UPDATE|INTO|MERGE\s+INTO|DELETE\s+FROM)\s+)(?:[A-Za-z_][\w$""]*\.)*(?:[A-Za-z_][\w$""]*)?$",
+        @"(?:\b(?:FROM|JOIN|UPDATE|INTO|MERGE\s+INTO|DELETE\s+FROM)\s+)" +
+        "(?:" + IdentifierPattern + @"(?:\s*\.\s*" + IdentifierPattern + @")*\s*(?:\.\s*)?)?$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>
@@ -342,28 +345,160 @@ public static class FctbCompletionMapper
         if (string.IsNullOrWhiteSpace(sql) || string.IsNullOrWhiteSpace(qualifier))
             return null;
 
-        foreach (Match match in RelationAliasRegex.Matches(sql))
+        string unquotedQualifier = UnquoteIdentifier(qualifier);
+        foreach ((string tableName, string alias) in EnumerateRelations(sql))
         {
-            string relation = NormalizeQualifiedIdentifier(match.Groups["relation"].Value);
-            string alias = match.Groups["alias"].Value;
-            if (string.IsNullOrEmpty(relation))
-                continue;
-
-            string tableName = relation[(relation.LastIndexOf('.') + 1)..];
-            if (tableName.Equals(qualifier, StringComparison.OrdinalIgnoreCase)
-                || alias.Equals(qualifier, StringComparison.OrdinalIgnoreCase))
+            if (tableName.Equals(unquotedQualifier, StringComparison.OrdinalIgnoreCase)
+                || UnquoteIdentifier(alias).Equals(unquotedQualifier, StringComparison.OrdinalIgnoreCase))
                 return tableName;
         }
 
         return null;
     }
 
-    private static string NormalizeQualifiedIdentifier(string relation)
+    private static IEnumerable<(string TableName, string Alias)> EnumerateRelations(string sql)
     {
-        return string.Join(
-            ".",
-            relation.Split('.', StringSplitOptions.RemoveEmptyEntries)
-                .Select(part => part.Trim()));
+        foreach (Match match in RelationStartRegex.Matches(sql))
+        {
+            int index = match.Index + match.Length;
+            SkipWhitespace(sql, ref index);
+            if (!TryReadQualifiedRelation(sql, ref index, out string tableName))
+                continue;
+
+            SkipWhitespace(sql, ref index);
+            string alias = string.Empty;
+            if (TryReadIdentifier(sql, ref index, out string candidate))
+            {
+                if (candidate.Equals("AS", StringComparison.OrdinalIgnoreCase))
+                {
+                    SkipWhitespace(sql, ref index);
+                    TryReadIdentifier(sql, ref index, out alias);
+                }
+                else if (!IsRelationBoundary(candidate))
+                {
+                    alias = candidate;
+                }
+            }
+
+            yield return (tableName, alias);
+        }
+    }
+
+    private static bool TryReadQualifiedRelation(string sql, ref int index, out string tableName)
+    {
+        tableName = null;
+        var parts = new List<string>();
+        if (!TryReadIdentifier(sql, ref index, out string firstPart))
+            return false;
+
+        parts.Add(firstPart);
+        while (parts.Count < 3)
+        {
+            int afterPart = index;
+            SkipWhitespace(sql, ref index);
+            if (index >= sql.Length || sql[index] != '.')
+            {
+                index = afterPart;
+                break;
+            }
+
+            index++;
+            SkipWhitespace(sql, ref index);
+            if (index < sql.Length && sql[index] == '.')
+            {
+                parts.Add(string.Empty);
+                index++;
+                SkipWhitespace(sql, ref index);
+            }
+
+            if (!TryReadIdentifier(sql, ref index, out string part))
+                return false;
+
+            parts.Add(part);
+        }
+
+        tableName = UnquoteIdentifier(parts[^1]);
+        return true;
+    }
+
+    private static bool TryReadIdentifier(string sql, ref int index, out string identifier)
+    {
+        identifier = null;
+        if (index >= sql.Length)
+            return false;
+
+        if (sql[index] == '"')
+            return TryReadQuotedIdentifier(sql, ref index, out identifier);
+
+        if (!(char.IsLetter(sql[index]) || sql[index] == '_'))
+            return false;
+
+        int start = index++;
+        while (index < sql.Length
+            && (char.IsLetterOrDigit(sql[index]) || sql[index] is '_' or '$'))
+        {
+            index++;
+        }
+
+        identifier = sql[start..index];
+        return true;
+    }
+
+    private static bool TryReadQuotedIdentifier(string sql, ref int index, out string identifier)
+    {
+        identifier = null;
+        int start = index++;
+        while (index < sql.Length)
+        {
+            if (sql[index] != '"')
+            {
+                index++;
+                continue;
+            }
+
+            if (index + 1 < sql.Length && sql[index + 1] == '"')
+            {
+                index += 2;
+                continue;
+            }
+
+            index++;
+            identifier = sql[start..index];
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void SkipWhitespace(string sql, ref int index)
+    {
+        while (index < sql.Length && char.IsWhiteSpace(sql[index]))
+            index++;
+    }
+
+    private static bool IsRelationBoundary(string identifier)
+        => identifier.Equals("JOIN", StringComparison.OrdinalIgnoreCase)
+            || identifier.Equals("ON", StringComparison.OrdinalIgnoreCase)
+            || identifier.Equals("WHERE", StringComparison.OrdinalIgnoreCase)
+            || identifier.Equals("GROUP", StringComparison.OrdinalIgnoreCase)
+            || identifier.Equals("ORDER", StringComparison.OrdinalIgnoreCase)
+            || identifier.Equals("HAVING", StringComparison.OrdinalIgnoreCase)
+            || identifier.Equals("LIMIT", StringComparison.OrdinalIgnoreCase)
+            || identifier.Equals("UNION", StringComparison.OrdinalIgnoreCase)
+            || identifier.Equals("INNER", StringComparison.OrdinalIgnoreCase)
+            || identifier.Equals("LEFT", StringComparison.OrdinalIgnoreCase)
+            || identifier.Equals("RIGHT", StringComparison.OrdinalIgnoreCase)
+            || identifier.Equals("FULL", StringComparison.OrdinalIgnoreCase)
+            || identifier.Equals("CROSS", StringComparison.OrdinalIgnoreCase)
+            || identifier.Equals("OUTER", StringComparison.OrdinalIgnoreCase)
+            || identifier.Equals("USING", StringComparison.OrdinalIgnoreCase);
+
+    private static string UnquoteIdentifier(string value)
+    {
+        value = value?.Trim() ?? string.Empty;
+        return value.Length >= 2 && value[0] == '"' && value[^1] == '"'
+            ? value[1..^1].Replace("\"\"", "\"", StringComparison.Ordinal)
+            : value;
     }
 
     public static string QualifyLabel(string label, string fragmentText)

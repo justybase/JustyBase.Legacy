@@ -47,6 +47,31 @@ public sealed class SqlExecutionRiskGateTests
         Assert.False(allowed);
     }
 
+    [Fact]
+    public void AllowExecution_suppression_skips_update_delete_and_drop_but_keeps_other_risks()
+    {
+        var gate = new SqlExecutionRiskGate(new SqlRiskAnalysisService());
+        var confirmation = new RecordingConfirmation(accept: false);
+
+        Assert.True(gate.AllowExecution(
+            "UPDATE users SET value = 1",
+            driverName: null,
+            suppressWarnings: true,
+            confirmation));
+        Assert.True(gate.AllowExecution(
+            "DROP TABLE users",
+            driverName: null,
+            suppressWarnings: true,
+            confirmation));
+        Assert.False(gate.AllowExecution(
+            "CREATE TABLE users (id INT)",
+            driverName: "NetezzaSQL",
+            suppressWarnings: true,
+            confirmation));
+        Assert.Single(confirmation.Risks);
+        Assert.Equal(SqlRiskKind.MissingDistribute, confirmation.Risks[0].Kind);
+    }
+
     private sealed class AcceptAllConfirmation : ISqlRiskConfirmation
     {
         public bool Confirm(SqlRisk risk) => true;
@@ -55,5 +80,16 @@ public sealed class SqlExecutionRiskGateTests
     private sealed class RejectAllConfirmation : ISqlRiskConfirmation
     {
         public bool Confirm(SqlRisk risk) => false;
+    }
+
+    private sealed class RecordingConfirmation(bool accept) : ISqlRiskConfirmation
+    {
+        public List<SqlRisk> Risks { get; } = [];
+
+        public bool Confirm(SqlRisk risk)
+        {
+            Risks.Add(risk);
+            return accept;
+        }
     }
 }

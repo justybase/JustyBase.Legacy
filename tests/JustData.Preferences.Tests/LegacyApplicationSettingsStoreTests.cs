@@ -31,6 +31,7 @@ public sealed class WinFormsApplicationSettingsStoreTests : IDisposable
         var draft = (await store.LoadAsync()).ToDraft();
         draft.Appearance.FontName = "TransactionalFont";
         draft.SqlResults.CommandTimeout = 1234;
+        draft.SqlResults.DoNotWarnFullUpdateDelete = true;
         draft.FilesStartup.StartsFolderPaths = ["C:\\sql", "D:\\startup"];
         draft.FilesStartup.StartFilesExtra = new Dictionary<string, bool> { ["C:\\sql\\one.sql"] = true };
         draft.Snippets = new SnippetSettings { Keywords = ["keyword"], Snippets = ["SELECT"], MonkeySnippets = ["@@orders"] };
@@ -39,9 +40,11 @@ public sealed class WinFormsApplicationSettingsStoreTests : IDisposable
 
         Assert.Equal("TransactionalFont", config.FontName);
         Assert.Equal(1234, config.CommandTimeout);
+        Assert.True(config.DoNotWarnFullUpdateDelete);
         Assert.Equal("keyword", state.Keywords.Single());
         Assert.Equal("TransactionalFont", JsonDocument.Parse(File.ReadAllText(configPath)).RootElement.GetProperty("FontName").GetString());
         using JsonDocument persistedConfig = JsonDocument.Parse(File.ReadAllText(configPath));
+        Assert.True(persistedConfig.RootElement.GetProperty("DoNotWarnFullUpdateDelete").GetBoolean());
         Assert.Equal(2, persistedConfig.RootElement.GetProperty("StartsFolderPaths").GetArrayLength());
         Assert.True(persistedConfig.RootElement.GetProperty("StartFilesExtra").GetProperty("C:\\sql\\one.sql").GetBoolean());
         var persistedSnippets = JsonSerializer.Deserialize(File.ReadAllText(Path.Combine(_directory, "snipets.json")), AppBase.Common.MyJsonContextSnipets.Default.Snipets)!;

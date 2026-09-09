@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0.22] - 2026-09-09
+
+### Fixed
+
+- Completed Netezza source search, schema/cache refresh, quoted identifier completion, and `DROP` risk handling.
+
+### Added
+
+- Added a Preferences option to suppress `UPDATE`/`DELETE`/`DROP` confirmation warnings.
+
 ## [1.1.0.21] - 2026-09-09
 
 ### Changed

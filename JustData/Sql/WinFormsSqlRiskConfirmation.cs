@@ -15,6 +15,7 @@ internal sealed class WinFormsSqlRiskConfirmation(IWin32Window owner, ILogger lo
         string caption = risk.Kind switch
         {
             SqlRiskKind.UnsafeUpdateDelete => "Update/delete warning",
+            SqlRiskKind.UnsafeDrop => "DROP warning",
             SqlRiskKind.MissingDistribute => "Create table warning",
             SqlRiskKind.SelectInto => "SELECT INTO warning",
             _ => "SQL risk warning"

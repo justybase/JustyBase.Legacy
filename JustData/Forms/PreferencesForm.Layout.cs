@@ -841,8 +841,9 @@ namespace JustyBaseLegacy.UI
                 AddFullRow(body, cbLoadSourcesOnStartup);
                 AddField(body, "Schema parallelism", nuMaxSchemaParallelism, "Maximum concurrent refresh operations.");
             });
-            AddPreferenceCard(cards, "Query warnings", "Warn about running or expensive queries using minute-based thresholds.", 190, body =>
+            AddPreferenceCard(cards, "Query warnings", "Warn about running or expensive queries using minute-based thresholds.", 235, body =>
             {
+                AddFullRow(body, cbDoNotWarnFullUpdateDelete);
                 AddField(body, "Running query warning", nlongQueryWarning, "Minutes.");
                 AddField(body, "Estimated cost warning", nestimatedWarning, "Minutes.");
                 AddField(body, "Warning interval", nEstimatedWarningInterval, "Minutes.");

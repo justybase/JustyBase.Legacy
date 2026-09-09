@@ -34,8 +34,6 @@ public static class NetezzaHelpers
 
     public static readonly string USER_GROUPS = NetezzaSystemSql.UserGroupsSql;
 
-    static string msg = "";
-
     public static string GetDescSql(string dbName)
         => NetezzaCatalogSql.GetDescSql(dbName);
 
@@ -66,14 +64,17 @@ public static class NetezzaHelpers
 
         if (conn is NzConnection nETConnection)
         {
-            nETConnection.NoticeReceived += NETConnection_Notice;
+            string message = string.Empty;
+            void OnNotice(object _, NzNoticeEventArgs notice) => message = notice.Message;
+            nETConnection.NoticeReceived += OnNotice;
 
             try
             {
                 using (NzCommand tempXmd = new NzCommand(sql, nETConnection))
                 {
-                    var obj = tempXmd.ExecuteNonQuery();
-                    res = !(msg.Trim()[^1..] == "0");
+                    tempXmd.ExecuteNonQuery();
+                    string trimmed = message.Trim();
+                    res = trimmed.Length > 0 && trimmed[^1] != '0';
                 }
             }
             catch (Exception exception)
@@ -82,7 +83,7 @@ public static class NetezzaHelpers
             }
             finally
             {
-                nETConnection.NoticeReceived -= NETConnection_Notice;
+                nETConnection.NoticeReceived -= OnNotice;
             }
         }
         else
@@ -96,11 +97,6 @@ public static class NetezzaHelpers
 
     public static string ExternalSql(string database)
         => NetezzaCatalogSql.GetLegacyExternalSql(database);
-
-    private static void NETConnection_Notice(object o, NzNoticeEventArgs message)
-    {
-        msg = message.Message;
-    }
 
     public static string ProcSql(string database)
         => NetezzaCatalogSql.GetLegacyProcSql(database);

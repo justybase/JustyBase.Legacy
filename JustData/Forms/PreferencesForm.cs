@@ -297,6 +297,7 @@ namespace JustyBaseLegacy.UI
             nlongQueryWarning.Value = _config.LongQueryWarning / 600;
             nestimatedWarning.Value = _config.EstimatedWarning / (1000 * 60);
             nEstimatedWarningInterval.Value = _config.EstimatedWarningInterval / 600;
+            cbDoNotWarnFullUpdateDelete.Checked = _config.DoNotWarnFullUpdateDelete;
 
             cbDateFormat.Text = _config.DateTimeFormat;
             if (!cbDateFormat.Items.Contains(_config.DateTimeFormat))
@@ -627,6 +628,7 @@ namespace JustyBaseLegacy.UI
             _config.LongQueryWarning = (int)nlongQueryWarning.Value * 600;
             _config.EstimatedWarning = (int)nestimatedWarning.Value * 1000 * 60;
             _config.EstimatedWarningInterval = (int)nEstimatedWarningInterval.Value * 600;
+            _config.DoNotWarnFullUpdateDelete = cbDoNotWarnFullUpdateDelete.Checked;
 
             _config.DateTimeFormat = cbDateFormat.Text;
             _config.IntegerFormat = cbIntFormat.Text;

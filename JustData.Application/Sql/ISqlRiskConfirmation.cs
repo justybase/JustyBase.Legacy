@@ -19,12 +19,17 @@ public sealed class SqlExecutionRiskGate(SqlRiskAnalysisService analysis)
         bool suppressWarnings,
         ISqlRiskConfirmation confirmation)
     {
-        if (suppressWarnings)
-            return true;
-
         ArgumentNullException.ThrowIfNull(confirmation);
         foreach (SqlRisk risk in _analysis.Analyze(sql, driverName))
         {
+            // Keep the legacy setting name for persisted-config compatibility.
+            // It suppresses only destructive statement confirmations.
+            if (suppressWarnings
+                && risk.Kind is SqlRiskKind.UnsafeUpdateDelete or SqlRiskKind.UnsafeDrop)
+            {
+                continue;
+            }
+
             if (!confirmation.Confirm(risk))
                 return false;
         }

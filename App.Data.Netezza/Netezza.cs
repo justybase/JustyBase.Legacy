@@ -271,6 +271,7 @@ public sealed class Netezza : GeneralDb, INetezza
                 {
                     _netezzaHelperService.ServerVersion = netezzaConnection.ServerVersion;
                     defaultDatabase = netezzaConnection.Database;
+                    DefaultDatabaseName = defaultDatabase;
 
                     //BAZY
                     string databasesQuery = NetezzaHelpers.DATABASES;
@@ -467,12 +468,153 @@ public sealed class Netezza : GeneralDb, INetezza
 
     public override void ResetDynamicCollection()
     {
-        throw new NotImplementedException();
+        ResetDynamicCollectionH();
+
+        bool loadedFromRuntimeCatalog = false;
+        if (_databaseRuntimeContext.DatabaseSchemaLookup.TryGetValue(ConnectionName, out var databases))
+        {
+            foreach ((string database, Dictionary<string, (string owner, int tableId)> objects) in databases)
+            {
+                AutocompleteSuggestions.OneWord.Add(FormatIdentifier(database));
+                foreach (var (objectName, objectInfo) in objects)
+                {
+                    string formattedObject = FormatIdentifier(objectName);
+                    string formattedSchema = FormatIdentifier(objectInfo.owner);
+                    if (string.IsNullOrWhiteSpace(objectInfo.owner))
+                    {
+                        AutocompleteSuggestions.OneWord.Add(formattedObject);
+                    }
+                    else
+                    {
+                        AutocompleteSuggestions.TwoWords.Add($"{formattedSchema}.{formattedObject}");
+                        AutocompleteSuggestions.TreeWords.Add($"{FormatIdentifier(database)}.{formattedSchema}.{formattedObject}");
+                    }
+
+                    loadedFromRuntimeCatalog = true;
+                }
+            }
+        }
+
+        if (!loadedFromRuntimeCatalog)
+        {
+            foreach ((string schema, Dictionary<string, TypeInDatabase> objects) in objectInSchema)
+            {
+                string formattedSchema = FormatIdentifier(schema);
+                foreach (string objectName in objects.Keys)
+                {
+                    AutocompleteSuggestions.TwoWords.Add($"{formattedSchema}.{FormatIdentifier(objectName)}");
+                }
+            }
+
+            AddLegacyTableSuggestions();
+        }
     }
 
     protected override void AddToCache(string dbname, string schema, string tablename)
     {
-        throw new NotImplementedException();
+        string cacheKey = dbname + "_" + schema + "\\" + tablename;
+        if (TryLoadColumnsFromRuntimeCatalog(dbname, schema, tablename, cacheKey))
+        {
+            return;
+        }
+
+        using DbConnection connection = GetConnection(dbname, usePool: false);
+        connection.Open();
+        using DbCommand command = connection.CreateCommand();
+        command.CommandText = NetezzaCatalogSql.GetTableColumnsSql(dbname, schema, tablename);
+        command.CommandTimeout = _databaseRuntimeContext.Config.CommandTimeout;
+
+        var names = new List<string>();
+        var types = new List<string>();
+        var primaryKeyPositions = new List<short>();
+        var remarks = new List<string>();
+        using DbDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            names.Add(reader.GetString(1));
+            remarks.Add(reader.IsDBNull(2) ? string.Empty : reader.GetValue(2)?.ToString() ?? string.Empty);
+            types.Add(reader.IsDBNull(3) ? string.Empty : reader.GetValue(3)?.ToString() ?? string.Empty);
+            primaryKeyPositions.Add(-1);
+        }
+
+        columnsOfTables[cacheKey] = (names.ToArray(), types.ToArray(), primaryKeyPositions.ToArray(), remarks.ToArray());
+    }
+
+    private bool TryLoadColumnsFromRuntimeCatalog(string database, string schema, string table, string cacheKey)
+    {
+        if (!_databaseRuntimeContext.DatabaseSchemaLookup.TryGetValue(ConnectionName, out var databases))
+            return false;
+
+        var databaseEntry = databases.FirstOrDefault(item => SameIdentifier(item.Key, database));
+        if (databaseEntry.Value is null)
+            return false;
+
+        var objectEntry = databaseEntry.Value.FirstOrDefault(item => SameIdentifier(item.Key, table));
+        if (string.IsNullOrEmpty(objectEntry.Key))
+            return false;
+
+        var objectInfo = objectEntry.Value;
+        if (!SameIdentifier(objectInfo.owner, schema))
+            return false;
+
+        if (!_databaseRuntimeContext.ColumnTablesDictionary.TryGetValue(ConnectionName, out var columns))
+            return false;
+
+        var rows = columns
+            .Where(column => column.TABLE_ID == objectInfo.tableId)
+            .OrderBy(column => column.COLUMN_NUMBER)
+            .ToArray();
+        if (rows.Length == 0)
+            return false;
+
+        columnsOfTables[cacheKey] = (
+            rows.Select(column => column.COLUMN_NAME).ToArray(),
+            rows.Select(column => column.DATA_TYPE).ToArray(),
+            rows.Select(_ => (short)-1).ToArray(),
+            rows.Select(column => column.COLUMN_DESCRIPTION ?? string.Empty).ToArray());
+        return true;
+    }
+
+    private void AddLegacyTableSuggestions()
+    {
+        if (tables.Rows.Count == 0)
+            return;
+
+        foreach (DataRow row in tables.Rows)
+        {
+            string schema = ReadTableValue(row, "TABLE_SCHEM", "SCHEMA", "OWNER");
+            string table = ReadTableValue(row, "TABLE_NAME", "TABLENAME", "TABLE");
+            if (string.IsNullOrWhiteSpace(table))
+                continue;
+
+            string formattedTable = FormatIdentifier(table);
+            if (string.IsNullOrWhiteSpace(schema))
+                AutocompleteSuggestions.OneWord.Add(formattedTable);
+            else
+                AutocompleteSuggestions.TwoWords.Add($"{FormatIdentifier(schema)}.{formattedTable}");
+        }
+    }
+
+    private static string ReadTableValue(DataRow row, params string[] columnNames)
+    {
+        foreach (string columnName in columnNames)
+        {
+            if (row.Table.Columns.Contains(columnName) && row[columnName] != DBNull.Value)
+                return row[columnName]?.ToString() ?? string.Empty;
+        }
+
+        return string.Empty;
+    }
+
+    private static bool SameIdentifier(string left, string right)
+        => string.Equals(StringExtension.UnquoteName(left.Trim()), StringExtension.UnquoteName(right.Trim()), StringComparison.OrdinalIgnoreCase);
+
+    private static string FormatIdentifier(string value)
+    {
+        value = value.Trim();
+        return value.StartsWith('"') && value.EndsWith('"')
+            ? value
+            : StringExtension.QuoteNameIfNeeded(value);
     }
 
     private DatabaseColumnType GetTypedValue(string[] headers, ImportTypeAnalyzer analyzer, string[] row, int j, bool doTrim = true, bool isBoolean = false)
@@ -1174,16 +1316,24 @@ public sealed class Netezza : GeneralDb, INetezza
 
     public override string SearchInViewsSource(string txtToSearch)
     {
-        throw new NotImplementedException();
+        return NetezzaCatalogSql.GetLegacyViewSourceSearchSql(GetSearchDatabase(), txtToSearch);
     }
 
     public override string SearchInProcedureSource(string txtToSearch)
     {
-        throw new NotImplementedException();
+        return NetezzaCatalogSql.GetLegacyProcedureSourceSearchSql(GetSearchDatabase(), txtToSearch);
+    }
+
+    private string GetSearchDatabase()
+    {
+        if (string.IsNullOrWhiteSpace(DefaultDatabaseName))
+            throw new InvalidOperationException("Netezza source search requires a default database.");
+
+        return DefaultDatabaseName;
     }
 
     public Dictionary<string, List<(string name, string database, string DEFINITION, string DESCRIPTION)>> ViewCache { get; set; } = [];
-    public Dictionary<string, List<(string name, string database, string DEFINITION, string DESCRIPTION)>> ProcCache { get; set; } // not initialized on purpose !!! 
+    public Dictionary<string, List<(string name, string database, string DEFINITION, string DESCRIPTION)>> ProcCache { get; set; } = [];
 
     public Dictionary<string, List<(string name, string database, string extobjname, string DESCRIPTION)>> ExternalCache { get; set; } = [];
 
@@ -1195,11 +1345,11 @@ public sealed class Netezza : GeneralDb, INetezza
     /// <returns></returns>
     public async Task LoadSourceTextCache()
     {
-        ProcCache = [];
-        ProcCache.Clear();
-        ExternalCache.Clear();
-        SynonymCache.Clear();
-        ViewCache.Clear();
+        var procCache = new Dictionary<string, List<(string name, string database, string DEFINITION, string DESCRIPTION)>>(StringComparer.OrdinalIgnoreCase);
+        var externalCache = new Dictionary<string, List<(string name, string database, string extobjname, string DESCRIPTION)>>(StringComparer.OrdinalIgnoreCase);
+        var synonymCache = new Dictionary<string, List<(string name, string database, string refobjname, string DESCRIPTION)>>(StringComparer.OrdinalIgnoreCase);
+        var viewCache = new Dictionary<string, List<(string name, string database, string DEFINITION, string DESCRIPTION)>>(StringComparer.OrdinalIgnoreCase);
+        bool completed = false;
         await Task.Run(() =>
         {
             try
@@ -1226,15 +1376,16 @@ public sealed class Netezza : GeneralDb, INetezza
                             string name = rdr.GetString(2);
                             string definition = rdr.GetString(3);
                             string desc = rdr.GetValue(4).ToString();
-                            Monitor.Enter(ProcCache);
-                            if (!ProcCache.TryGetValue(key, out List<(string name, string database, string DEFINITION, string DESCRIPTION)> value))
+                            lock (procCache)
                             {
-                                value = [];
-                                ProcCache[key] = value;
-                            }
+                                if (!procCache.TryGetValue(key, out List<(string name, string database, string DEFINITION, string DESCRIPTION)> value))
+                                {
+                                    value = [];
+                                    procCache[key] = value;
+                                }
 
-                            value.Add((name, db, definition, desc));
-                            Monitor.Exit(ProcCache);
+                                value.Add((name, db, definition, desc));
+                            }
                         }
                     }
                     //externals
@@ -1248,15 +1399,16 @@ public sealed class Netezza : GeneralDb, INetezza
                             string name = rdr.GetString(2);
                             string definition = rdr.GetString(3);
                             string desc = rdr.GetValue(4).ToString();
-                            Monitor.Enter(ExternalCache);
-                            if (!ExternalCache.TryGetValue(key, out List<(string name, string database, string extobjname, string DESCRIPTION)> value))
+                            lock (externalCache)
                             {
-                                value = [];
-                                ExternalCache[key] = value;
-                            }
+                                if (!externalCache.TryGetValue(key, out List<(string name, string database, string extobjname, string DESCRIPTION)> value))
+                                {
+                                    value = [];
+                                    externalCache[key] = value;
+                                }
 
-                            value.Add((name, db, definition, desc));
-                            Monitor.Exit(ExternalCache);
+                                value.Add((name, db, definition, desc));
+                            }
                         }
                     }
                     //synonyms
@@ -1270,15 +1422,16 @@ public sealed class Netezza : GeneralDb, INetezza
                             string name = rdr.GetString(2);
                             string definition = rdr.GetString(3);
                             string desc = rdr.GetValue(4).ToString();
-                            Monitor.Enter(SynonymCache);
-                            if (!SynonymCache.TryGetValue(key, out List<(string name, string database, string refobjname, string DESCRIPTION)> value))
+                            lock (synonymCache)
                             {
-                                value = [];
-                                SynonymCache[key] = value;
-                            }
+                                if (!synonymCache.TryGetValue(key, out List<(string name, string database, string refobjname, string DESCRIPTION)> value))
+                                {
+                                    value = [];
+                                    synonymCache[key] = value;
+                                }
 
-                            value.Add((name, db, definition, desc));
-                            Monitor.Exit(SynonymCache);
+                                value.Add((name, db, definition, desc));
+                            }
                         }
                     }
                     //views
@@ -1292,23 +1445,33 @@ public sealed class Netezza : GeneralDb, INetezza
                             string name = rdr.GetString(2);
                             string definition = rdr.GetString(3);
                             string desc = rdr.GetValue(4).ToString();
-                            Monitor.Enter(ViewCache);
-                            if (!ViewCache.TryGetValue(key, out List<(string name, string database, string DEFINITION, string DESCRIPTION)> value))
+                            lock (viewCache)
                             {
-                                value = [];
-                                ViewCache[key] = value;
-                            }
+                                if (!viewCache.TryGetValue(key, out List<(string name, string database, string DEFINITION, string DESCRIPTION)> value))
+                                {
+                                    value = [];
+                                    viewCache[key] = value;
+                                }
 
-                            value.Add((name, db, definition, desc));
-                            Monitor.Exit(ViewCache);
+                                value.Add((name, db, definition, desc));
+                            }
                         }
                     }
                 });
+                completed = true;
             }
             catch (Exception ex)
             {
                 _logger.Log(ex.Message);
             }
         });
+
+        if (completed)
+        {
+            ProcCache = procCache;
+            ExternalCache = externalCache;
+            SynonymCache = synonymCache;
+            ViewCache = viewCache;
+        }
     }
 }

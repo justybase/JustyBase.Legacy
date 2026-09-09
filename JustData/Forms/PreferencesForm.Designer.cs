@@ -132,6 +132,7 @@
             nEstimatedWarningInterval = new System.Windows.Forms.NumericUpDown();
             nestimatedWarning = new System.Windows.Forms.NumericUpDown();
             nlongQueryWarning = new System.Windows.Forms.NumericUpDown();
+            cbDoNotWarnFullUpdateDelete = new System.Windows.Forms.CheckBox();
             tabResults = new System.Windows.Forms.TabPage();
             splitContainer1 = new System.Windows.Forms.SplitContainer();
             groupRes1 = new System.Windows.Forms.GroupBox();
@@ -1229,6 +1230,16 @@
             nlongQueryWarning.TabIndex = 0;
             nlongQueryWarning.ThousandsSeparator = true;
             this.nlongQueryWarning.Value = new decimal(new int[] { 15, 0, 0, 0 });
+            //
+            // cbDoNotWarnFullUpdateDelete
+            //
+            cbDoNotWarnFullUpdateDelete.AutoSize = true;
+            cbDoNotWarnFullUpdateDelete.Name = "cbDoNotWarnFullUpdateDelete";
+            cbDoNotWarnFullUpdateDelete.Size = new System.Drawing.Size(260, 19);
+            cbDoNotWarnFullUpdateDelete.TabIndex = 8;
+            cbDoNotWarnFullUpdateDelete.Text = "Do not warn before UPDATE/DELETE/DROP";
+            cbDoNotWarnFullUpdateDelete.UseVisualStyleBackColor = true;
+            toolTip1.SetToolTip(cbDoNotWarnFullUpdateDelete, "Disables confirmation dialogs for destructive UPDATE, DELETE and DROP statements.");
             // 
             // cbLoadSourcesOnStartup
             // 
@@ -1673,6 +1684,7 @@
         private System.Windows.Forms.NumericUpDown nEstimatedWarningInterval;
         private System.Windows.Forms.NumericUpDown nestimatedWarning;
         private System.Windows.Forms.NumericUpDown nlongQueryWarning;
+        private System.Windows.Forms.CheckBox cbDoNotWarnFullUpdateDelete;
         private System.Windows.Forms.Label label21;
         private System.Windows.Forms.Label label20;
         private System.Windows.Forms.Label label19;
