@@ -22,6 +22,35 @@ public sealed partial class SqlPreprocessingService : ISqlPreprocessingService
         }
     }
 
+    /// <summary>
+    /// Returns an offset-preserving SQL view for authoring services. Legacy
+    /// ampersand declarations are application directives rather than SQL
+    /// statements, so they are blanked out before the SQL parser sees them.
+    /// Newlines are retained so diagnostics continue to point at the original
+    /// document locations.
+    /// </summary>
+    public static string RemoveAmpersandDeclarationsForAuthoring(string sql)
+    {
+        if (string.IsNullOrEmpty(sql))
+            return sql;
+
+        IReadOnlyList<AmpersandDeclaration> declarations = FindAmpersandDeclarations(sql);
+        if (declarations.Count == 0)
+            return sql;
+
+        var result = new StringBuilder(sql);
+        foreach (AmpersandDeclaration declaration in declarations)
+        {
+            for (int index = declaration.Start; index < declaration.End; index++)
+            {
+                if (result[index] is not '\r' and not '\n')
+                    result[index] = ' ';
+            }
+        }
+
+        return result.ToString();
+    }
+
     public async Task<PreprocessResult> PreprocessAsync(
         PreprocessRequest request,
         IVariablePromptService? promptService = null,
@@ -132,30 +161,21 @@ public sealed partial class SqlPreprocessingService : ISqlPreprocessingService
         Dictionary<string, string> updatedGlobal,
         CancellationToken cancellationToken)
     {
-        MatchCollection declarations = AmpersandDeclarationRegex().Matches(sql);
+        IReadOnlyList<AmpersandDeclaration> declarations = FindAmpersandDeclarations(sql);
         if (declarations.Count == 0)
             return sql;
 
         var result = new StringBuilder(sql.Length);
         int copiedThrough = 0;
 
-        foreach (Match declaration in declarations)
+        foreach (AmpersandDeclaration declaration in declarations)
         {
-            result.Append(sql, copiedThrough, declaration.Index - copiedThrough);
-
-            // A line that looks like a declaration inside a quoted literal or
-            // comment is ordinary SQL text and must not be consumed.
-            if (LegacyScriptDialectAdapter.IsInsideQuotedLiteral(sql, declaration.Index))
-            {
-                result.Append(declaration.Value);
-                copiedThrough = declaration.Index + declaration.Length;
-                continue;
-            }
+            result.Append(sql, copiedThrough, declaration.Start - copiedThrough);
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            string variableName = '&' + declaration.Groups["name"].Value;
-            string expression = declaration.Groups["value"].Value.Trim();
+            string variableName = declaration.Name;
+            string expression = declaration.Expression;
             string variableValue;
 
             if (TryExtractSqlCommand(
@@ -180,7 +200,7 @@ public sealed partial class SqlPreprocessingService : ISqlPreprocessingService
 
             knownVariables[variableName] = variableValue;
             updatedGlobal[variableName] = variableValue;
-            copiedThrough = declaration.Index + declaration.Length;
+            copiedThrough = declaration.End;
         }
 
         result.Append(sql, copiedThrough, sql.Length - copiedThrough);
@@ -260,10 +280,14 @@ public sealed partial class SqlPreprocessingService : ISqlPreprocessingService
         if (string.IsNullOrWhiteSpace(expression))
             return string.Empty;
 
+        string candidate = expression.Trim();
+        if (IsSqlStringLiteral(candidate))
+            return candidate;
+
         try
         {
             using var table = new DataTable();
-            object? evaluated = table.Compute(expression, string.Empty);
+            object? evaluated = table.Compute(candidate, string.Empty);
             return evaluated?.ToString() ?? string.Empty;
         }
         catch
@@ -514,8 +538,252 @@ public sealed partial class SqlPreprocessingService : ISqlPreprocessingService
     {
         string content = value;
         if (content.Length >= 2 && content[0] == '\'' && content[^1] == '\'')
-            content = content[1..^1];
+            content = content[1..^1].Replace("''", "'", StringComparison.Ordinal);
         return content.Replace("'", "''", StringComparison.Ordinal);
+    }
+
+    private static bool IsSqlStringLiteral(string value)
+    {
+        if (value.Length < 2 || value[0] != '\'' || value[^1] != '\'')
+            return false;
+
+        for (int index = 1; index < value.Length - 1; index++)
+        {
+            if (value[index] != '\'')
+                continue;
+
+            if (index + 1 < value.Length - 1 && value[index + 1] == '\'')
+            {
+                index++;
+                continue;
+            }
+
+            return false;
+        }
+
+        return true;
+    }
+
+    private static IReadOnlyList<AmpersandDeclaration> FindAmpersandDeclarations(string sql)
+    {
+        var declarations = new List<AmpersandDeclaration>();
+
+        for (int index = 0; index < sql.Length; index++)
+        {
+            char current = sql[index];
+            if (current == '\'')
+            {
+                index = SkipSingleQuotedLiteral(sql, index) - 1;
+                continue;
+            }
+
+            if (current == '"')
+            {
+                index = SkipDoubleQuotedLiteral(sql, index) - 1;
+                continue;
+            }
+
+            if (current == '-' && index + 1 < sql.Length && sql[index + 1] == '-')
+            {
+                index = SkipLineComment(sql, index) - 1;
+                continue;
+            }
+
+            if (current == '/' && index + 1 < sql.Length && sql[index + 1] == '*')
+            {
+                index = SkipBlockComment(sql, index) - 1;
+                continue;
+            }
+
+            if (!IsDeclareKeywordAt(sql, index) || !IsDeclarationBoundary(sql, index))
+                continue;
+
+            if (!TryReadAmpersandDeclaration(sql, index, out AmpersandDeclaration declaration))
+                continue;
+
+            declarations.Add(declaration);
+            index = declaration.End - 1;
+        }
+
+        return declarations;
+    }
+
+    private static bool IsDeclareKeywordAt(string sql, int index) =>
+        index + 7 <= sql.Length
+        && sql.AsSpan(index, 7).Equals("declare".AsSpan(), StringComparison.OrdinalIgnoreCase)
+        && (index + 7 == sql.Length || char.IsWhiteSpace(sql[index + 7]));
+
+    private static bool IsDeclarationBoundary(string sql, int index)
+    {
+        if (index == 0)
+            return true;
+
+        int previous = index - 1;
+        while (previous >= 0 && sql[previous] is ' ' or '\t')
+            previous--;
+
+        return previous < 0 || sql[previous] is ';' or '\r' or '\n';
+    }
+
+    private static bool TryReadAmpersandDeclaration(
+        string sql,
+        int start,
+        out AmpersandDeclaration declaration)
+    {
+        int cursor = SkipWhitespace(sql, start + 7);
+        if (cursor >= sql.Length || sql[cursor] != '&')
+        {
+            declaration = default;
+            return false;
+        }
+
+        int nameStart = cursor++;
+        if (cursor >= sql.Length || !(char.IsLetter(sql[cursor]) || sql[cursor] == '_'))
+        {
+            declaration = default;
+            return false;
+        }
+
+        cursor++;
+        while (cursor < sql.Length && (char.IsLetterOrDigit(sql[cursor]) || sql[cursor] == '_'))
+            cursor++;
+
+        string name = sql[nameStart..cursor];
+        cursor = SkipWhitespace(sql, cursor);
+        if (cursor >= sql.Length || sql[cursor] != '=')
+        {
+            declaration = default;
+            return false;
+        }
+
+        cursor = SkipWhitespace(sql, cursor + 1);
+        int expressionStart = cursor;
+        int expressionEnd = cursor;
+        int declarationEnd = cursor;
+
+        while (cursor < sql.Length)
+        {
+            char current = sql[cursor];
+            if (current == '\'')
+            {
+                cursor = SkipSingleQuotedLiteral(sql, cursor);
+                continue;
+            }
+
+            if (current == '"')
+            {
+                cursor = SkipDoubleQuotedLiteral(sql, cursor);
+                continue;
+            }
+
+            if (current == '-' && cursor + 1 < sql.Length && sql[cursor + 1] == '-')
+            {
+                expressionEnd = TrimEnd(sql, expressionStart, cursor);
+                declarationEnd = cursor;
+                break;
+            }
+
+            if (current == '/' && cursor + 1 < sql.Length && sql[cursor + 1] == '*')
+            {
+                cursor = SkipBlockComment(sql, cursor);
+                continue;
+            }
+
+            if (current == ';')
+            {
+                expressionEnd = TrimEnd(sql, expressionStart, cursor);
+                declarationEnd = cursor + 1;
+                break;
+            }
+
+            if (current is '\r' or '\n')
+            {
+                expressionEnd = TrimEnd(sql, expressionStart, cursor);
+                declarationEnd = cursor;
+                break;
+            }
+
+            cursor++;
+        }
+
+        if (cursor >= sql.Length)
+        {
+            expressionEnd = TrimEnd(sql, expressionStart, sql.Length);
+            declarationEnd = sql.Length;
+        }
+
+        if (expressionEnd <= expressionStart)
+        {
+            declaration = default;
+            return false;
+        }
+
+        declaration = new AmpersandDeclaration(
+            Start: start,
+            End: declarationEnd,
+            Name: name,
+            Expression: sql[expressionStart..expressionEnd]);
+        return true;
+    }
+
+    private static int SkipWhitespace(string sql, int index)
+    {
+        while (index < sql.Length && char.IsWhiteSpace(sql[index]))
+            index++;
+        return index;
+    }
+
+    private static int TrimEnd(string sql, int start, int end)
+    {
+        while (end > start && char.IsWhiteSpace(sql[end - 1]))
+            end--;
+        return end;
+    }
+
+    private static int SkipSingleQuotedLiteral(string sql, int start)
+    {
+        for (int index = start + 1; index < sql.Length; index++)
+        {
+            if (sql[index] != '\'')
+                continue;
+            if (index + 1 < sql.Length && sql[index + 1] == '\'')
+            {
+                index++;
+                continue;
+            }
+            return index + 1;
+        }
+
+        return sql.Length;
+    }
+
+    private static int SkipDoubleQuotedLiteral(string sql, int start)
+    {
+        for (int index = start + 1; index < sql.Length; index++)
+        {
+            if (sql[index] != '"')
+                continue;
+            if (index + 1 < sql.Length && sql[index + 1] == '"')
+            {
+                index++;
+                continue;
+            }
+            return index + 1;
+        }
+
+        return sql.Length;
+    }
+
+    private static int SkipLineComment(string sql, int start)
+    {
+        int newline = sql.IndexOfAny(['\r', '\n'], start + 2);
+        return newline < 0 ? sql.Length : newline;
+    }
+
+    private static int SkipBlockComment(string sql, int start)
+    {
+        int end = sql.IndexOf("*/", start + 2, StringComparison.Ordinal);
+        return end < 0 ? sql.Length : end + 2;
     }
 
     private async Task<string> ResolveUnknownVariablesAsync(
@@ -564,11 +832,6 @@ public sealed partial class SqlPreprocessingService : ISqlPreprocessingService
     private static partial Regex VariableRefRegex();
 
     [GeneratedRegex(
-        @"^[ \t]*declare\s+&(?<name>[A-Za-z_]\w*)\s*=\s*(?<value>.+?)[ \t]*;?[ \t]*(?=\r?$)",
-        RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex AmpersandDeclarationRegex();
-
-    [GeneratedRegex(
         @"^[ \t]*__SessionVar__(?<name>\$\w+)\s*=\s*(?<value>.+?)[ \t]*;?[ \t]*(?=\r?$)",
         RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex LegacySessionVarDefinitionRegex();
@@ -589,4 +852,10 @@ public sealed partial class SqlPreprocessingService : ISqlPreprocessingService
         public async ValueTask<object?> EvaluateSqlAsync(string sql, CancellationToken cancellationToken = default)
             => await evaluate(sql).ConfigureAwait(false);
     }
+
+    private readonly record struct AmpersandDeclaration(
+        int Start,
+        int End,
+        string Name,
+        string Expression);
 }

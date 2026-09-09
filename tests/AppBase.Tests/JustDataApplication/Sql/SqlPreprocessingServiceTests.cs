@@ -257,6 +257,49 @@ public sealed class SqlPreprocessingServiceTests
     }
 
     [Fact]
+    public async Task PreprocessAsync_DeclareAmpersandLiteral_preserves_sql_literal_for_bare_use()
+    {
+        var service = new SqlPreprocessingService();
+
+        var result = await service.PreprocessAsync(CreateRequest(
+            "declare &SOME_VAR = 'test';\nSELECT &SOME_VAR"));
+
+        Assert.Equal("\nSELECT 'test'", result.ProcessedSql);
+        Assert.Equal("'test'", result.UpdatedGlobalVariables["&SOME_VAR"]);
+    }
+
+    [Fact]
+    public async Task PreprocessAsync_DeclareAmpersandLiteral_supports_same_line_and_escaped_quotes()
+    {
+        var service = new SqlPreprocessingService();
+
+        var result = await service.PreprocessAsync(CreateRequest(
+            "declare &value = 'it''s; ready'; SELECT '&value' AS quoted, &value AS bare"));
+
+        Assert.Equal(" SELECT 'it''s; ready' AS quoted, 'it''s; ready' AS bare", result.ProcessedSql);
+        Assert.Equal("'it''s; ready'", result.UpdatedGlobalVariables["&value"]);
+    }
+
+    [Fact]
+    public async Task RemoveAmpersandDeclarationsForAuthoring_preserves_offsets_and_ignores_literals_and_comments()
+    {
+        const string sql = "SELECT 'declare &ignored = ''x'';';\n"
+            + "-- declare &also_ignored = 'y';\n"
+            + "declare &value = 'test';\n"
+            + "SELECT &value";
+
+        string normalized = SqlPreprocessingService.RemoveAmpersandDeclarationsForAuthoring(sql);
+
+        Assert.Equal(sql.Length, normalized.Length);
+        Assert.Contains("SELECT 'declare &ignored = ''x'';';", normalized);
+        Assert.Contains("-- declare &also_ignored = 'y';", normalized);
+        Assert.Contains("SELECT &value", normalized);
+        Assert.DoesNotContain("declare &value", normalized, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(sql.IndexOf("SELECT &value", StringComparison.Ordinal),
+            normalized.IndexOf("SELECT &value", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task PreprocessAsync_DeclareAmpersandSqlResult_without_evaluator_fails_before_sql_execution()
     {
         var service = new SqlPreprocessingService();

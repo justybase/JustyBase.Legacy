@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0.21] - 2026-09-09
+
+### Changed
+- Updated stable NuGet package dependencies.
+
+### Fixed
+- Improved SQL authoring handling for legacy ampersand declarations.
+
 ## [1.1.0.20] - 2026-08-27
 
 ### Added

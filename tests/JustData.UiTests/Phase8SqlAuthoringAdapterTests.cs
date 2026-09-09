@@ -60,6 +60,42 @@ public sealed class Phase8SqlAuthoringAdapterTests
     }
 
     [Fact]
+    public async Task Lint_accepts_ampersand_variables_and_legacy_declarations()
+    {
+        var completion = CreateCompletion();
+        using var legacy = new LegacySqlAuthoringServices(completion);
+        var adapter = new NetezzaSqlAuthoringUseCaseAdapter(
+            new NetezzaSqlAuthoringUseCase(completion, legacy),
+            legacy);
+
+        SqlLintResult result = await adapter.LintAsync(new SqlLintRequest(
+            EditorDocumentId.New(),
+            "declare &SOME_VAR = 'test';\nSELECT &SOME_VAR"));
+
+        Assert.DoesNotContain(result.Diagnostics, diagnostic => diagnostic.Code == "LEX001");
+    }
+
+    [Fact]
+    public async Task Lint_does_not_treat_ampersand_variable_as_column_with_schema()
+    {
+        var completion = CreateCompletion();
+        completion.SchemaProvider.AddTable(new JustyBase.NetezzaSqlParser.Ast.TableInfo(
+            "ORDERS", "PUBLIC", "TESTDB",
+            Columns: [new JustyBase.NetezzaSqlParser.Ast.ColumnInfo("STATUS")]));
+
+        using var legacy = new LegacySqlAuthoringServices(completion);
+        var adapter = new NetezzaSqlAuthoringUseCaseAdapter(
+            new NetezzaSqlAuthoringUseCase(completion, legacy),
+            legacy);
+
+        SqlLintResult result = await adapter.LintAsync(new SqlLintRequest(
+            EditorDocumentId.New(),
+            "declare &SEARCHED = 'x';\nSELECT STATUS FROM TESTDB.PUBLIC.ORDERS WHERE STATUS LIKE &SEARCHED"));
+
+        Assert.DoesNotContain(result.Diagnostics, diagnostic => diagnostic.Code is "LEX001" or "SQL004");
+    }
+
+    [Fact]
     public async Task Completion_and_signature_requests_are_mapped_without_parser_types()
     {
         var completion = CreateCompletion();

@@ -10,6 +10,7 @@ using JustyBase.NetezzaSqlParser.Formatter;
 using JustyBase.NetezzaSqlParser.Lexer;
 using JustyBase.NetezzaSqlParser.Linter;
 using JustyBase.NetezzaSqlParser.Parser;
+using JustData.Application.Sql;
 using SQL.Formatter;
 
 namespace AppBase.Data.Completion;
@@ -132,6 +133,7 @@ public sealed class LegacySqlAuthoringServices : IDisposable
         int caretOffset = -1)
     {
         sql ??= string.Empty;
+        string authoringSql = SqlPreprocessingService.RemoveAmpersandDeclarationsForAuthoring(sql);
         int lineCount = SqlPerformancePolicy.ResolveLineCountForLintGate(sql, knownLineCount);
         if (SqlPerformancePolicy.ShouldSkipLint(invocation, lineCount, sql.Length))
             return Task.FromResult<IReadOnlyList<LintIssue>>([]);
@@ -147,7 +149,7 @@ public sealed class LegacySqlAuthoringServices : IDisposable
             if (SqlPerformancePolicy.ShouldRunCheapLintOnly(lineCount, sql.Length))
             {
                 result = new LintResult(
-                    lintEngine.RunCheapRules(sql),
+                    lintEngine.RunCheapRules(authoringSql),
                     lintEngine.Queue.CheapRules.Count,
                     0,
                     0,
@@ -156,14 +158,14 @@ public sealed class LegacySqlAuthoringServices : IDisposable
             else
             {
                 var config = new LintConfig(
-                    Sql: sql,
+                    Sql: authoringSql,
                     Schema: _completionServices.SchemaProvider,
                     DocumentUri: lintDocumentUri,
                     MetadataEpoch: schemaEpoch,
                     CancellationToken: cancellationToken,
                     Dialect: dialect,
                     ActiveDatabase: databaseName);
-                ParsingCoordinator.GetOrCreate(lintDocumentUri, dialect).Parse(sql);
+                ParsingCoordinator.GetOrCreate(lintDocumentUri, dialect).Parse(authoringSql);
                 result = lintEngine.RunIncrementalLint(config);
             }
 
@@ -349,8 +351,9 @@ public sealed class LegacySqlAuthoringServices : IDisposable
 
                     int schemaEpoch = _completionServices.SchemaProvider.MetadataEpoch;
                     LintEngine lintEngine = GetLintEngine(dialect);
+                    string authoringSql = SqlPreprocessingService.RemoveAmpersandDeclarationsForAuthoring(sql);
                     var config = new LintConfig(
-                        Sql: sql,
+                        Sql: authoringSql,
                         Schema: _completionServices.SchemaProvider,
                         DocumentUri: BuildLintDocumentUri(documentUri, dialect, databaseName),
                         MetadataEpoch: schemaEpoch,
@@ -367,13 +370,13 @@ public sealed class LegacySqlAuthoringServices : IDisposable
                     }
                     else if (SqlPerformancePolicy.ShouldRunCheapLintOnly(lineCount, length))
                     {
-                        var cheapIssues = lintEngine.RunCheapRules(sql);
+                        var cheapIssues = lintEngine.RunCheapRules(authoringSql);
                         result = new LintResult(cheapIssues, lintEngine.Queue.CheapRules.Count, 0, 0, false);
                     }
                     else
                     {
                         ParsingCoordinator.GetOrCreate(
-                            config.DocumentUri, dialect).Parse(sql);
+                            config.DocumentUri, dialect).Parse(authoringSql);
                         result = lintEngine.RunIncrementalLint(config);
                     }
 
