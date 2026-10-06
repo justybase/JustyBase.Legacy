@@ -1,7 +1,6 @@
 using AppBase.Common;
 using JustData.ViewModels.Ai;
 using JustyBase.Ai.Models;
-using Microsoft.Web.WebView2.WinForms;
 using System.ComponentModel;
 using System.Text;
 
@@ -15,7 +14,7 @@ public sealed class AiChatPanel : UserControl
 {
     private readonly ChatViewModel _viewModel;
     private readonly System.Windows.Forms.Timer _renderTimer;
-    private readonly WebView2 _webView = new();
+    private readonly WebView2AotHost _webView = new(Path.Combine(Program.LogDirectory, "WebView2"));
     private readonly TextBox _fallbackView = new()
     {
         Multiline = true,
@@ -166,7 +165,6 @@ public sealed class AiChatPanel : UserControl
         header.Controls.Add(backendLabel, 0, 0);
 
         _backendCombo = MakeCombo(0, "aiChatPanelBackend");
-        _backendCombo.DisplayMember = nameof(ChatBackendOption.DisplayName);
         _backendCombo.Margin = comboMargin;
         _backendCombo.Anchor = AnchorStyles.Left | AnchorStyles.Right;
         header.Controls.Add(_backendCombo, 1, 0);
@@ -197,7 +195,6 @@ public sealed class AiChatPanel : UserControl
         header.Controls.Add(modeLabel, 0, 1);
 
         _modeCombo = MakeCombo(0, "aiChatPanelMode");
-        _modeCombo.DisplayMember = nameof(ChatModeConfig.DisplayName);
         _modeCombo.Margin = comboMargin;
         _modeCombo.Anchor = AnchorStyles.Left | AnchorStyles.Right;
         header.Controls.Add(_modeCombo, 1, 1);
@@ -270,11 +267,18 @@ public sealed class AiChatPanel : UserControl
         };
         _modeCombo.SelectedIndexChanged += (_, _) =>
         {
-            if (_modeCombo.SelectedItem is ChatModeConfig mode)
-                _viewModel.CurrentMode = mode.Mode;
+            if (_modeCombo.SelectedItem is ChatModeOption option)
+                _viewModel.CurrentMode = option.Config.Mode;
         };
 
         return header;
+    }
+
+    // ChatModeConfig lives in the shared library, so a local wrapper provides the
+    // display text via ToString() instead of ComboBox.DisplayMember reflection.
+    private sealed record ChatModeOption(ChatModeConfig Config)
+    {
+        public override string ToString() => Config.DisplayName;
     }
 
     private Control BuildComposerPanel()
@@ -469,40 +473,27 @@ public sealed class AiChatPanel : UserControl
 
     private void HookWebView()
     {
-        try
+        _webView.Ready += (_, _) =>
         {
-            _ = InitializeWebViewAsync();
-        }
-        catch
-        {
-            ShowFallback();
-        }
-    }
-
-    private async Task InitializeWebViewAsync()
-    {
-        try
-        {
-            await _webView.EnsureCoreWebView2Async();
-            _webView.CoreWebView2.WebMessageReceived += (_, e) =>
-            {
-                var payload = e.TryGetWebMessageAsString();
-                if (payload == "approve")
-                {
-                    _viewModel.ConfirmToolCommand.Execute(true);
-                }
-                else if (payload == "deny")
-                {
-                    _viewModel.ConfirmToolCommand.Execute(false);
-                }
-            };
             _webViewReady = true;
             OnMessagesChanged();
-        }
-        catch
+        };
+        _webView.Failed += (_, exception) =>
         {
+            Program.LogStartup($"WebView2 initialization failed: {exception.Message}");
             ShowFallback();
-        }
+        };
+        _webView.MessageReceived += (_, payload) =>
+        {
+            if (payload == "approve")
+            {
+                _viewModel.ConfirmToolCommand.Execute(true);
+            }
+            else if (payload == "deny")
+            {
+                _viewModel.ConfirmToolCommand.Execute(false);
+            }
+        };
     }
 
     private void ShowFallback()
@@ -719,11 +710,12 @@ public sealed class AiChatPanel : UserControl
         if (_modeCombo!.Items.Count == 0)
         {
             foreach (var mode in _viewModel.AvailableModes)
-                _modeCombo.Items.Add(mode);
+                _modeCombo.Items.Add(new ChatModeOption(mode));
         }
 
-        _modeCombo.SelectedItem = _viewModel.AvailableModes
-            .FirstOrDefault(m => m.Mode == _viewModel.CurrentMode);
+        _modeCombo.SelectedItem = _modeCombo.Items
+            .OfType<ChatModeOption>()
+            .FirstOrDefault(option => option.Config.Mode == _viewModel.CurrentMode);
     }
 
     private void ShowCopilotVerificationDialog(string code, string url)

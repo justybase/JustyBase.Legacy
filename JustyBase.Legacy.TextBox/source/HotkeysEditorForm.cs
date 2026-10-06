@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Data;
 using System.Drawing;
 using System.Text;
@@ -10,7 +9,7 @@ namespace FastColoredTextBoxNS
 {
     public partial class HotkeysEditorForm : Form
     {
-        readonly BindingList<HotkeyWrapper> wrappers = new BindingList<HotkeyWrapper>();
+        readonly List<HotkeyWrapper> wrappers = new List<HotkeyWrapper>();
 
         public HotkeysEditorForm(HotkeysMapping hotkeys, string message = "")
         {
@@ -20,8 +19,62 @@ namespace FastColoredTextBoxNS
                 this.Text += (" " + message);
             }
 
+            // The grid is intentionally unbound: DataGridView.DataSource with
+            // column DataPropertyName uses reflection (PropertyDescriptors), which
+            // is disabled under trimming/Native AOT. Rows are filled manually and
+            // edits are written back to the wrapper list.
+            dgv.CurrentCellDirtyStateChanged += Dgv_CurrentCellDirtyStateChanged;
+            dgv.CellValueChanged += Dgv_CellValueChanged;
+
             BuildWrappers(hotkeys);
-            dgv.DataSource = wrappers;
+            RebuildGrid();
+        }
+
+        private void RebuildGrid()
+        {
+            dgv.Rows.Clear();
+            foreach (var wrapper in wrappers)
+            {
+                dgv.Rows.Add(wrapper.Modifiers, wrapper.Key, wrapper.Action);
+            }
+        }
+
+        private void Dgv_CurrentCellDirtyStateChanged(object? sender, EventArgs e)
+        {
+            if (dgv.IsCurrentCellDirty)
+            {
+                dgv.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            }
+        }
+
+        private void Dgv_CellValueChanged(object? sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= wrappers.Count || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            var wrapper = wrappers[e.RowIndex];
+            switch (e.ColumnIndex)
+            {
+                case 0:
+                    wrapper.Modifiers = dgv[0, e.RowIndex].Value as string ?? string.Empty;
+                    break;
+                case 1:
+                    if (dgv[1, e.RowIndex].Value is Keys key)
+                    {
+                        wrapper.Key = key;
+                    }
+
+                    break;
+                case 2:
+                    if (dgv[2, e.RowIndex].Value is FCTBAction action)
+                    {
+                        wrapper.Action = action;
+                    }
+
+                    break;
+            }
         }
 
         int CompereKeys(Keys key1, Keys key2)
@@ -49,6 +102,8 @@ namespace FastColoredTextBoxNS
         /// <returns></returns>
         public HotkeysMapping GetHotkeys()
         {
+            dgv.EndEdit();
+
             var result = new HotkeysMapping();
             foreach (var w in wrappers)
                 result[w.ToKeyData()] = w.Action;
@@ -58,7 +113,9 @@ namespace FastColoredTextBoxNS
 
         private void btAdd_Click(object sender, EventArgs e)
         {
-            wrappers.Add(new HotkeyWrapper(Keys.None, FCTBAction.None));
+            var wrapper = new HotkeyWrapper(Keys.None, FCTBAction.None);
+            wrappers.Add(wrapper);
+            dgv.Rows.Add(wrapper.Modifiers, wrapper.Key, wrapper.Action);
         }
 
         private void dgv_RowsAdded(object sender, DataGridViewRowsAddedEventArgs e)
@@ -92,12 +149,24 @@ namespace FastColoredTextBoxNS
             HotkeysMapping h = new HotkeysMapping();
             h.InitDefault();
             BuildWrappers(h);
+            RebuildGrid();
         }
 
         private void btRemove_Click(object sender, EventArgs e)
         {
             for (int i = dgv.RowCount - 1; i >= 0; i--)
-                if (dgv.Rows[i].Selected) dgv.Rows.RemoveAt(i);
+            {
+                if (!dgv.Rows[i].Selected)
+                {
+                    continue;
+                }
+
+                dgv.Rows.RemoveAt(i);
+                if (i < wrappers.Count)
+                {
+                    wrappers.RemoveAt(i);
+                }
+            }
         }
 
         private void HotkeysEditorForm_FormClosing(object sender, FormClosingEventArgs e)

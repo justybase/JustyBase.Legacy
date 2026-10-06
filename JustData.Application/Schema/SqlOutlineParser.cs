@@ -1,8 +1,6 @@
 using JustyBase.NetezzaSqlParser.Ast;
 using JustyBase.NetezzaSqlParser.Lexer;
 using JustyBase.NetezzaSqlParser.Parser;
-using System.Collections;
-using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Collections.Concurrent;
 
@@ -149,22 +147,6 @@ public static class SqlOutlineParser
             statement is ProcedureIfStatement or ProcedureLoopStatement or ProcedureWhileStatement or ProcedureForStatement
                 ? OutlineNodeKind.Block : OutlineNodeKind.Statement,
             Absolute(statement.Position), Math.Max(0, sql.Length - Absolute(statement.Position)));
-
-    private static void AddExpressionSubqueries(object? value, string sql, ICollection<OutlineNode> output)
-    {
-        if (value is null) return;
-        if (value is SubqueryExpression subquery)
-        {
-            output.Add(new OutlineNode("SUBQUERY", OutlineNodeKind.Subquery, Absolute(subquery.Position),
-                Math.Max(0, sql.Length - Absolute(subquery.Position)), Children: BuildSelect(subquery.Query, sql)));
-            return;
-        }
-        if (value is IEnumerable enumerable && value is not string)
-            foreach (object? item in enumerable) AddExpressionSubqueries(item, sql, output);
-        else if (value is AstNode ast)
-            foreach (PropertyInfo property in ast.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
-                if (property.Name != "Position") AddExpressionSubqueries(property.GetValue(ast), sql, output);
-    }
 
     private static string Qualified(TableName table) => string.Join(".", new[] { table.Database, table.Schema, table.Name }.Where(x => !string.IsNullOrWhiteSpace(x)));
     private static int Absolute(SourcePosition? position) => position?.Absolute ?? 0;

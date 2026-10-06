@@ -100,7 +100,6 @@ public static class Program
             TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
             Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
-            RegisterComWrappers();
 
             // Kill llama-server children orphaned by a previously crashed or force-killed
             // instance (they hold VRAM/RAM and are never auto-exited). Only servers whose
@@ -154,10 +153,6 @@ public static class Program
                 catch { /* Dispose errors are non-fatal during shutdown */ }
             }
         }
-    }
-
-    private static void RegisterComWrappers()
-    {
     }
 
     /// <summary>

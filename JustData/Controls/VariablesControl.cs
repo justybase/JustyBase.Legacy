@@ -5,7 +5,6 @@ using JustyBaseLegacy.UI.Helpers;
 using JustData.Application.Variables;
 using JustData.ViewModels.Variables;
 using System;
-using System.ComponentModel;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
@@ -52,7 +51,7 @@ namespace JustyBaseLegacy.UI.Controls
             _colorTheme = colorTheme;
 
             InitializeComponent();
-            _viewModel.Entries.ListChanged += Entries_ListChanged;
+            _viewModel.EntriesChanged += Entries_Changed;
             _viewModel.InsertVariableRequested += ViewModel_InsertVariableRequested;
             InitializeVariablesControl();
         }
@@ -213,10 +212,9 @@ namespace JustyBaseLegacy.UI.Controls
             }
 
             _viewModel.Refresh(_documentKeyProvider());
-            SyncRowsFromViewModel();
         }
 
-        private void Entries_ListChanged(object? sender, ListChangedEventArgs e)
+        private void Entries_Changed(object? sender, EventArgs e)
         {
             if (IsDisposed)
             {

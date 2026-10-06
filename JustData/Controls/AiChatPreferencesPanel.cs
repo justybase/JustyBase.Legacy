@@ -14,11 +14,22 @@ public sealed class AiChatPreferencesPanel : UserControl
 {
     private readonly IApplicationSettingsContext _settings;
     private readonly EmbeddedChatModelCatalog? _chatCatalog;
-    private readonly object? _chatBootstrap;
+    private readonly IEmbeddedChatModelBootstrapService? _chatBootstrap;
     private static readonly ToolTip toolTip = new();
     private bool _loading;
 
-    private sealed record ComboOption(string Id, string Name);
+    // ToString() supplies the ComboBox display text: DisplayMember uses reflection,
+    // which is disabled under trimming/Native AOT.
+    private sealed record ComboOption(string Id, string Name)
+    {
+        public override string ToString() => Name;
+    }
+
+    // ModelDescriptor comes from the shared library, so wrap it to provide display text.
+    private sealed record ModelOption(ModelDescriptor Model)
+    {
+        public override string ToString() => Model.DisplayName;
+    }
 
     private CheckBox? _enableChat;
     private ComboBox? _backend;
@@ -56,7 +67,7 @@ public sealed class AiChatPreferencesPanel : UserControl
     public AiChatPreferencesPanel(
         IApplicationSettingsContext settings,
         EmbeddedChatModelCatalog? chatCatalog = null,
-        object? chatBootstrap = null)
+        IEmbeddedChatModelBootstrapService? chatBootstrap = null)
     {
         _settings = settings;
         _chatCatalog = chatCatalog;
@@ -92,7 +103,6 @@ public sealed class AiChatPreferencesPanel : UserControl
                 new ComboOption("openai-compatible", "OpenAI-compatible server"),
                 new ComboOption("embedded", "Embedded model (local)")
             });
-            _backend.DisplayMember = "Name";
             _backend.SelectedIndexChanged += (_, _) =>
             {
                 if (!_loading)
@@ -109,7 +119,6 @@ public sealed class AiChatPreferencesPanel : UserControl
                 new ComboOption("sqlfix", "SQL Fix"),
                 new ComboOption("simple", "Simple")
             });
-            _defaultMode.DisplayMember = "Name";
             _autoConnect = AddCheckBox(body, "Auto-connect on start", "Connect to the selected provider when the app starts.", "aiChatAutoConnect");
             _historyLimit = AddNumeric(body, "History limit (messages)", 1, 100, "aiChatHistoryLimit");
             _promptOverride = AddMultiline(body, "System prompt override", "Optional text prepended to the mode prompt.", "aiChatPromptOverride");
@@ -209,15 +218,13 @@ public sealed class AiChatPreferencesPanel : UserControl
             {
                 foreach (var model in _chatCatalog.Models)
                 {
-                    _embeddedModel.Items.Add(model);
+                    _embeddedModel.Items.Add(new ModelOption(model));
                 }
-
-                _embeddedModel.DisplayMember = "DisplayName";
             }
 
             object? selectedModel = _embeddedModel.Items
-                .OfType<ModelDescriptor>()
-                .FirstOrDefault(model => string.Equals(model.Id, config.EmbeddedChatModelId, StringComparison.OrdinalIgnoreCase));
+                .OfType<ModelOption>()
+                .FirstOrDefault(option => string.Equals(option.Model.Id, config.EmbeddedChatModelId, StringComparison.OrdinalIgnoreCase));
             _embeddedModel.SelectedItem = selectedModel ?? config.EmbeddedChatModelId;
             UpdateEmbeddedDownloadStatus();
             UpdateProviderOptions();
@@ -252,8 +259,8 @@ public sealed class AiChatPreferencesPanel : UserControl
         config.AiChatMaxRetries = (int)_maxRetries!.Value;
         config.AiChatSystemPromptOverride = _promptOverride!.Text;
         config.EnableEmbeddedChatAi = string.Equals(providerId, "embedded", StringComparison.OrdinalIgnoreCase);
-        config.EmbeddedChatModelId = _embeddedModel!.SelectedItem is ModelDescriptor descriptor
-            ? descriptor.Id
+        config.EmbeddedChatModelId = _embeddedModel!.SelectedItem is ModelOption option
+            ? option.Model.Id
             : _embeddedModel.Text.Trim();
         config.EmbeddedChatGpuLayers = (int)_embeddedGpuLayers!.Value;
         config.EmbeddedChatCtxSize = (int)_embeddedCtxSize!.Value;
@@ -321,13 +328,14 @@ public sealed class AiChatPreferencesPanel : UserControl
 
     private async Task DownloadEmbeddedModelAsync()
     {
-        if (_chatBootstrap is null || _embeddedModel is null || _embeddedDownload is null || _embeddedCancel is null)
+        var bootstrap = _chatBootstrap;
+        if (bootstrap is null || _embeddedModel is null || _embeddedDownload is null || _embeddedCancel is null)
             return;
 
-        var model = _embeddedModel.SelectedItem as ModelDescriptor
+        var model = (_embeddedModel.SelectedItem as ModelOption)?.Model
             ?? _chatCatalog?.Models.FirstOrDefault(candidate =>
                 string.Equals(candidate.Id, _embeddedModel.Text.Trim(), StringComparison.OrdinalIgnoreCase))
-            ?? (ModelDescriptor)((dynamic)_chatBootstrap).CurrentModel;
+            ?? bootstrap.CurrentModel;
         if (model.RequiresLicenseAcceptance
             && !_settings.Config.EmbeddedChatAcceptedLicenseModelIds.Contains(model.Id, StringComparer.OrdinalIgnoreCase))
         {
@@ -363,11 +371,11 @@ public sealed class AiChatPreferencesPanel : UserControl
                 _embeddedProgress!.Value = Math.Clamp((int)Math.Round(update.Fraction * 100), 0, 100);
                 _embeddedStatus!.Text = update.Message;
             });
-            await ((dynamic)_chatBootstrap).EnsureModelAsync(model.Id, progress, _embeddedDownloadCts.Token).ConfigureAwait(true);
+            await bootstrap.EnsureModelAsync(model.Id, progress, _embeddedDownloadCts.Token).ConfigureAwait(true);
             if (CanUpdateDownloadUi)
             {
                 _embeddedProgress.Value = 100;
-                _embeddedStatus.Text = ((dynamic)_chatBootstrap).SelectedModelDiskStatus;
+                _embeddedStatus.Text = bootstrap.SelectedModelDiskStatus;
             }
         }
         catch (OperationCanceledException)
@@ -414,7 +422,7 @@ public sealed class AiChatPreferencesPanel : UserControl
     private void UpdateEmbeddedDownloadStatus()
     {
         if (CanUpdateDownloadUi && _embeddedStatus is not null && _chatBootstrap is not null)
-            _embeddedStatus.Text = ((dynamic)_chatBootstrap).SelectedModelDiskStatus;
+            _embeddedStatus.Text = _chatBootstrap.SelectedModelDiskStatus;
     }
 
     protected override void Dispose(bool disposing)

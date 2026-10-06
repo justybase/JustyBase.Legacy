@@ -32,7 +32,7 @@ internal sealed class PreferencesDockContent : DockContent
         JustyBase.Ai.Embedded.Download.IModelCatalog? fimCatalog = null,
         JustyBase.Ai.Embedded.Server.IFimModelBootstrapService? fimBootstrap = null,
         JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null,
-        object? chatBootstrap = null)
+        JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? chatBootstrap = null)
     {
         Text = "JustyBase Settings";
         TabText = "JustyBase Settings";

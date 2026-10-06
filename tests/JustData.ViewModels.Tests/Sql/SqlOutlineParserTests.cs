@@ -31,6 +31,14 @@ public sealed class SqlOutlineParserTests
     }
 
     [Fact]
+    public void Subquery_source_is_nested_under_select()
+    {
+        SqlOutline outline = SqlOutlineParser.Parse("SELECT * FROM (SELECT * FROM orders) t");
+        OutlineNode select = Assert.Single(outline.Nodes);
+        Assert.Contains(select.Children, node => node.Kind == OutlineNodeKind.Subquery);
+    }
+
+    [Fact]
     public void Cte_definition_positions_point_to_their_names()
     {
         const string sql = "WITH CTE1 AS (\n    SELECT * FROM DIMDATE\n)\n, CTE2 AS (\n    SELECT * FROM DIMDATE\n)\n\nSELECT * FROM CTE1 C\nWHERE C.CALENDARQUARTER > 0";

@@ -31,6 +31,17 @@
 		<PublishTrimmed>false</PublishTrimmed>
 		<PublishSingleFile>false</PublishSingleFile>
 	</PropertyGroup>
+	<!--
+		WinForms .resx files compiled with CustomResourceTypesSupport reference the
+		System.Resources.Extensions reader/set by assembly identity (Version=4.0.0.0)
+		in the .resources header. Nothing references that assembly statically, so
+		Native AOT trims it away and ResourceManager.GetObject fails with
+		"Could not resolve assembly". Rooting it keeps the custom-type resource
+		reader available in AOT builds.
+	-->
+	<ItemGroup Condition="'$(PublishAot)' == 'true'">
+		<TrimmerRootAssembly Include="System.Resources.Extensions" />
+	</ItemGroup>
 	<PropertyGroup Condition="'$(IncludeDB2)' == 'true'">
 		<DefineConstants>$(DefineConstants);INCLUDE_DB2</DefineConstants>
 	</PropertyGroup>
@@ -70,8 +81,22 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" />
 		<PackageReference Include="DockPanelSuite" />
 		<PackageReference Include="DockPanelSuite.ThemeVS2015" />
-		<PackageReference Include="Microsoft.Web.WebView2" />
+		<PackageReference Include="WebView2Aot" />
+		<PackageReference Include="DirectNAot" />
+		<PackageReference Include="DirectNAot.Extensions" />
+		<!-- Kept only as the versioned source of the native WebView2Loader.dll,
+		     which is embedded below so WebView2Utilities.Initialize can load it
+		     at runtime (works in JIT and Native AOT). -->
+		<PackageReference Include="Microsoft.Web.WebView2" GeneratePathProperty="true" PrivateAssets="all" ExcludeAssets="all" />
 		<PackageReference Include="Markdig" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- Native bootstrapper embedded so WebView2Utilities.Initialize can extract
+		     and load it under JIT and Native AOT without shipping a loose DLL. -->
+		<EmbeddedResource Include="$(PkgMicrosoft_Web_WebView2)\runtimes\win-x64\native\WebView2Loader.dll"
+		                  LogicalName="runtimes/win-x64/native/WebView2Loader.dll"
+		                  Condition="'$(PkgMicrosoft_Web_WebView2)' != ''" />
 	</ItemGroup>
 
 	<ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' == 'true'">

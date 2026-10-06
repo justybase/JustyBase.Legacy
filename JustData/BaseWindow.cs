@@ -432,7 +432,7 @@ namespace JustyBaseLegacy.UI
             , ChatViewModel? chatViewModel = null
             , JustyBase.Ai.Ports.ISqlDiagnosticsProvider? sqlDiagnosticsProvider = null
             , JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null
-            , object? chatBootstrap = null
+            , JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? chatBootstrap = null
             )
         {
             Program.LogStartup("BaseWindow ctor: begin");
