@@ -121,7 +121,6 @@
 
 	<Target Name="ValidateDb2Publishing" BeforeTargets="Publish" Condition="'$(IncludeDB2)' == 'true'">
 		<Error Condition="'$(UseAOT)' == 'true' or '$(PublishAot)' == 'true'" Text="Native AOT is not supported by this distribution. Publish self-contained with PublishAot=false." />
-		<Error Condition="'$(SelfContained)' != 'true'" Text="The default DB2 distribution must be self-contained." />
 	</Target>
 	<ItemGroup>
 		<Compile Update="Forms\DraggableTabControl.cs">
