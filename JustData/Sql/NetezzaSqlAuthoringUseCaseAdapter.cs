@@ -3,6 +3,7 @@ using JustData.Application.Editor;
 using JustData.Application.Sql;
 using JustyBase.NetezzaSqlParser.Authoring;
 using JustyBase.NetezzaSqlParser.Linter;
+using SqlTextEdit = JustData.Application.Sql.SqlTextEdit;
 
 namespace JustyBaseLegacy.UI.Sql;
 

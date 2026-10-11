@@ -1,6 +1,7 @@
 using JustData.Application.Editor;
 using JustData.Application.Sql;
 using JustyBase.NetezzaSqlParser.Authoring;
+using SqlTextEdit = JustData.Application.Sql.SqlTextEdit;
 
 namespace AppBase.Tests.JustDataApplication.Sql;
 

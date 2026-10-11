@@ -6,6 +6,7 @@ using AppBase.Data.Core.Enums;
 using AppBase.Data.Core.Interfaces;
 using AppBase.Data.Core.Models;
 using IBM.Data.Db2;
+using JustyBase.Db2.AdoNet;
 using System.Data;
 using System.Data.Common;
 using System.Text;
@@ -104,7 +105,7 @@ ORDER BY
             {
 
                 conn.Open();
-                using (var cmd = new DB2Command("SELECT DISTINCT DB_NAME FROM TABLE (MON_GET_MEMORY_SET ('DATABASE', NULL, -2))", conn))
+                using (var cmd = CreateCommand("SELECT DISTINCT DB_NAME FROM TABLE (MON_GET_MEMORY_SET ('DATABASE', NULL, -2))", conn))
                 {
                     var rdr = cmd.ExecuteReader();
                     while (rdr.Read())
@@ -220,7 +221,7 @@ ORDER BY
             // DB2 snapshot consumed by the MVVM schema explorer.
             RebuildObjectInSchema();
 
-            using (var cmd = new DB2Command("SELECT CURRENT SERVER FROM SYSIBM.SYSDUMMY1", conn))
+            using (var cmd = CreateCommand("SELECT CURRENT SERVER FROM SYSIBM.SYSDUMMY1", conn))
             {
                 DefaultDatabaseName = cmd.ExecuteScalar() as string;
                 cmd.CommandText = @"
@@ -310,7 +311,7 @@ ORDER BY
         using (var conn = new DB2Connection(ConnectionString))
         {
             conn.Open();
-            using (var cmd = new DB2Command("SELECT 1 FROM SYSIBM.SYSDUMMY1", conn))
+            using (var cmd = CreateCommand("SELECT 1 FROM SYSIBM.SYSDUMMY1", conn))
             {
                 cmd.CommandText =
                     @$"
@@ -370,7 +371,7 @@ ORDER BY
         using (var conn = new DB2Connection(ConnectionString))
         {
             conn.Open();
-            using (var cmd = new DB2Command("SELECT 1 FROM SYSIBM.SYSDUMMY1", conn))
+            using (var cmd = CreateCommand("SELECT 1 FROM SYSIBM.SYSDUMMY1", conn))
             {
                 cmd.CommandText =
                     @$"
@@ -408,7 +409,7 @@ SELECT DISTINCT INDNAME /*INDSCHEMA , INDNAME, COLNAMES,
         using (var conn = new DB2Connection(ConnectionString))
         {
             conn.Open();
-            using (var cmd = new DB2Command("SELECT 1 FROM SYSIBM.SYSDUMMY1", conn))
+            using (var cmd = CreateCommand("SELECT 1 FROM SYSIBM.SYSDUMMY1", conn))
             {
                 cmd.CommandText =
                     @$"SELECT P.DATAPARTITIONNAME,P.LOWVALUE,P.HIGHVALUE,P.LOWINCLUSIVE,P.HIGHINCLUSIVE, S.TBSPACE
@@ -439,7 +440,7 @@ WITH UR; ";
         using (var conn = new DB2Connection(ConnectionString))
         {
             conn.Open();
-            using (var cmd = new DB2Command(GetTriggersSql(schema, tablename), conn))
+            using (var cmd = CreateCommand(GetTriggersSql(schema, tablename), conn))
             {
                 var rdr = cmd.ExecuteReader();
 
@@ -460,7 +461,7 @@ WITH UR; ";
         {
             conn.Open();
             List<string> ls = new List<string>();
-            using (var cmd = new DB2Command(GetChecksSql(schema, tablename), conn))
+            using (var cmd = CreateCommand(GetChecksSql(schema, tablename), conn))
             {
                 var rdr = cmd.ExecuteReader();
 
@@ -469,7 +470,7 @@ WITH UR; ";
                     ls.Add(rdr.GetString(0) + " - " + rdr.GetString(1));
                 }
             }
-            using (var cmd = new DB2Command(GetConstraints2Sql(schema, tablename), conn))
+            using (var cmd = CreateCommand(GetConstraints2Sql(schema, tablename), conn))
             {
                 var rdr = cmd.ExecuteReader();
 
@@ -802,7 +803,7 @@ WITH UR";
                             where TABSCHEMA = '{schema}' and TABNAME = '{tableName}' and partkeyseq !=0
                             order by partkeyseq with ur";
 
-                    using (var cmd2 = new DB2Command(distSql, conn))
+                    using (var cmd2 = CreateCommand(distSql, conn))
                     {
                         using var rdrDist = cmd2.ExecuteReader();
                         while (rdrDist.Read())
@@ -820,7 +821,7 @@ WITH UR";
             {
                 SQL = GetConstraints1Sql(schema, tableName);
 
-                using (var cmd = new DB2Command(SQL, conn))
+                using (var cmd = CreateCommand(SQL, conn))
                 {
                     var rdr = cmd.ExecuteReader();
                     while (rdr.Read())
@@ -866,7 +867,7 @@ WITH UR";
                          ORDER BY c.constname
                                 , kcu.colseq
                         WITH UR";
-            using (var cmd = new DB2Command(SQL, conn))
+            using (var cmd = CreateCommand(SQL, conn))
             {
                 var rdr = cmd.ExecuteReader();
                 while (rdr.Read())
@@ -910,7 +911,7 @@ WITH UR";
                         R.TABSCHEMA = '{schema}'
                          AND r.tabname = '{tableName}'";
 
-            using (var cmd = new DB2Command(SQL, conn))
+            using (var cmd = CreateCommand(SQL, conn))
             {
                 var rdr = cmd.ExecuteReader();
                 while (rdr.Read())
@@ -937,7 +938,7 @@ WITH UR";
 
             SQL = GetChecksSql(schema, tableName);
 
-            using (var cmd = new DB2Command(SQL, conn))
+            using (var cmd = CreateCommand(SQL, conn))
             {
                 var rdr = cmd.ExecuteReader();
                 while (rdr.Read())
@@ -984,7 +985,7 @@ WITH UR";
                     end as index_type
                     , COMPRESSION
                     FROM syscat.indexes  WHERE indschema not like 'SYS%' AND TABSCHEMA = '{schema}' AND TABNAME = '{tableName}' WITH UR;";
-            using (var cmd = new DB2Command(SQL, conn))
+            using (var cmd = CreateCommand(SQL, conn))
             {
                 var rdr = cmd.ExecuteReader();
                 while (rdr.Read())
@@ -1032,7 +1033,7 @@ WITH UR";
 
             SQL = GetTriggersSql(schema, tableName);
 
-            using (var cmd = new DB2Command(SQL, conn))
+            using (var cmd = CreateCommand(SQL, conn))
             {
                 var rdr = cmd.ExecuteReader();
                 while (rdr.Read())
@@ -1045,7 +1046,7 @@ WITH UR";
             SQL = "SELECT DATAPARTITIONEXPRESSION, NULLSFIRST FROM SYSCAT.DATAPARTITIONEXPRESSION " +
                 $"WHERE TABSCHEMA = '{schema}' AND TABNAME = '{tableName}' order by DATAPARTITIONKEYSEQ;";
             List<string> ls = new List<string>();
-            using (var cmd = new DB2Command(SQL, conn))
+            using (var cmd = CreateCommand(SQL, conn))
             {
                 var rdr = cmd.ExecuteReader();
 
@@ -1077,7 +1078,7 @@ WITH UR";
                 }
 
                 ls.Clear();
-                using (var cmd = new DB2Command(SQL, conn))
+                using (var cmd = CreateCommand(SQL, conn))
                 {
                     var rdr = cmd.ExecuteReader();
                     //int i = 0;
@@ -1231,11 +1232,11 @@ SET SCHEMA {StringExtension.QuoteNameIfNeeded(schemaBefore)};
         using (var conn = new DB2Connection(ConnectionString))
         {
             conn.Open();
-            using (var cmd = new DB2Command(procedureBodySql, conn))
+            using (var cmd = CreateCommand(procedureBodySql, conn))
             {
                 procTxt = cmd.ExecuteScalar() as string;
             }
-            using (var cmd = new DB2Command(schemaSql, conn))
+            using (var cmd = CreateCommand(schemaSql, conn))
             {
                 schemaBefore = cmd.ExecuteScalar() as string;
             }
@@ -1265,7 +1266,7 @@ SET SCHEMA {StringExtension.QuoteNameIfNeeded(schemaBefore)};
             using (var conn = new DB2Connection(ConnectionString))
             {
                 conn.Open();
-                using (var cmd = new DB2Command(SQL, conn))
+                using (var cmd = CreateCommand(SQL, conn))
                 {
                     var rdr = cmd.ExecuteReader();
                     aliasesDic.Clear();
@@ -1332,7 +1333,7 @@ SET SCHEMA {StringExtension.QuoteNameIfNeeded(schemaBefore)};
                 using (var conn = new DB2Connection(ConnectionString))
                 {
                     conn.Open();
-                    using (var cmd = new DB2Command(SQL, conn))
+                    using (var cmd = CreateCommand(SQL, conn))
                     {
                         var rdr = cmd.ExecuteReader();
                         aliasesDic.Clear();
@@ -1426,7 +1427,7 @@ SET SCHEMA {StringExtension.QuoteNameIfNeeded(schemaBefore)};
             {
                 conn.Open();
                 List<string> ls = new List<string>();
-                using (var cmd = new DB2Command(SQL, conn))
+                using (var cmd = CreateCommand(SQL, conn))
                 {
                     var rdr = cmd.ExecuteReader();
                     while (rdr.Read())
@@ -1472,7 +1473,7 @@ SET SCHEMA {StringExtension.QuoteNameIfNeeded(schemaBefore)};
             }
             var paths = sql.Substring(par + 7 + Environment.NewLine.Length).Split(Environment.NewLine);
             sql = sql.Substring(0, par);
-            using (var cmd = new DB2Command(sql, conn))
+            using (var cmd = CreateCommand(sql, conn))
             {
                 int parCnt = sql.Length - sql.Replace("?", "").Length;
                 if (paths.Length != parCnt)
@@ -1482,7 +1483,10 @@ SET SCHEMA {StringExtension.QuoteNameIfNeeded(schemaBefore)};
                 for (int i = 0; i < parCnt; i++)
                 {
                     var arr = File.ReadAllBytes(paths[i]);
-                    DB2Parameter param1 = new DB2Parameter($"par{i}", DB2Type.Blob, arr.Length);
+                    DbParameter param1 = cmd.CreateParameter();
+                    param1.ParameterName = $"par{i}";
+                    param1.DbType = DbType.Binary;
+                    param1.Size = arr.Length;
                     param1.Value = arr;
                     cmd.Parameters.Add(param1);
                 }
@@ -1517,7 +1521,7 @@ SET SCHEMA {StringExtension.QuoteNameIfNeeded(schemaBefore)};
             {
                 schema = rdr.GetSchemaTable();
                 var rows = schema.Rows;
-                isProviderType = schema.Columns.Contains("ProviderType") && rdr is DB2DataReader;
+                isProviderType = schema.Columns.Contains("ProviderType") && rdr is Db2AdoDataReader;
 
                 for (int i = 0; i < rows.Count; i++)
                 {
@@ -1582,7 +1586,7 @@ SET SCHEMA {StringExtension.QuoteNameIfNeeded(schemaBefore)};
                 headers[i] = $"{columnsNames[i].NormalizeName(_databaseRuntimeContext.Config.KeyWordsListForColoring1)} {typeName}";
             }
 
-            var cmd = new DB2Command($"CREATE TABLE {randName} ({String.Join(',', headers)}){Environment.NewLine}ORGANIZE BY ROW{Environment.NewLine}COMPRESS YES{Environment.NewLine};", conn);
+            var cmd = CreateCommand($"CREATE TABLE {randName} ({String.Join(',', headers)}){Environment.NewLine}ORGANIZE BY ROW{Environment.NewLine}COMPRESS YES{Environment.NewLine};", conn);
             cmd.ExecuteNonQuery();
         }
 
@@ -1684,10 +1688,17 @@ WHERE
         return new DB2Connection(builder.ConnectionString);
     }
 
+    private static DbCommand CreateCommand(string sql, DbConnection connection)
+    {
+        DbCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        return command;
+    }
+
     private static DataTable LoadCatalogTable(DB2Connection connection, string sql)
     {
-        using var command = new DB2Command(sql, connection);
-        using DB2DataReader reader = command.ExecuteReader();
+        using var command = CreateCommand(sql, connection);
+        using DbDataReader reader = command.ExecuteReader();
         var result = new DataTable();
         result.Load(reader);
         return result;
