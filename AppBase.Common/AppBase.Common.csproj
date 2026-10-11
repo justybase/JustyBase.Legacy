@@ -15,14 +15,9 @@
     <ProjectReference Include="..\JustyBase.Legacy.TextBox\source\JustyBase.Legacy.TextBox.csproj" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' == 'true'">
-    <ProjectReference Include="$(JustyBaseLocalImportExportProject)" />
-    <ProjectReference Include="$(JustyBaseLocalAiProject)" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' != 'true'">
-    <PackageReference Include="JustyBase.ImportExport" />
-    <PackageReference Include="JustyBase.Ai" />
+  <ItemGroup>
+    <ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.ImportExport\JustyBase.ImportExport.csproj" />
+    <ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.Ai\JustyBase.Ai.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

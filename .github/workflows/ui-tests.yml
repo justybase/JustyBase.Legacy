@@ -14,6 +14,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Checkout shared JustyBase libraries
+        uses: actions/checkout@v7
+        with:
+          repository: justybase/JustyBase.NetezzaSql
+          ref: master
+          path: JustyBase.NetezzaSql
+
+      - name: Stage shared libraries beside repository
+        shell: pwsh
+        run: |
+          $source = Join-Path $env:GITHUB_WORKSPACE 'JustyBase.NetezzaSql'
+          $destination = Join-Path (Split-Path $env:GITHUB_WORKSPACE -Parent) 'JustyBase.NetezzaSql'
+          Copy-Item -Path $source -Destination $destination -Recurse -Force
+          $requiredProject = Join-Path $destination 'JustyBase.NetezzaSqlParser.csproj'
+          if (-not (Test-Path -LiteralPath $requiredProject)) {
+            throw "Shared JustyBase project was not staged at the expected sibling path: $requiredProject"
+          }
+
+      - name: Verify shared library package references
+        shell: pwsh
+        run: ./scripts/verify-no-internal-justybase-nugets.ps1
+
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
         with:

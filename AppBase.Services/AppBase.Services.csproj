@@ -37,15 +37,11 @@
     <PackageReference Include="Hogimn.Sql.Formatter" />
     <PackageReference Include="SpreadSheetTasks" />
     <PackageReference Include="Sylvan.Data.Csv" />
-	<PackageReference Include="Net.IBM.Data.Db2" Condition="'$(IncludeDB2)' == 'true'" />
+	<PackageReference Include="JustyBase.Db2.IBMCompat" Condition="'$(IncludeDB2)' == 'true'" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' == 'true'">
-    <ProjectReference Include="$(JustyBaseLocalImportExportProject)" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' != 'true'">
-    <PackageReference Include="JustyBase.ImportExport" />
+  <ItemGroup>
+    <ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.ImportExport\JustyBase.ImportExport.csproj" />
   </ItemGroup>
 
   <ItemGroup>

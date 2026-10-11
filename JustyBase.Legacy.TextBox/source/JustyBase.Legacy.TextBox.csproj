@@ -18,13 +18,9 @@
 	<ItemGroup>
 		<None Include="..\README.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
-	<ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' == 'true'">
-		<ProjectReference Include="$(JustyBaseLocalCoreProject)" />
-		<ProjectReference Include="$(JustyBaseLocalNetezzaSqlParserProject)" />
-	</ItemGroup>
-	<ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' != 'true'">
-		<PackageReference Include="JustyBase.Core" />
-		<PackageReference Include="JustyBase.NetezzaSqlParser" />
+	<ItemGroup>
+		<ProjectReference Include="..\..\..\JustyBase.NetezzaSql\JustyBase.Core\JustyBase.Core.csproj" />
+		<ProjectReference Include="..\..\..\JustyBase.NetezzaSql\JustyBase.NetezzaSqlParser.csproj" />
 	</ItemGroup>
 	<PropertyGroup>
 		<SignAssembly>true</SignAssembly>

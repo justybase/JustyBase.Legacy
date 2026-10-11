@@ -3,7 +3,7 @@
 ## Quick Start
 
 1. Read the [Architecture Decision Records](docs/ADR/) — 7 ADRs covering key design decisions.
-2. Restore packages from NuGet.org (`dotnet restore JustData.All.slnx`).
+2. Ensure the sibling checkout `../JustyBase.NetezzaSql` exists, then restore remaining NuGet packages (`dotnet restore JustData.All.slnx`).
 3. Run `dotnet test` with `--filter "Category!=Integration"` before opening a PR (see [docs/INTEGRATION_TESTS.md](docs/INTEGRATION_TESTS.md) for optional real Netezza checks).
 4. Check an existing test in `tests/` for style conventions.
 

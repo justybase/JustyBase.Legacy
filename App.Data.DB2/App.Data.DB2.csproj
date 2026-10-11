@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Net.IBM.Data.Db2" />
+    <PackageReference Include="JustyBase.Db2.IBMCompat" />
   </ItemGroup>
 
   <ItemGroup>

@@ -99,14 +99,9 @@
 		                  Condition="'$(PkgMicrosoft_Web_WebView2)' != ''" />
 	</ItemGroup>
 
-	<ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' == 'true'">
-		<ProjectReference Include="$(JustyBaseLocalAiProject)" />
-		<ProjectReference Include="$(JustyBaseLocalAiEmbeddedProject)" />
-	</ItemGroup>
-
-	<ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' != 'true'">
-		<PackageReference Include="JustyBase.Ai" />
-		<PackageReference Include="JustyBase.Ai.Embedded" />
+	<ItemGroup>
+		<ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.Ai\JustyBase.Ai.csproj" />
+		<ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.Ai.Embedded\JustyBase.Ai.Embedded.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>

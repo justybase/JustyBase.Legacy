@@ -36,6 +36,14 @@ jobs:
         $source = Join-Path $env:GITHUB_WORKSPACE 'JustyBase.NetezzaSql'
         $destination = Join-Path (Split-Path $env:GITHUB_WORKSPACE -Parent) 'JustyBase.NetezzaSql'
         Copy-Item -Path $source -Destination $destination -Recurse -Force
+        $requiredProject = Join-Path $destination 'JustyBase.NetezzaSqlParser.csproj'
+        if (-not (Test-Path -LiteralPath $requiredProject)) {
+          throw "Shared JustyBase project was not staged at the expected sibling path: $requiredProject"
+        }
+
+    - name: Verify shared library package references
+      shell: pwsh
+      run: ./scripts/verify-no-internal-justybase-nugets.ps1
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v6

@@ -137,9 +137,9 @@ dotnet build JustData.All.slnx -c Release
 dotnet test JustData.All.slnx -c Release --filter "Category!=Integration"
 ```
 
-### Local JustyBase.Netezza* libraries
+### Shared JustyBase libraries
 
-When sibling folder `../JustyBase.NetezzaSql` exists (e.g. a `##justybase` multi-repo checkout), MSBuild automatically uses `ProjectReference` instead of NuGet for `JustyBase.Netezza`, `JustyBase.NetezzaDdl`, `JustyBase.NetezzaCatalogSql`, and `JustyBase.NetezzaSqlParser`. External clones without that sibling keep using NuGet (`*-*` = latest published, including previews). Force either mode with `-p:UseLocalJustyBaseLibraries=true|false`. Pin a NuGet version with `-p:JustyBaseNetezzaLibsPackageVersion=0.2.0-preview.6`.
+Local builds require the sibling checkout `../JustyBase.NetezzaSql`. The application references its Netezza, SQL parser, DDL, catalog, core, import/export, and AI projects directly; there is no NuGet fallback for these libraries. CI, release, and UI-test workflows check out and stage this sibling before restoring the solution. `JustyBase.NetezzaDriver` remains a NuGet dependency. DB2 uses `JustyBase.Db2.IBMCompat` version `0.1.0-alpha.1`.
 
 Optional provider (example):
 

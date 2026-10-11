@@ -24,6 +24,12 @@
 
 <Project Path="../JustyBase.NetezzaSql/JustyBase.Ai/JustyBase.Ai.csproj" />
 <Project Path="../JustyBase.NetezzaSql/JustyBase.Ai.Embedded/JustyBase.Ai.Embedded.csproj" />
+<Project Path="../JustyBase.NetezzaSql/JustyBase.Core/JustyBase.Core.csproj" />
+<Project Path="../JustyBase.NetezzaSql/JustyBase.ImportExport/JustyBase.ImportExport.csproj" />
+<Project Path="../JustyBase.NetezzaSql/JustyBase.Netezza/JustyBase.Netezza.csproj" />
+<Project Path="../JustyBase.NetezzaSql/JustyBase.NetezzaCatalogSql/JustyBase.NetezzaCatalogSql.csproj" />
+<Project Path="../JustyBase.NetezzaSql/JustyBase.NetezzaDdl/JustyBase.NetezzaDdl.csproj" />
+<Project Path="../JustyBase.NetezzaSql/JustyBase.NetezzaSqlParser.csproj" />
   <Project Path="JustyBase.Legacy.TextBox/source/JustyBase.Legacy.TextBox.csproj" />
   <Project Path="JustyBaseLegacy.AdditionalForms/JustyBaseLegacy.AdditionalForms.csproj" />
   <Project Path="tests/AppBase.Tests/AppBase.Tests.csproj" />

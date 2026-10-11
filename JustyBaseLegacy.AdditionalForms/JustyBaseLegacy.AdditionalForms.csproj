@@ -16,11 +16,8 @@
     <ProjectReference Include="..\JustData.Application\JustData.Application.csproj" />
     <ProjectReference Include="..\JustData.ViewModels\JustData.ViewModels.csproj" />
   </ItemGroup>
-  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' == 'true'">
-    <ProjectReference Include="$(JustyBaseLocalNetezzaDdlProject)" />
-  </ItemGroup>
-  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' != 'true'">
-    <PackageReference Include="JustyBase.NetezzaDdl" />
+  <ItemGroup>
+    <ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.NetezzaDdl\JustyBase.NetezzaDdl.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="DatabaseDataGridView.WinForms" />

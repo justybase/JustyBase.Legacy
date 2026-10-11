@@ -14,12 +14,8 @@
   <ItemGroup>
     <ProjectReference Include="..\JustData.Application\JustData.Application.csproj" />
   </ItemGroup>
-  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' == 'true'">
-    <ProjectReference Include="$(JustyBaseLocalNetezzaSqlParserProject)" />
-    <ProjectReference Include="$(JustyBaseLocalAiProject)" />
-  </ItemGroup>
-  <ItemGroup Condition="'$(UseLocalJustyBaseLibraries)' != 'true'">
-    <PackageReference Include="JustyBase.NetezzaSqlParser" />
-    <PackageReference Include="JustyBase.Ai" />
+  <ItemGroup>
+    <ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.NetezzaSqlParser.csproj" />
+    <ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.Ai\JustyBase.Ai.csproj" />
   </ItemGroup>
 </Project>
