@@ -10,6 +10,11 @@
   #define MyAppVersion "0.0.0.0"
 #endif
 
+; Output name suffix, e.g. "-framework-dependent" for non-self-contained builds.
+#ifndef Variant
+  #define Variant ""
+#endif
+
 #define MyAppAssocName "sql files"
 #define MyAppAssocExt ".sql"
 #define MyAppAssocKey StringChange(MyAppAssocName, " ", "") + MyAppAssocExt
@@ -51,7 +56,7 @@ ChangesAssociations=yes
 ; PrivilegesRequiredOverridesAllowed=dialog
 ; Remove the following line to run in administrative install mode (install for all users.)
 PrivilegesRequired=lowest
-OutputBaseFilename=JustyBaseLegacy-{#MyAppVersion}
+OutputBaseFilename=JustyBaseLegacy-{#MyAppVersion}{#Variant}
 OutputDir=Output
 SetupIconFile=..\iconNew.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}

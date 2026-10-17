@@ -9,7 +9,12 @@ param(
     [string] $Configuration = 'Release',
 
     [Parameter()]
-    [switch] $NoRestore
+    [switch] $NoRestore,
+
+    # Self-contained (default) bundles the .NET runtime. Framework-dependent
+    # builds require the .NET 10 Windows Desktop Runtime (x64) on the target.
+    [Parameter()]
+    [bool] $SelfContained = $true
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,7 +63,7 @@ $publishArguments = @(
     '-p:PublishAot=false',
     '-p:PublishTrimmed=false',
     '-p:PublishReadyToRun=true',
-    '--self-contained', 'true',
+    '--self-contained', $SelfContained.ToString().ToLowerInvariant(),
     '-o', $stagingPath,
     "-p:Version=$Version"
 )
@@ -155,7 +160,12 @@ if (-not $iscc) {
 }
 
 Write-Host "Building Inno Setup installer"
-& $iscc $installerScript "/DMyAppVersion=$Version" "/DSourcePath=$stagingPath"
+$isccArguments = @($installerScript, "/DMyAppVersion=$Version", "/DSourcePath=$stagingPath")
+if (-not $SelfContained) {
+    $isccArguments += '/DVariant=-framework-dependent'
+}
+
+& $iscc @isccArguments
 if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup compilation failed with exit code $LASTEXITCODE"
 }

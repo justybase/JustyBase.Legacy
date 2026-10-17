@@ -147,6 +147,66 @@ jobs:
           throw "No installer executable was produced."
         }
 
+    - name: Stage self-contained release assets
+      shell: pwsh
+      run: |
+        $assets = Join-Path $pwd 'release-assets'
+        New-Item -ItemType Directory -Path $assets -Force | Out-Null
+        Get-ChildItem -Path "./JustData/Installers/Offline/Output" -Filter "*.exe" -File |
+          Copy-Item -Destination $assets
+        Copy-Item -LiteralPath "./JustyBaseLegacy-${{ steps.get_version.outputs.version }}.zip" -Destination $assets
+
+    - name: Publish framework-dependent application and create installer
+      shell: pwsh
+      run: |
+        ./scripts/build-installer.ps1 `
+          -Version "${{ steps.get_version.outputs.version }}" `
+          -Configuration Release `
+          -NoRestore `
+          -SelfContained:$false
+
+    - name: Verify framework-dependent application
+      run: |
+        $publishPath = Join-Path $pwd "${{ env.SETUP_FILES_PATH }}"
+        $executable = Join-Path $publishPath "JustyBaseLegacy.exe"
+        if (-not (Test-Path -LiteralPath $executable)) {
+          throw "Application executable was not produced: $executable"
+        }
+        if ((Get-Item -LiteralPath $executable).Length -le 0) {
+          throw "Application executable is empty: $executable"
+        }
+        Write-Host "Verified application: $executable"
+
+        $process = Start-Process -FilePath $executable -ArgumentList "--smoke-test" -PassThru
+        if (-not $process.WaitForExit(30000)) {
+          Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          throw "Framework-dependent startup smoke test timed out."
+        }
+        if ($process.ExitCode -ne 0) {
+          throw "Framework-dependent startup smoke test failed with exit code $($process.ExitCode)."
+        }
+        Write-Host "Framework-dependent startup smoke test passed."
+
+    - name: Create framework-dependent ZIP package
+      run: |
+        Compress-Archive -Path "./${{ env.SETUP_FILES_PATH }}/*" -DestinationPath "./JustyBaseLegacy-${{ steps.get_version.outputs.version }}-framework-dependent.zip"
+
+    - name: Verify and stage framework-dependent release assets
+      shell: pwsh
+      run: |
+        $version = "${{ steps.get_version.outputs.version }}"
+        $zip = Join-Path $pwd "JustyBaseLegacy-$version-framework-dependent.zip"
+        if (-not (Test-Path -LiteralPath $zip)) {
+          throw "Framework-dependent ZIP package was not produced: $zip"
+        }
+        $installers = @(Get-ChildItem -Path "./JustData/Installers/Offline/Output" -Filter "*-framework-dependent.exe" -File)
+        if ($installers.Count -ne 1) {
+          throw "Expected exactly one framework-dependent installer, found $($installers.Count)."
+        }
+        $assets = Join-Path $pwd 'release-assets'
+        Copy-Item -LiteralPath $installers[0].FullName -Destination $assets
+        Copy-Item -LiteralPath $zip -Destination $assets
+
     - name: Prepare release notes
       id: release_notes
       shell: pwsh
@@ -161,14 +221,19 @@ jobs:
         } else {
           $body = "## JustyBaseLegacy $version`n`nSee CHANGELOG.md for details."
         }
-        $body | Out-File -FilePath release-notes.md -Encoding utf8
+        $packages = @(
+          "",
+          "### Downloads",
+          "- **Self-contained** (`JustyBaseLegacy-$version.exe` / `.zip`): includes the .NET runtime, no prerequisites.",
+          "- **Framework-dependent** (`JustyBaseLegacy-$version-framework-dependent.exe` / `.zip`): smaller download; requires the [.NET 10 Windows Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)."
+        ) -join "`n"
+        "$body`n$packages" | Out-File -FilePath release-notes.md -Encoding utf8
 
     - name: Create Release
       uses: softprops/action-gh-release@v3
       with:
         files: |
-          ./JustData/Installers/Offline/Output/*.exe
-          ./JustyBaseLegacy-${{ steps.get_version.outputs.version }}.zip
+          ./release-assets/*
         name: Release ${{ steps.get_version.outputs.version }}
         body_path: release-notes.md
       env:
