@@ -217,6 +217,51 @@ public sealed class SqlExecutionRouterTests
         Assert.Equal([1, 2], observed);
     }
 
+    [Fact]
+    public async Task General_engine_appends_parts_split_by_row_limit_to_one_result()
+    {
+        // A provider surfaces the rows left after the limit as follow-up
+        // result sets with the same schema: 3 + 3 + 1 rows for limit 3.
+        using var reader = new DataTableReader([IdTable(1, 3), IdTable(4, 6), IdTable(7, 7)]);
+
+        SqlExecutionEvent[] events = await CollectAsync(GeneralSqlExecutionEngine.ReadResultSetsAsync(
+            reader, EditorDocumentId.New(), 0, "select id from t", rowLimit: 3));
+
+        SqlExecutionEvent resultSet = Assert.Single(events, e => e.Kind == SqlExecutionEventKind.ResultSet);
+        string resultSetId = resultSet.ResultSet!.ResultSetId;
+        SqlExecutionEvent[] rows = events.Where(e => e.Kind == SqlExecutionEventKind.Rows).ToArray();
+        Assert.All(rows, e => Assert.Equal(resultSetId, e.ResultSetId));
+        Assert.Equal(
+            [1, 2, 3, 4, 5, 6, 7],
+            rows.SelectMany(e => e.Rows!).Select(row => (int)row[0]!));
+        Assert.DoesNotContain(events, e => e.Kind == SqlExecutionEventKind.Truncated);
+    }
+
+    [Fact]
+    public async Task General_engine_keeps_result_sets_with_different_schemas_separate()
+    {
+        var other = new DataTable();
+        other.Columns.Add("name", typeof(string));
+        other.Rows.Add("x");
+        using var reader = new DataTableReader([IdTable(1, 2), other]);
+
+        SqlExecutionEvent[] events = await CollectAsync(GeneralSqlExecutionEngine.ReadResultSetsAsync(
+            reader, EditorDocumentId.New(), 0, "select 1", rowLimit: 2));
+
+        Assert.Equal(2, events.Count(e => e.Kind == SqlExecutionEventKind.ResultSet));
+        SqlExecutionEvent truncated = Assert.Single(events, e => e.Kind == SqlExecutionEventKind.Truncated);
+        Assert.Equal(2, truncated.RowCount);
+    }
+
+    private static DataTable IdTable(int from, int to)
+    {
+        var table = new DataTable();
+        table.Columns.Add("id", typeof(int));
+        for (int id = from; id <= to; id++)
+            table.Rows.Add(id);
+        return table;
+    }
+
     private static SqlExecutionRouter CreateRouter(string driver, RecordingPresenter presenter)
     {
         var database = Substitute.For<IGeneralDbService>();

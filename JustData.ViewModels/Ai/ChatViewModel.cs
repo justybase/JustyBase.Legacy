@@ -35,6 +35,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     private bool _copilotCodeRaised;
     private CancellationTokenSource? _backendSwitchCts;
     private int _modelsRefreshVersion;
+    private int _startupAccountProbesStarted;
     private bool _constructed;
     private bool _disposed;
     private bool _suppressBackendSelection;
@@ -102,11 +103,6 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         RefreshCodexAccountState();
         RefreshCopilotAccountState();
 
-        // Probe account/read once at startup so an already-signed-in session is detected
-        // without waiting for the user to click the Codex button.
-        RefreshCodexCommand.Execute(null);
-        RefreshCopilotCommand.Execute(null);
-
         // Do not probe models until a provider is active. Before connection the service
         // cannot identify a provider and its local discovery path may return unrelated
         // local models for a selected Codex/Copilot provider.
@@ -124,6 +120,20 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
             return;
 
         _ = ConnectAsync();
+    }
+
+    /// <summary>
+    /// Starts the initial account probes after the host window has been constructed.
+    /// The dispatcher resolves that window lazily, so doing this from the constructor
+    /// can re-enter dependency injection while BaseWindow is still being created.
+    /// </summary>
+    public void StartStartupAccountProbes()
+    {
+        if (Interlocked.Exchange(ref _startupAccountProbesStarted, 1) != 0)
+            return;
+
+        RefreshCodexCommand.Execute(null);
+        RefreshCopilotCommand.Execute(null);
     }
 
     /// <summary>Raised when the message list content needs a UI re-render.</summary>
@@ -797,19 +807,15 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void RefreshCopilot()
     {
-        _ = _chatService.ReadCopilotAccountAsync().ContinueWith(_ =>
-        {
-            RaiseUi(RefreshCopilotAccountState);
-        }, TaskScheduler.Default);
+        _ = Task.Run(() => _chatService.ReadCopilotAccountAsync())
+            .ContinueWith(_ => RaiseUi(RefreshCopilotAccountState), TaskScheduler.Default);
     }
 
     [RelayCommand]
     private void RefreshCodex()
     {
-        _ = _chatService.ReadCodexAccountAsync().ContinueWith(_ =>
-        {
-            RaiseUi(RefreshCodexAccountState);
-        }, TaskScheduler.Default);
+        _ = Task.Run(() => _chatService.ReadCodexAccountAsync())
+            .ContinueWith(_ => RaiseUi(RefreshCodexAccountState), TaskScheduler.Default);
     }
 
     private string GetBackendDisplayName(string? backendId)

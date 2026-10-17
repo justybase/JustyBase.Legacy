@@ -101,8 +101,13 @@ if ($missingRuntimeAssemblies) {
     throw "Required runtime assemblies were not included in publish staging: $($missingRuntimeAssemblies -join ', ')"
 }
 
-if (-not (Test-Path -LiteralPath (Join-Path $stagingPath 'IBM.Data.Db2.dll') -PathType Leaf)) {
-    throw "DB2 managed provider was not included in publish staging: $stagingPath"
+# DB2 is implemented by the lightweight managed JustyBase driver. The
+# IBM.Data.Db2 namespace is provided only for source compatibility; the IBM
+# client assembly and native clidriver are no longer part of the application.
+foreach ($db2Assembly in @('JustyBase.Db2.dll', 'JustyBase.Db2.IBMCompat.dll')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $stagingPath $db2Assembly) -PathType Leaf)) {
+        throw "DB2 JustyBase managed driver assembly was not included in publish staging: $db2Assembly"
+    }
 }
 
 if (-not (Test-Path -LiteralPath (Join-Path $stagingPath 'Microsoft.Data.SqlClient.dll') -PathType Leaf)) {
@@ -111,12 +116,6 @@ if (-not (Test-Path -LiteralPath (Join-Path $stagingPath 'Microsoft.Data.SqlClie
 
 if (-not (Test-Path -LiteralPath (Join-Path $stagingPath 'Npgsql.dll') -PathType Leaf)) {
     throw "PostgreSQL managed provider was not included in publish staging: $stagingPath"
-}
-
-$db2NativeDriver = Get-ChildItem -LiteralPath $stagingPath -Recurse -File -Filter 'db2app64.dll' |
-    Select-Object -First 1
-if (-not $db2NativeDriver) {
-    throw "DB2 native clidriver was not included in publish staging: $stagingPath"
 }
 
 $unexpectedFiles = Get-ChildItem -LiteralPath $stagingPath -Recurse -File |

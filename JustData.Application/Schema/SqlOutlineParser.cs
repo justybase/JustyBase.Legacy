@@ -20,7 +20,7 @@ public static class SqlOutlineParser
         try
         {
             var tokens = NzLexer.Tokenize(sql).ToArray();
-            var parser = new NzSqlParser(tokens);
+            var parser = new NzSqlParser(tokens, strictNetezzaIntervalSyntax: true);
             int safety = 0;
             while (parser.Position < tokens.Length && safety++ < tokens.Length + 2)
             {

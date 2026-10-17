@@ -30,16 +30,10 @@ public partial class BaseWindow
             legacyDiagnostics.SetActiveEditorIssuesProvider(GetActiveEditorLintIssues);
         }
 
-        // Auto-connect only after the window is fully constructed — the chat dispatcher
-        // resolves BaseWindow lazily, and resolving it from the constructor would be a DI cycle.
-        try
-        {
-            BeginInvoke(() => _chatViewModel.AutoConnectIfEnabled());
-        }
-        catch (InvalidOperationException)
-        {
-            // Handle not created yet — skip auto-connect; the user can connect from the panel.
-        }
+        // Start account probes and auto-connect only after the window has been shown.
+        // The chat dispatcher resolves BaseWindow lazily, so starting provider work
+        // during DI construction can re-enter the in-flight BaseWindow resolution.
+        Shown += StartAiChatAfterFirstShow;
 
         // "AI Chat" entry in the Dock windows menu.
         var windowsMenu = optionsToolStripMenuItem.DropDownItems
@@ -58,6 +52,13 @@ public partial class BaseWindow
             optionsToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
             optionsToolStripMenuItem.DropDownItems.Add(aiChatItem);
         }
+    }
+
+    private void StartAiChatAfterFirstShow(object? sender, EventArgs e)
+    {
+        Shown -= StartAiChatAfterFirstShow;
+        _chatViewModel?.StartStartupAccountProbes();
+        _chatViewModel?.AutoConnectIfEnabled();
     }
 
     private void EnsureAiChatPanel()

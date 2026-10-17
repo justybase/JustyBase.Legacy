@@ -1,6 +1,7 @@
 using AppBase.Common;
 using JustData.ViewModels.Ai;
 using JustyBase.Ai.Models;
+using Microsoft.Web.WebView2.WinForms;
 using System.ComponentModel;
 using System.Text;
 
@@ -14,7 +15,7 @@ public sealed class AiChatPanel : UserControl
 {
     private readonly ChatViewModel _viewModel;
     private readonly System.Windows.Forms.Timer _renderTimer;
-    private readonly WebView2AotHost _webView = new(Path.Combine(Program.LogDirectory, "WebView2"));
+    private readonly WebView2 _webView = new();
     private readonly TextBox _fallbackView = new()
     {
         Multiline = true,
@@ -473,27 +474,36 @@ public sealed class AiChatPanel : UserControl
 
     private void HookWebView()
     {
-        _webView.Ready += (_, _) =>
+        try
         {
+            _ = InitializeWebViewAsync();
+        }
+        catch
+        {
+            ShowFallback();
+        }
+    }
+
+    private async Task InitializeWebViewAsync()
+    {
+        try
+        {
+            await _webView.EnsureCoreWebView2Async();
+            _webView.CoreWebView2.WebMessageReceived += (_, e) =>
+            {
+                var payload = e.TryGetWebMessageAsString();
+                if (payload == "approve")
+                    _viewModel.ConfirmToolCommand.Execute(true);
+                else if (payload == "deny")
+                    _viewModel.ConfirmToolCommand.Execute(false);
+            };
             _webViewReady = true;
             OnMessagesChanged();
-        };
-        _webView.Failed += (_, exception) =>
+        }
+        catch
         {
-            Program.LogStartup($"WebView2 initialization failed: {exception.Message}");
             ShowFallback();
-        };
-        _webView.MessageReceived += (_, payload) =>
-        {
-            if (payload == "approve")
-            {
-                _viewModel.ConfirmToolCommand.Execute(true);
-            }
-            else if (payload == "deny")
-            {
-                _viewModel.ConfirmToolCommand.Execute(false);
-            }
-        };
+        }
     }
 
     private void ShowFallback()
@@ -597,7 +607,7 @@ public sealed class AiChatPanel : UserControl
                 var role = message.Role.Equals("user", StringComparison.OrdinalIgnoreCase) ? "User" : "Assistant";
                 if (message.Role.Equals("tool-confirmation", StringComparison.OrdinalIgnoreCase))
                     role = $"Tool ({message.ToolName})";
-                sb.Append('[').Append(role).Append(']').Append(' ').AppendLine(message.Content);
+                sb.Append('[').Append(role).Append("] ").AppendLine(message.Content);
                 sb.AppendLine();
             }
 

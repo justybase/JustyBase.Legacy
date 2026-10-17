@@ -294,53 +294,13 @@ public sealed class GeneralSqlExecutionEngine : ISqlExecutionEngine, IStatementL
         }
 
         bool sawResultSet = false;
-        int resultNumber = 0;
-        do
+        await foreach (SqlExecutionEvent resultEvent in ReadResultSetsAsync(
+            reader, request.DocumentId, statementIndex, sql, request.RowLimit, cancellationToken)
+            .WithCancellation(cancellationToken))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (reader.FieldCount <= 0)
-                continue;
-
-            sawResultSet = true;
-            string resultSetId = $"{request.DocumentId}-{statementIndex}-{resultNumber++}";
-            ResultColumnDescriptor[] columns = Enumerable.Range(0, reader.FieldCount)
-                .Select(i => new ResultColumnDescriptor(i, reader.GetName(i), reader.GetDataTypeName(i)))
-                .ToArray();
-            yield return SqlExecutionEvent.Result(request.DocumentId,
-                new ResultSetDescriptor(
-                    resultSetId,
-                    $"Result {resultNumber}",
-                    columns,
-                    statementIndex,
-                    ExecutedSql: SqlSensitiveDataRedactor.Redact(sql)));
-
-            var batch = new List<IReadOnlyList<object?>>(500);
-            long rows = 0;
-            long limit = request.RowLimit ?? long.MaxValue;
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                object?[] row = new object?[reader.FieldCount];
-                for (int i = 0; i < row.Length; i++)
-                    row[i] = await reader.IsDBNullAsync(i, cancellationToken).ConfigureAwait(false)
-                        ? null
-                        : reader.GetValue(i);
-                batch.Add(row);
-                rows++;
-                if (batch.Count == 500)
-                {
-                    yield return SqlExecutionEvent.RowsBatch(request.DocumentId, batch.ToArray(), statementIndex, resultSetId);
-                    batch.Clear();
-                }
-                if (rows >= limit)
-                {
-                    yield return new SqlExecutionEvent(SqlExecutionEventKind.Truncated, request.DocumentId)
-                    { StatementIndex = statementIndex, ResultSetId = resultSetId, RowCount = rows, IsTruncated = true };
-                    break;
-                }
-            }
-            if (batch.Count > 0)
-                yield return SqlExecutionEvent.RowsBatch(request.DocumentId, batch.ToArray(), statementIndex, resultSetId);
-        } while (await reader.NextResultAsync(cancellationToken).ConfigureAwait(false));
+            sawResultSet |= resultEvent.Kind == SqlExecutionEventKind.ResultSet;
+            yield return resultEvent;
+        }
 
         if (!sawResultSet)
         {
@@ -353,6 +313,90 @@ public sealed class GeneralSqlExecutionEngine : ISqlExecutionEngine, IStatementL
             yield return new SqlExecutionEvent(SqlExecutionEventKind.Log, request.DocumentId)
             { StatementIndex = statementIndex, Message = "Statement completed without a result set." };
         }
+    }
+
+    /// <summary>
+    /// Streams every result set of <paramref name="reader"/> as ResultSet/Rows
+    /// events. The row limit splits reading into parts: when a part stops at
+    /// the limit, some providers (Netezza) surface the remaining rows through
+    /// <see cref="DbDataReader.NextResultAsync(CancellationToken)"/>. A
+    /// following result set with the same schema is therefore a continuation
+    /// and is appended to the same result (one grid) instead of opening a new one.
+    /// </summary>
+    internal static async IAsyncEnumerable<SqlExecutionEvent> ReadResultSetsAsync(
+        DbDataReader reader,
+        EditorDocumentId documentId,
+        int statementIndex,
+        string sql,
+        long? rowLimit,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        long limit = rowLimit is > 0 ? rowLimit.Value : long.MaxValue;
+        int resultNumber = 0;
+        string? resultSetId = null;
+        ResultColumnDescriptor[]? columns = null;
+        long totalRows = 0;
+        SqlExecutionEvent? pendingTruncation = null;
+        do
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (reader.FieldCount <= 0)
+                continue;
+
+            ResultColumnDescriptor[] currentColumns = Enumerable.Range(0, reader.FieldCount)
+                .Select(i => new ResultColumnDescriptor(i, reader.GetName(i), reader.GetDataTypeName(i)))
+                .ToArray();
+            bool isContinuation = pendingTruncation is not null
+                && columns is not null
+                && currentColumns.SequenceEqual(columns);
+            if (!isContinuation)
+            {
+                if (pendingTruncation is not null)
+                    yield return pendingTruncation;
+
+                resultSetId = $"{documentId}-{statementIndex}-{resultNumber++}";
+                columns = currentColumns;
+                totalRows = 0;
+                yield return SqlExecutionEvent.Result(documentId,
+                    new ResultSetDescriptor(
+                        resultSetId,
+                        $"Result {resultNumber}",
+                        columns,
+                        statementIndex,
+                        ExecutedSql: SqlSensitiveDataRedactor.Redact(sql)));
+            }
+            pendingTruncation = null;
+
+            var batch = new List<IReadOnlyList<object?>>(500);
+            long partRows = 0;
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                object?[] row = new object?[reader.FieldCount];
+                for (int i = 0; i < row.Length; i++)
+                    row[i] = await reader.IsDBNullAsync(i, cancellationToken).ConfigureAwait(false)
+                        ? null
+                        : reader.GetValue(i);
+                batch.Add(row);
+                partRows++;
+                totalRows++;
+                if (batch.Count == 500)
+                {
+                    yield return SqlExecutionEvent.RowsBatch(documentId, batch.ToArray(), statementIndex, resultSetId);
+                    batch.Clear();
+                }
+                if (partRows >= limit)
+                {
+                    pendingTruncation = new SqlExecutionEvent(SqlExecutionEventKind.Truncated, documentId)
+                    { StatementIndex = statementIndex, ResultSetId = resultSetId, RowCount = totalRows, IsTruncated = true };
+                    break;
+                }
+            }
+            if (batch.Count > 0)
+                yield return SqlExecutionEvent.RowsBatch(documentId, batch.ToArray(), statementIndex, resultSetId);
+        } while (await reader.NextResultAsync(cancellationToken).ConfigureAwait(false));
+
+        if (pendingTruncation is not null)
+            yield return pendingTruncation;
     }
 
     /// <summary>

@@ -3,10 +3,11 @@
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
 		<AssemblyName>JustyBaseLegacy</AssemblyName>
-		<TargetFramework>net10.0-windows10.0.22000.0</TargetFramework>
+		<TargetFramework>net10.0-windows</TargetFramework>
 		<UseWindowsForms>true</UseWindowsForms>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<Platforms>x64</Platforms>
+		<PlatformTarget>x64</PlatformTarget>
 		<RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
 		<ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
 		<ApplicationIcon>icon2ico.ico</ApplicationIcon>
@@ -15,12 +16,11 @@
 		<!--<ServerGarbageCollection>true</ServerGarbageCollection>-->
 		<!--<NeutralLanguage>true</NeutralLanguage>-->
 		<NoWarn>$(NoWarn);WFO1000</NoWarn>
-		
-		<SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
 		<CustomResourceTypesSupport>true</CustomResourceTypesSupport>
 		<EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
 	</PropertyGroup>
 	<PropertyGroup>
+		<IncludeDB2 Condition="'$(IncludeDB2)' == ''">true</IncludeDB2>
 		<IncludeOracle Condition="'$(IncludeOracle)' == ''">false</IncludeOracle>
 		<IncludeMsSql Condition="'$(IncludeMsSql)' == ''">true</IncludeMsSql>
 		<IncludePostgres Condition="'$(IncludePostgres)' == ''">true</IncludePostgres>
@@ -31,17 +31,6 @@
 		<PublishTrimmed>false</PublishTrimmed>
 		<PublishSingleFile>false</PublishSingleFile>
 	</PropertyGroup>
-	<!--
-		WinForms .resx files compiled with CustomResourceTypesSupport reference the
-		System.Resources.Extensions reader/set by assembly identity (Version=4.0.0.0)
-		in the .resources header. Nothing references that assembly statically, so
-		Native AOT trims it away and ResourceManager.GetObject fails with
-		"Could not resolve assembly". Rooting it keeps the custom-type resource
-		reader available in AOT builds.
-	-->
-	<ItemGroup Condition="'$(PublishAot)' == 'true'">
-		<TrimmerRootAssembly Include="System.Resources.Extensions" />
-	</ItemGroup>
 	<PropertyGroup Condition="'$(IncludeDB2)' == 'true'">
 		<DefineConstants>$(DefineConstants);INCLUDE_DB2</DefineConstants>
 	</PropertyGroup>
@@ -58,7 +47,7 @@
 		<DefineConstants>$(DefineConstants);INCLUDE_POSTGRES</DefineConstants>
 	</PropertyGroup>
 	<PropertyGroup Condition="'$(SelfContained)' == 'true'">
-		<DefineConstants>SELF_CONTAINED</DefineConstants>
+		<DefineConstants>$(DefineConstants);SELF_CONTAINED</DefineConstants>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -81,22 +70,8 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" />
 		<PackageReference Include="DockPanelSuite" />
 		<PackageReference Include="DockPanelSuite.ThemeVS2015" />
-		<PackageReference Include="WebView2Aot" />
-		<PackageReference Include="DirectNAot" />
-		<PackageReference Include="DirectNAot.Extensions" />
-		<!-- Kept only as the versioned source of the native WebView2Loader.dll,
-		     which is embedded below so WebView2Utilities.Initialize can load it
-		     at runtime (works in JIT and Native AOT). -->
-		<PackageReference Include="Microsoft.Web.WebView2" GeneratePathProperty="true" PrivateAssets="all" ExcludeAssets="all" />
+		<PackageReference Include="Microsoft.Web.WebView2" />
 		<PackageReference Include="Markdig" />
-	</ItemGroup>
-
-	<ItemGroup>
-		<!-- Native bootstrapper embedded so WebView2Utilities.Initialize can extract
-		     and load it under JIT and Native AOT without shipping a loose DLL. -->
-		<EmbeddedResource Include="$(PkgMicrosoft_Web_WebView2)\runtimes\win-x64\native\WebView2Loader.dll"
-		                  LogicalName="runtimes/win-x64/native/WebView2Loader.dll"
-		                  Condition="'$(PkgMicrosoft_Web_WebView2)' != ''" />
 	</ItemGroup>
 
 	<ItemGroup>

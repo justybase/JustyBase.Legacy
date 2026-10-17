@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0.23] - 2026-10-17
+
+### Changed
+
+- DB2 now runs on the managed JustyBase driver; the IBM client and native clidriver are no longer bundled.
+- Removed the WebView2Aot/DirectNAot AI chat host in favor of the standard WebView2 package.
+- Updated NuGet dependencies, including a pin for `System.Security.Cryptography.Pkcs` to address GHSA-2fmv-rv2c-59x7 and GHSA-846f-f764-76mx.
+
+### Fixed
+
+- Netezza file import now rethrows errors instead of silently swallowing them.
+- SQL outline parsing and SQL execution routing fixes, with new routing tests.
+
 ## [1.1.0.22] - 2026-09-09
 
 ### Fixed

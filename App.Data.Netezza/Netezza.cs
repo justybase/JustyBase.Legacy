@@ -1193,6 +1193,7 @@ public sealed class Netezza : GeneralDb, INetezza
         catch (Exception ex)
         {
             _logger.LogError("Error during import from file", ex);
+            throw;
         }
     }
 
