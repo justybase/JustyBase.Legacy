@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0.24] - 2026-10-17
+
+### Added
+
+- Framework-dependent Windows x64 installer and ZIP alongside the self-contained package. The framework-dependent build requires the .NET 10 Windows Desktop Runtime (x64).
+
 ## [1.1.0.23] - 2026-10-17
 
 ### Changed

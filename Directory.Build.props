@@ -3,7 +3,7 @@
     <Nullable>annotations</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <NoWarn>$(NoWarn);WFO1000;MSB3277</NoWarn>
-    <Version>1.1.0.23</Version>
+    <Version>1.1.0.24</Version>
     <Authors>Krzysztof Duśko</Authors>
     <PackageLicenseExpression>LGPL-3.0-or-later</PackageLicenseExpression>
     <Deterministic>true</Deterministic>
