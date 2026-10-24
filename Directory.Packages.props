@@ -12,7 +12,7 @@
     <PackageVersion Include="Oracle.ManagedDataAccess.Core" Version="23.26.301" />
     <PackageVersion Include="JustyBase.Db2.IBMCompat" Version="0.1.0-alpha.2" />
     <PackageVersion Include="Npgsql" Version="10.0.3" />
-    <PackageVersion Include="JustyBase.NetezzaDriver" Version="1.9.5" />
+    <PackageVersion Include="JustyBase.NetezzaDriver" Version="1.10.0" />
     <PackageVersion Include="Hogimn.Sql.Formatter" Version="2.0.4" />
     <PackageVersion Include="SpreadSheetTasks" Version="1.0.3" />
     <PackageVersion Include="Sylvan.Data.Csv" Version="1.4.4" />
