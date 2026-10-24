@@ -14,7 +14,7 @@
     <PackageVersion Include="Npgsql" Version="10.0.3" />
     <PackageVersion Include="JustyBase.NetezzaDriver" Version="1.9.5" />
     <PackageVersion Include="Hogimn.Sql.Formatter" Version="2.0.4" />
-    <PackageVersion Include="SpreadSheetTasks" Version="1.0.3" />
+    <PackageVersion Include="SpreadSheetTasks" Version="2.1.0" />
     <PackageVersion Include="Sylvan.Data.Csv" Version="1.4.4" />
     <PackageVersion Include="DockPanelSuite" Version="3.1.1" />
     <PackageVersion Include="DockPanelSuite.ThemeVS2015" Version="3.1.1" />
