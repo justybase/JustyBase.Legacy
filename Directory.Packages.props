@@ -27,6 +27,6 @@
     <PackageVersion Include="NSubstitute" Version="6.2.0" />
     <PackageVersion Include="Microsoft.Extensions.AI" Version="10.8.3" />
     <PackageVersion Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
-    <PackageVersion Include="Markdig" Version="1.4.1" />
+    <PackageVersion Include="Markdig" Version="1.5.1" />
   </ItemGroup>
 </Project>
