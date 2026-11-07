@@ -242,9 +242,11 @@ $slimAppName = 'JustyBaseLegacy Slim'
 $slimAppId = '{{5F718B72-A986-407C-9E00-C27B20438619}'
 $isccArguments = @($installerScript, "/DMyAppVersion=$Version", "/DSourcePath=$stagingPath")
 if ($isSlim) {
-    # Quote the display name: ISCC parses its own command line, so a value
-    # with a space must be quoted to survive as a single /D define.
-    $isccArguments += "/DMyAppName=`"$slimAppName`""
+    # No embedded quotes: PowerShell quotes the whole argument for the native
+    # command line when it contains a space, so ISCC receives a single
+    # /DMyAppName=... argument. (Embedded value-only quotes split it into two
+    # arguments and ISCC fails with "more than one script filename".)
+    $isccArguments += "/DMyAppName=$slimAppName"
     $isccArguments += "/DMyAppId=$slimAppId"
 }
 if ($variantSuffix) {
