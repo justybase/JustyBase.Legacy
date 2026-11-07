@@ -22,6 +22,7 @@
   </Project>
   <Project Path="JustData.ViewModels/JustData.ViewModels.csproj" />
 
+<Project Path="../JustyBase.NetezzaSql/JustyBase.Ai.Contracts/JustyBase.Ai.Contracts.csproj" />
 <Project Path="../JustyBase.NetezzaSql/JustyBase.Ai/JustyBase.Ai.csproj" />
 <Project Path="../JustyBase.NetezzaSql/JustyBase.Ai.Embedded/JustyBase.Ai.Embedded.csproj" />
 <Project Path="../JustyBase.NetezzaSql/JustyBase.Core/JustyBase.Core.csproj" />

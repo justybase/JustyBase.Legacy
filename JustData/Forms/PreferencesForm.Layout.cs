@@ -51,7 +51,9 @@ namespace JustyBaseLegacy.UI
         private readonly List<ColorSettingControl> _colorEditors = new();
         private readonly List<Panel> _preferenceCardPanels = new();
         private readonly List<GroupBox> _preferenceCardFrames = new();
+#if AI
         private TabPage _tabEmbeddedFim;
+#endif
 
         private void BuildModernLayout()
         {
@@ -87,6 +89,7 @@ namespace JustyBaseLegacy.UI
                 tabResults,
                 "results format formatting preset date integer decimal rows limit warning timeout filter pin scale tabs"));
 
+#if AI
             _tabEmbeddedFim = new TabPage("Embedded AI")
             {
                 Name = "tabEmbeddedFim",
@@ -114,6 +117,7 @@ namespace JustyBaseLegacy.UI
                 "✆",
                 _tabAiChat,
                 "ai chat provider codex copilot openai compatible local embedded llama gguf model endpoint api key temperature tokens timeout retries"));
+#endif
 
             foreach (PreferenceSection section in _preferenceSections)
             {

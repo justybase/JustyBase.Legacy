@@ -1,0 +1,9 @@
+<Project>
+  <!--
+    Define the AI preprocessor constant late so every project in this
+    repository sees the same EnableAi switch after its own properties are set.
+  -->
+  <PropertyGroup Condition="'$(EnableAi)' == 'true'">
+    <DefineConstants>$(DefineConstants);AI</DefineConstants>
+  </PropertyGroup>
+</Project>

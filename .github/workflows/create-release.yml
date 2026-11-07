@@ -207,6 +207,68 @@ jobs:
         Copy-Item -LiteralPath $installers[0].FullName -Destination $assets
         Copy-Item -LiteralPath $zip -Destination $assets
 
+    - name: Publish slim framework-dependent application and create installer
+      shell: pwsh
+      run: |
+        ./scripts/build-installer.ps1 `
+          -Version "${{ steps.get_version.outputs.version }}" `
+          -Configuration Release `
+          -NoRestore `
+          -SelfContained:$false `
+          -SlimDb2
+
+    - name: Verify slim framework-dependent application
+      run: |
+        $publishPath = Join-Path $pwd "${{ env.SETUP_FILES_PATH }}"
+        $executable = Join-Path $publishPath "JustyBaseLegacy.exe"
+        if (-not (Test-Path -LiteralPath $executable)) {
+          throw "Application executable was not produced: $executable"
+        }
+        if ((Get-Item -LiteralPath $executable).Length -le 0) {
+          throw "Application executable is empty: $executable"
+        }
+        foreach ($forbidden in @('Microsoft.Data.SqlClient.dll', 'Npgsql.dll', 'JustyBase.Ai.dll', 'JustyBase.Ai.Embedded.dll', 'Markdig.dll')) {
+          if (Test-Path -LiteralPath (Join-Path $publishPath $forbidden)) {
+            throw "Slim publish must not contain: $forbidden"
+          }
+        }
+        foreach ($required in @('JustyBase.Db2.IBMCompat.dll', 'JustyBase.Db2.dll')) {
+          if (-not (Test-Path -LiteralPath (Join-Path $publishPath $required))) {
+            throw "Slim publish is missing required DB2 driver: $required"
+          }
+        }
+        Write-Host "Verified slim application: $executable"
+
+        $process = Start-Process -FilePath $executable -ArgumentList "--smoke-test" -PassThru
+        if (-not $process.WaitForExit(30000)) {
+          Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          throw "Slim framework-dependent startup smoke test timed out."
+        }
+        if ($process.ExitCode -ne 0) {
+          throw "Slim framework-dependent startup smoke test failed with exit code $($process.ExitCode)."
+        }
+        Write-Host "Slim framework-dependent startup smoke test passed."
+
+    - name: Create slim framework-dependent ZIP package
+      run: |
+        Compress-Archive -Path "./${{ env.SETUP_FILES_PATH }}/*" -DestinationPath "./JustyBaseLegacy-${{ steps.get_version.outputs.version }}-slim-db2-framework-dependent.zip"
+
+    - name: Verify and stage slim framework-dependent release assets
+      shell: pwsh
+      run: |
+        $version = "${{ steps.get_version.outputs.version }}"
+        $zip = Join-Path $pwd "JustyBaseLegacy-$version-slim-db2-framework-dependent.zip"
+        if (-not (Test-Path -LiteralPath $zip)) {
+          throw "Slim framework-dependent ZIP package was not produced: $zip"
+        }
+        $installers = @(Get-ChildItem -Path "./JustData/Installers/Offline/Output" -Filter "*-slim-db2-framework-dependent.exe" -File)
+        if ($installers.Count -ne 1) {
+          throw "Expected exactly one slim framework-dependent installer, found $($installers.Count)."
+        }
+        $assets = Join-Path $pwd 'release-assets'
+        Copy-Item -LiteralPath $installers[0].FullName -Destination $assets
+        Copy-Item -LiteralPath $zip -Destination $assets
+
     - name: Prepare release notes
       id: release_notes
       shell: pwsh
@@ -225,7 +287,8 @@ jobs:
           "",
           "### Downloads",
           "- **Self-contained** (`JustyBaseLegacy-$version.exe` / `.zip`): includes the .NET runtime, no prerequisites.",
-          "- **Framework-dependent** (`JustyBaseLegacy-$version-framework-dependent.exe` / `.zip`): smaller download; requires the [.NET 10 Windows Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)."
+          "- **Framework-dependent** (`JustyBaseLegacy-$version-framework-dependent.exe` / `.zip`): smaller download; requires the [.NET 10 Windows Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0).",
+          "- **Slim (Netezza + DB2, no-AI)** (`JustyBaseLegacy-$version-slim-db2-framework-dependent.exe` / `.zip`): framework-dependent, no MS SQL Server / PostgreSQL / AI features; installs side-by-side with full as `JustyBaseLegacy Slim`."
         ) -join "`n"
         "$body`n$packages" | Out-File -FilePath release-notes.md -Encoding utf8
 

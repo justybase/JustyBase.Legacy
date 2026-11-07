@@ -123,6 +123,7 @@ public sealed class PreferencesUiTests : IDisposable
         }
     }
 
+#if AI
     [Fact]
     [Trait("Category", "UI")]
     public void Preferences_AIChat_has_one_master_switch_and_a_provider_selector()
@@ -183,6 +184,7 @@ public sealed class PreferencesUiTests : IDisposable
             }
         }
     }
+#endif
 
     [Fact]
     [Trait("Category", "UI")]

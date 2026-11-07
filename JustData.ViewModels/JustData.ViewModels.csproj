@@ -16,6 +16,13 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.NetezzaSqlParser.csproj" />
-    <ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.Ai\JustyBase.Ai.csproj" />
+    <!-- GitViewModel uses only the dependency-free commit-message contract. -->
+    <ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.Ai.Contracts\JustyBase.Ai.Contracts.csproj" />
+    <ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.Ai\JustyBase.Ai.csproj"
+                      Condition="'$(EnableAi)' == 'true'" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(EnableAi)' != 'true'">
+    <!-- ChatViewModel depends on the full AI pipeline and is not part of the no-AI build. -->
+    <Compile Remove="Ai\**\*.cs" />
   </ItemGroup>
 </Project>

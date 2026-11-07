@@ -28,11 +28,14 @@ internal sealed class PreferencesDockContent : DockContent
         Action saveRecentFiles,
         IUiHelperService uiHelperService,
         IColorTheme colorTheme,
-        INetezzaAutocompleteState netezzaAutocompleteState,
-        JustyBase.Ai.Embedded.Download.IModelCatalog? fimCatalog = null,
-        JustyBase.Ai.Embedded.Server.IFimModelBootstrapService? fimBootstrap = null,
-        JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null,
-        JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? chatBootstrap = null)
+        INetezzaAutocompleteState netezzaAutocompleteState
+#if AI
+        , JustyBase.Ai.Embedded.Download.IModelCatalog? fimCatalog = null
+        , JustyBase.Ai.Embedded.Server.IFimModelBootstrapService? fimBootstrap = null
+        , JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null
+        , JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? chatBootstrap = null
+#endif
+        )
     {
         Text = "JustyBase Settings";
         TabText = "JustyBase Settings";
@@ -51,11 +54,14 @@ internal sealed class PreferencesDockContent : DockContent
             saveRecentFiles,
             uiHelperService,
             colorTheme,
-            netezzaAutocompleteState,
-            fimCatalog: fimCatalog,
-            fimBootstrap: fimBootstrap,
-            chatCatalog: chatCatalog,
-            chatBootstrap: chatBootstrap);
+            netezzaAutocompleteState
+#if AI
+            , fimCatalog: fimCatalog
+            , fimBootstrap: fimBootstrap
+            , chatCatalog: chatCatalog
+            , chatBootstrap: chatBootstrap
+#endif
+            );
         _preferencesForm.PrepareForDocumentHost();
         _preferencesForm.FormClosed += PreferencesForm_FormClosed;
         Controls.Add(_preferencesForm);

@@ -724,11 +724,14 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
         Action saveRecentFiles,
         IUiHelperService uiHelperService,
         IColorTheme colorTheme,
-        INetezzaAutocompleteState netezzaAutocompleteState,
-        JustyBase.Ai.Embedded.Download.IModelCatalog? fimCatalog = null,
-        JustyBase.Ai.Embedded.Server.IFimModelBootstrapService? fimBootstrap = null,
-        JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null,
-        JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? chatBootstrap = null)
+        INetezzaAutocompleteState netezzaAutocompleteState
+#if AI
+        , JustyBase.Ai.Embedded.Download.IModelCatalog? fimCatalog = null
+        , JustyBase.Ai.Embedded.Server.IFimModelBootstrapService? fimBootstrap = null
+        , JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null
+        , JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? chatBootstrap = null
+#endif
+        )
     {
         if (_preferencesContent is not null && !_preferencesContent.IsDisposed)
         {
@@ -746,11 +749,14 @@ internal sealed class DockSuiteTabManager : ITabManager, IDisposable
             saveRecentFiles,
             uiHelperService,
             colorTheme,
-            netezzaAutocompleteState,
-            fimCatalog,
-            fimBootstrap,
-            chatCatalog,
-            chatBootstrap);
+            netezzaAutocompleteState
+#if AI
+            , fimCatalog
+            , fimBootstrap
+            , chatCatalog
+            , chatBootstrap
+#endif
+            );
         _preferencesContent.Show(_dockPanel, DockState.Document);
         _preferencesContent.Activate();
     }

@@ -56,9 +56,11 @@ public sealed class CompositionRootTests
         var firstSnippetContext = firstScope.ServiceProvider.GetRequiredService<ISnippetInitializationContext>();
         var firstTabNameProvider = firstScope.ServiceProvider.GetRequiredService<ITabNameProvider>();
         var firstDdlProvider = firstScope.ServiceProvider.GetRequiredService<INetezzaDdlCodeProvider>();
+#if AI
         var firstChatViewModel = firstScope.ServiceProvider.GetRequiredService<JustData.ViewModels.Ai.ChatViewModel>();
         var firstChatService = firstScope.ServiceProvider.GetRequiredService<JustyBase.Ai.Services.ICopilotChatService>();
         var firstChatSettings = firstScope.ServiceProvider.GetRequiredService<JustyBase.Ai.Ports.IChatSettingsStore>();
+#endif
 
         firstScope.Dispose();
         Assert.Throws<ObjectDisposedException>(() => firstFileWatch.Watch([], _ => { }));
@@ -89,15 +91,17 @@ public sealed class CompositionRootTests
         Assert.NotNull(firstObjectExplorer);
         Assert.NotNull(firstVariables);
         Assert.NotNull(firstImportOperation);
+#if AI
         Assert.NotNull(firstChatViewModel);
         Assert.NotNull(firstChatService);
         Assert.NotNull(firstChatSettings);
+#endif
 
         using IServiceScope windowScope = provider.CreateScope();
-        // BaseWindow takes the ChatViewModel as a constructor dependency; the
-        // chat dispatcher resolves the window lazily, so this must not cycle.
-        // A headless run may fail inside WinForms InitializeComponent — but the
-        // DI graph itself (all chat services + the window parameters) must resolve.
+        // In the AI build BaseWindow takes the ChatViewModel as a constructor
+        // dependency; the chat dispatcher resolves the window lazily, so this
+        // must not cycle. A headless run may fail inside WinForms
+        // InitializeComponent - but the DI graph itself must resolve.
         try
         {
             _ = windowScope.ServiceProvider.GetRequiredService<BaseWindow>();

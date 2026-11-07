@@ -622,11 +622,14 @@ namespace JustyBaseLegacy.UI
                     _recentFileRuntimeContext.SaveRecentFiles,
                     _uiHelperService,
                     _colorTheme,
-                    _netezzaAutocompleteState,
-                    _fimModelCatalog,
-                    _fimModelBootstrap,
-                    _chatCatalog,
-                    _chatBootstrap);
+                    _netezzaAutocompleteState
+#if AI
+                    , _fimModelCatalog
+                    , _fimModelBootstrap
+                    , _chatCatalog
+                    , _chatBootstrap
+#endif
+                    );
                 return;
             }
 
@@ -639,11 +642,14 @@ namespace JustyBaseLegacy.UI
                 _recentFileRuntimeContext.SaveRecentFiles,
                 _uiHelperService,
                 _colorTheme,
-                _netezzaAutocompleteState,
-                fimCatalog: _fimModelCatalog,
-                fimBootstrap: _fimModelBootstrap,
-                chatCatalog: _chatCatalog,
-                chatBootstrap: _chatBootstrap);
+                _netezzaAutocompleteState
+#if AI
+                , fimCatalog: _fimModelCatalog
+                , fimBootstrap: _fimModelBootstrap
+                , chatCatalog: _chatCatalog
+                , chatBootstrap: _chatBootstrap
+#endif
+                );
             pr.ShowDialog();
         }
 

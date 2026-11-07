@@ -106,3 +106,6 @@ jobs:
 
       - name: Check whitespace
         run: git diff --check
+
+      - name: Build no-AI variant
+        run: dotnet build JustData.NoAi.slnx -c Release -p:EnableAi=false -p:Platform=${{ env.DOTNET_PLATFORM }}

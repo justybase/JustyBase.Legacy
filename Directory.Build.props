@@ -3,7 +3,7 @@
     <Nullable>annotations</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <NoWarn>$(NoWarn);WFO1000;MSB3277</NoWarn>
-    <Version>1.1.0.24</Version>
+    <Version>1.1.0.25</Version>
     <Authors>Krzysztof Duśko</Authors>
     <PackageLicenseExpression>LGPL-3.0-or-later</PackageLicenseExpression>
     <Deterministic>true</Deterministic>
@@ -21,6 +21,15 @@
     <IncludeDB2 Condition="'$(IncludeDB2)' == ''">true</IncludeDB2>
     <IncludeMsSql Condition="'$(IncludeMsSql)' == ''">true</IncludeMsSql>
     <IncludePostgres Condition="'$(IncludePostgres)' == ''">true</IncludePostgres>
+
+    <!--
+      Set EnableAi=false to build the WinForms application without the optional
+      AI components and their heavy NuGet dependencies (GitHub.Copilot.SDK,
+      Microsoft.Extensions.AI, OpenAI, WebView2/Markdig, and embedded
+      llama.cpp model management). The no-AI build keeps the lightweight,
+      dependency-free JustyBase.Ai.Contracts project only.
+    -->
+    <EnableAi Condition="'$(EnableAi)' == ''">true</EnableAi>
 
   </PropertyGroup>
 </Project>

@@ -44,7 +44,10 @@ Get the latest **Windows x64** build from [GitHub Releases](https://github.com/j
 - Inno Setup installer, or
 - Portable ZIP (self-contained)
 
-No separate .NET runtime install required for release packages.
+Release assets:
+- **Self-contained full** — includes the .NET runtime, no prerequisites.
+- **Framework-dependent full** (`-framework-dependent`) — smaller download; requires the [.NET 10 Windows Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0).
+- **Slim (Netezza + DB2, no-AI)** (`-slim-db2-framework-dependent`) — framework-dependent, without MS SQL Server / PostgreSQL / AI features; installs side-by-side with full as `JustyBaseLegacy Slim`.
 
 ---
 
@@ -155,10 +158,34 @@ Self-contained publish:
 dotnet publish JustData/JustData.csproj -c Release -r win-x64 --self-contained true
 ```
 
+### No-AI build
+
+To build without the optional AI features and their heavy NuGet dependencies
+(Copilot SDK, Microsoft.Extensions.AI, WebView2/Markdig, embedded llama.cpp),
+set `EnableAi=false`. The dependency-free `JustyBase.Ai.Contracts` project is
+still referenced for shared chat models and git contracts.
+
+```powershell
+dotnet build JustData.NoAi.slnx -c Release -p:EnableAi=false
+```
+
+See [docs/NO_AI_BUILD.md](docs/NO_AI_BUILD.md) for the excluded components and
+verification commands.
+
 Build the local self-contained `win-x64` installer (requires Inno Setup 6):
 
 ```powershell
 ./scripts/build-installer.ps1 -Version 1.0.0.0
+```
+
+Framework-dependent variants (require the .NET 10 Windows Desktop Runtime x64 on the target):
+
+```powershell
+# Full, framework-dependent
+./scripts/build-installer.ps1 -Version 1.0.0.0 -SelfContained:$false
+
+# Slim: Netezza + DB2 only, no-AI, installs side-by-side as "JustyBaseLegacy Slim"
+./scripts/build-installer.ps1 -Version 1.0.0.0 -SelfContained:$false -SlimDb2
 ```
 
 The script recreates the publish staging directory on every run, removes development symbols/documentation files, and leaves exactly one installer in `JustData/Installers/Offline/Output`.

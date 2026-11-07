@@ -17,7 +17,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.ImportExport\JustyBase.ImportExport.csproj" />
-    <ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.Ai\JustyBase.Ai.csproj" />
+    <!-- ChatSession/ChatMessage live in the dependency-free contracts project. -->
+    <ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.Ai.Contracts\JustyBase.Ai.Contracts.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

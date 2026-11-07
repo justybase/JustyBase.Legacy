@@ -70,13 +70,32 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" />
 		<PackageReference Include="DockPanelSuite" />
 		<PackageReference Include="DockPanelSuite.ThemeVS2015" />
-		<PackageReference Include="Microsoft.Web.WebView2" />
-		<PackageReference Include="Markdig" />
+		<!-- Used only by the AI chat panel (WebView2 + Markdig markdown rendering). -->
+		<PackageReference Include="Microsoft.Web.WebView2" Condition="'$(EnableAi)' == 'true'" />
+		<PackageReference Include="Markdig" Condition="'$(EnableAi)' == 'true'" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.Ai\JustyBase.Ai.csproj" />
-		<ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.Ai.Embedded\JustyBase.Ai.Embedded.csproj" />
+		<!-- The host keeps the dependency-free chat/git contracts in every build. -->
+		<ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.Ai.Contracts\JustyBase.Ai.Contracts.csproj" />
+		<ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.Ai\JustyBase.Ai.csproj"
+		                  Condition="'$(EnableAi)' == 'true'" />
+		<ProjectReference Include="..\..\JustyBase.NetezzaSql\JustyBase.Ai.Embedded\JustyBase.Ai.Embedded.csproj"
+		                  Condition="'$(EnableAi)' == 'true'" />
+	</ItemGroup>
+
+	<ItemGroup Condition="'$(EnableAi)' != 'true'">
+		<!--
+			No-AI build: remove every source file that depends on the optional AI
+			pipeline. The remaining integration points compile against
+			JustyBase.Ai.Contracts and use #if AI for the AI-only calls.
+		-->
+		<Compile Remove="Ai\**\*.cs" />
+		<Compile Remove="Fim\**\*.cs" />
+		<Compile Remove="BaseWindow.AiChat.cs" />
+		<Compile Remove="Editor\InlineCompletion\FctbInlineCompletionController.cs" />
+		<Compile Remove="Controls\AiChatPreferencesPanel.cs" />
+		<Compile Remove="Controls\EmbeddedFimPreferencesPanel.cs" />
 	</ItemGroup>
 
 	<ItemGroup>

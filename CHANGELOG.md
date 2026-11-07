@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0.25] - 2026-11-07
+
+### Added
+
+- No-AI build (`EnableAi=false`, `JustData.NoAi.slnx`): application without the optional AI features and their heavy dependencies (Copilot SDK, Microsoft.Extensions.AI, WebView2/Markdig, embedded llama.cpp). See `docs/NO_AI_BUILD.md`.
+- Slim installer variant (Netezza + DB2 only, no-AI, framework-dependent): `JustyBaseLegacy Slim` installs side-by-side with full (separate AppId, directory, and Start Menu group) via `build-installer.ps1 -SlimDb2`.
+- Slim framework-dependent ZIP and installer are now published as GitHub release assets alongside full self-contained and framework-dependent packages.
+
 ## [1.1.0.24] - 2026-10-17
 
 ### Added

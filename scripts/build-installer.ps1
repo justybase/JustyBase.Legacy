@@ -14,7 +14,17 @@ param(
     # Self-contained (default) bundles the .NET runtime. Framework-dependent
     # builds require the .NET 10 Windows Desktop Runtime (x64) on the target.
     [Parameter()]
-    [bool] $SelfContained = $true
+    [bool] $SelfContained = $true,
+
+    # Build without the optional AI features and their heavy dependencies.
+    [Parameter()]
+    [switch] $NoAi,
+
+    # Slim variant: Netezza + DB2 only (no MS SQL Server / PostgreSQL),
+    # always without AI. Installs side-by-side with full (separate AppId,
+    # install directory, and Start Menu group).
+    [Parameter()]
+    [switch] $SlimDb2
 )
 
 $ErrorActionPreference = 'Stop'
@@ -49,7 +59,13 @@ if (Test-Path -LiteralPath $stagingPath) {
 }
 New-Item -ItemType Directory -Path $stagingPath -Force | Out-Null
 
-Write-Host "Publishing $Configuration application"
+$isSlim = $SlimDb2.IsPresent
+$enableAi = if ($isSlim) { 'false' } elseif ($NoAi) { 'false' } else { 'true' }
+$includeMsSql = if ($isSlim) { 'false' } else { 'true' }
+$includePostgres = if ($isSlim) { 'false' } else { 'true' }
+# Both variants ship Netezza + DB2. Oracle stays opt-in (default off).
+$slimLabel = if ($isSlim) { ' slim (Netezza+DB2, no-AI)' } else { '' }
+Write-Host "Publishing $Configuration application (EnableAi=$enableAi, IncludeMsSql=$includeMsSql, IncludePostgres=$includePostgres)$slimLabel"
 $publishArguments = @(
     'publish',
     $appProject,
@@ -57,8 +73,11 @@ $publishArguments = @(
     '-r', 'win-x64',
     '-p:Platform=x64',
     '-p:IncludeDB2=true',
-    '-p:IncludeMsSql=true',
-    '-p:IncludePostgres=true',
+    "-p:IncludeMsSql=$includeMsSql",
+    "-p:IncludePostgres=$includePostgres",
+    "-p:EnableAi=$enableAi",
+    # Windows Forms does not support Native AOT/trimming; use the supported
+    # self-contained ReadyToRun configuration instead.
     '-p:UseAOT=false',
     '-p:PublishAot=false',
     '-p:PublishTrimmed=false',
@@ -116,11 +135,27 @@ foreach ($db2Assembly in @('JustyBase.Db2.dll', 'JustyBase.Db2.IBMCompat.dll')) 
 }
 
 if (-not (Test-Path -LiteralPath (Join-Path $stagingPath 'Microsoft.Data.SqlClient.dll') -PathType Leaf)) {
-    throw "MS SQL Server managed provider was not included in publish staging: $stagingPath"
+    if (-not $isSlim) {
+        throw "MS SQL Server managed provider was not included in publish staging: $stagingPath"
+    }
+} elseif ($isSlim) {
+    throw "Slim (Netezza+DB2) publish must not contain MS SQL Server provider: $stagingPath"
+}
+
+if ($enableAi -eq 'false') {
+    $unexpectedAiFiles = Get-ChildItem -LiteralPath $stagingPath -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -in @('JustyBase.Ai.dll', 'JustyBase.Ai.Embedded.dll', 'Markdig.dll', 'Microsoft.Web.WebView2.Core.dll', 'GitHub.Copilot.SDK.dll', 'Microsoft.Extensions.AI.dll') }
+    if ($unexpectedAiFiles) {
+        throw "No-AI/slim publish must not contain AI assemblies: $($unexpectedAiFiles.FullName -join ', ')"
+    }
 }
 
 if (-not (Test-Path -LiteralPath (Join-Path $stagingPath 'Npgsql.dll') -PathType Leaf)) {
-    throw "PostgreSQL managed provider was not included in publish staging: $stagingPath"
+    if (-not $isSlim) {
+        throw "PostgreSQL managed provider was not included in publish staging: $stagingPath"
+    }
+} elseif ($isSlim) {
+    throw "Slim (Netezza+DB2) publish must not contain PostgreSQL provider: $stagingPath"
 }
 
 $unexpectedFiles = Get-ChildItem -LiteralPath $stagingPath -Recurse -File |
@@ -160,9 +195,27 @@ if (-not $iscc) {
 }
 
 Write-Host "Building Inno Setup installer"
-$isccArguments = @($installerScript, "/DMyAppVersion=$Version", "/DSourcePath=$stagingPath")
+if ($isSlim -and -not $NoAi) {
+    Write-Warning 'Slim variant implies no-AI; ignoring missing -NoAi switch.'
+}
+$variantSuffix = if ($isSlim) { '-slim-db2' } elseif ($NoAi) { '-noai' } else { '' }
 if (-not $SelfContained) {
-    $isccArguments += '/DVariant=-framework-dependent'
+    $variantSuffix += '-framework-dependent'
+}
+# Slim installs side-by-side with full: separate display name (install
+# directory, Start Menu group, Add/Remove Programs) and separate AppId.
+# The full variant keeps the historical AppId and directory.
+$slimAppName = 'JustyBaseLegacy Slim'
+$slimAppId = '{{5F718B72-A986-407C-9E00-C27B20438619}'
+$isccArguments = @($installerScript, "/DMyAppVersion=$Version", "/DSourcePath=$stagingPath")
+if ($isSlim) {
+    # Quote the display name: ISCC parses its own command line, so a value
+    # with a space must be quoted to survive as a single /D define.
+    $isccArguments += "/DMyAppName=`"$slimAppName`""
+    $isccArguments += "/DMyAppId=$slimAppId"
+}
+if ($variantSuffix) {
+    $isccArguments += "/DVariant=$variantSuffix"
 }
 
 & $iscc @isccArguments

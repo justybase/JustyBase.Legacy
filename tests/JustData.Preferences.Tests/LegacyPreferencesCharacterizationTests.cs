@@ -2,7 +2,9 @@ using AppBase.Common;
 using AppBase.Common.Configuration;
 using AppBase.Common.Interfaces;
 using JustData.Application.Settings;
+#if AI
 using JustyBaseLegacy.UI.Ai;
+#endif
 using JustyBaseLegacy.UI.Configuration;
 using NSubstitute;
 using System.Text.Json;
@@ -167,6 +169,7 @@ public sealed class LegacyPreferencesCharacterizationTests
         Assert.Equal("qwen3.5-4b", mapped.EmbeddedChatModelId);
     }
 
+#if AI
     [Fact]
     public void Legacy_chat_settings_store_reads_and_writes_the_model_for_the_selected_provider()
     {
@@ -199,4 +202,5 @@ public sealed class LegacyPreferencesCharacterizationTests
         Assert.Equal("qwen-new-model", config.EmbeddedChatModelId);
         ((IApplicationSettingsPersistence)context).Received(2).SaveConfig();
     }
+#endif
 }

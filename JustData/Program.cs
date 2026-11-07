@@ -35,8 +35,10 @@ using JustData.Application.History;
 using JustyBase.Ai.Git;
 using JustyBase.Core.Git;
 using JustData.ViewModels.Git;
+#if AI
 using JustyBaseLegacy.UI.Fim;
 using JustyBaseLegacy.UI.Ai;
+#endif
 
 using JustyBaseLegacy.UI.Configuration;
 using JustyBase.Core.Database;
@@ -101,10 +103,12 @@ public static class Program
 
             Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
 
+#if AI
             // Kill llama-server children orphaned by a previously crashed or force-killed
             // instance (they hold VRAM/RAM and are never auto-exited). Only servers whose
             // owner process is dead are touched — a running second instance is safe.
             JustyBase.Ai.Embedded.Server.LlamaServerProcessRegistry.CleanupOrphans();
+#endif
 
             ServiceCollection services = new();
             ConfigureServices(services);
@@ -217,8 +221,12 @@ public static class Program
         services.AddSingleton<IFilePickerService, WinFormsFilePickerService>();
         services.AddScoped<FilesViewModel>();
         services.AddSingleton<IGitService, SystemGitService>();
+#if AI
         services.AddEmbeddedFimCompletion();
         services.AddAiChatServices();
+#else
+        services.AddSingleton<IGitCommitMessageAiService, UnavailableGitCommitMessageAiService>();
+#endif
         services.AddScoped<GitViewModel>();
         services.AddScoped<ISqlExecutionSessionRegistry, SqlExecutionSessionRegistry>();
         services.AddScoped<IEditorCatalogState, EditorCatalogState>();

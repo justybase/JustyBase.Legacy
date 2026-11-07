@@ -40,6 +40,7 @@ namespace JustyBaseLegacy.UI
         private readonly PreferencesViewModel _settingsViewModel;
         private SnippetSettings _pendingSnippets = new();
         private bool _specialColoringHandlerAttached;
+#if AI
         private readonly JustyBase.Ai.Embedded.Download.IModelCatalog? _fimCatalog;
         private readonly JustyBase.Ai.Embedded.Server.IFimModelBootstrapService? _fimBootstrap;
         private EmbeddedFimPreferencesPanel? _embeddedFimPanel;
@@ -47,6 +48,7 @@ namespace JustyBaseLegacy.UI
         private TabPage? _tabAiChat;
         private readonly JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? _chatCatalog;
         private readonly JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? _chatBootstrap;
+#endif
 
         public PreferencesForm(Action repaintApplication, Action saveManySqlToDisk,
             IApplicationSettingsContext applicationSettingsContext,
@@ -56,11 +58,14 @@ namespace JustyBaseLegacy.UI
             IUiHelperService uiHelperService,
             IColorTheme colorTheme,
             INetezzaAutocompleteState netezzaAutocompleteState,
-            PreferencesViewModel? settingsViewModel = null,
-            JustyBase.Ai.Embedded.Download.IModelCatalog? fimCatalog = null,
-            JustyBase.Ai.Embedded.Server.IFimModelBootstrapService? fimBootstrap = null,
-            JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null,
-            JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? chatBootstrap = null)
+            PreferencesViewModel? settingsViewModel = null
+#if AI
+            , JustyBase.Ai.Embedded.Download.IModelCatalog? fimCatalog = null
+            , JustyBase.Ai.Embedded.Server.IFimModelBootstrapService? fimBootstrap = null
+            , JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? chatCatalog = null
+            , JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? chatBootstrap = null
+#endif
+            )
         {
             _applicationSettingsContext = applicationSettingsContext ?? throw new ArgumentNullException(nameof(applicationSettingsContext));
             _netezzaAutocompleteState = netezzaAutocompleteState ?? throw new ArgumentNullException(nameof(netezzaAutocompleteState));
@@ -71,10 +76,12 @@ namespace JustyBaseLegacy.UI
             _saveManySqlToDisk = saveManySqlToDisk ?? throw new ArgumentNullException(nameof(saveManySqlToDisk));
             _uiHelperService = uiHelperService;
             _config = _applicationSettingsContext.Config;
+#if AI
             _fimCatalog = fimCatalog;
             _fimBootstrap = fimBootstrap;
             _chatCatalog = chatCatalog;
             _chatBootstrap = chatBootstrap;
+#endif
             _themePreviewAdapter = new WinFormsSettingsThemePreviewAdapter(
                 _applicationSettingsContext,
                 _repaintApplication)
@@ -90,8 +97,10 @@ namespace JustyBaseLegacy.UI
             InitializeNumberFormatControls();
             _colorize = colorTheme;
             BuildModernLayout();
+#if AI
             EnsureEmbeddedFimPanel();
             EnsureAiChatPanel();
+#endif
             string lg = System.Globalization.CultureInfo.CurrentCulture.TwoLetterISOLanguageName;
 
             startupPathsDgv.Visible = true;
@@ -127,6 +136,7 @@ namespace JustyBaseLegacy.UI
             }
         }
 
+#if AI
         private void EnsureEmbeddedFimPanel()
         {
             if (_tabEmbeddedFim is null || _fimCatalog is null || _fimBootstrap is null)
@@ -159,6 +169,7 @@ namespace JustyBaseLegacy.UI
             _aiChatPanel = panel;
             _tabAiChat.Controls.Add(panel);
         }
+#endif
 
         internal void PrepareForDocumentHost()
         {
@@ -190,7 +201,9 @@ namespace JustyBaseLegacy.UI
             _config = LegacyApplicationSettingsMapper.ToLegacy(_settingsViewModel.Draft);
             _pendingSnippets = _settingsViewModel.Draft.Snippets.Clone();
             LoadFromConfig();
+#if AI
             _aiChatPanel?.LoadFromConfig(_config);
+#endif
             LoadSnippets();
             checkBoxSpecialColoring.Checked = _config.UseSpecialColoring;
             if (!_specialColoringHandlerAttached)
@@ -839,11 +852,13 @@ namespace JustyBaseLegacy.UI
 
         private void SyncViewModelFromLegacyBuffer()
         {
+#if AI
             _embeddedFimPanel?.ApplyCurrentSettingsTo(_config);
             // The AI panel has its own controls, but Preferences saves one transactional
             // buffer. Merge those controls into that buffer before rebuilding the draft; reading
             // the live settings context here would overwrite the user's unsaved changes.
             _aiChatPanel?.ApplyCurrentSettingsTo(_config);
+#endif
             _settingsViewModel.ReplaceDraft(LegacyApplicationSettingsMapper.ToSnapshot(_config, _pendingSnippets).ToDraft());
         }
 
