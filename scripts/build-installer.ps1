@@ -66,13 +66,41 @@ $includePostgres = if ($isSlim) { 'false' } else { 'true' }
 # Both variants ship Netezza + DB2. Oracle stays opt-in (default off).
 $slimLabel = if ($isSlim) { ' slim (Netezza+DB2, no-AI)' } else { '' }
 Write-Host "Publishing $Configuration application (EnableAi=$enableAi, IncludeMsSql=$includeMsSql, IncludePostgres=$includePostgres)$slimLabel"
-# Publish variants differ only by MSBuild flags (EnableAi/Include*), but
-# MSBuild treats global-property changes as up-to-date and skips recompilation.
-# A plain `dotnet publish` would then reuse the previous variant's reference
-# closure (SqlClient/Npgsql/AI assemblies leaking into slim). Force a full
-# rebuild with the active flags first, then publish from those outputs.
-$buildArguments = @(
-    'build',
+# Slim uses different MSBuild flags than every preceding build in the
+# session, but MSBuild treats global-property changes as up-to-date and skips
+# recompilation. A plain `dotnet publish` would then reuse the previous
+# variant's reference closure (SqlClient/Npgsql/AI assemblies leaking into
+# slim, verified locally). Force a full rebuild with the slim flags first;
+# the full variants keep the standard single-step publish, which already
+# produces correct self-contained output (publish --no-build broke the
+# self-contained apphost smoke test in CI).
+if ($isSlim) {
+    $slimBuildArguments = @(
+        'build',
+        $appProject,
+        '-c', $Configuration,
+        '-r', 'win-x64',
+        '-p:Platform=x64',
+        '-p:IncludeDB2=true',
+        "-p:IncludeMsSql=$includeMsSql",
+        "-p:IncludePostgres=$includePostgres",
+        "-p:EnableAi=$enableAi",
+        '-p:UseAOT=false',
+        '-p:PublishAot=false',
+        '-p:PublishTrimmed=false',
+        '-p:PublishReadyToRun=true',
+        "-p:Version=$Version",
+        '--no-incremental'
+    )
+
+    & dotnet @slimBuildArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet build failed with exit code $LASTEXITCODE"
+    }
+}
+
+$publishArguments = @(
+    'publish',
     $appProject,
     '-c', $Configuration,
     '-r', 'win-x64',
@@ -87,38 +115,13 @@ $buildArguments = @(
     '-p:PublishAot=false',
     '-p:PublishTrimmed=false',
     '-p:PublishReadyToRun=true',
-    "-p:Version=$Version",
-    '--no-incremental'
-)
-if ($NoRestore) {
-    $buildArguments += '--no-restore'
-}
-
-& dotnet @buildArguments
-if ($LASTEXITCODE -ne 0) {
-    throw "dotnet build failed with exit code $LASTEXITCODE"
-}
-
-$publishArguments = @(
-    'publish',
-    $appProject,
-    '-c', $Configuration,
-    '-r', 'win-x64',
-    '-p:Platform=x64',
-    '-p:IncludeDB2=true',
-    "-p:IncludeMsSql=$includeMsSql",
-    "-p:IncludePostgres=$includePostgres",
-    "-p:EnableAi=$enableAi",
-    '-p:UseAOT=false',
-    '-p:PublishAot=false',
-    '-p:PublishTrimmed=false',
-    '-p:PublishReadyToRun=true',
     '--self-contained', $SelfContained.ToString().ToLowerInvariant(),
-    '--no-build',
-    '--no-restore',
     '-o', $stagingPath,
     "-p:Version=$Version"
 )
+if ($NoRestore) {
+    $publishArguments += '--no-restore'
+}
 
 & dotnet @publishArguments
 if ($LASTEXITCODE -ne 0) {
