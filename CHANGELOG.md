@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Slim installer/ZIP filename simplified to `-slim-framework-dependent` (was `-slim-db2-framework-dependent`); contents unchanged (Netezza + DB2, no-AI).
+
 ## [1.1.0.25] - 2026-11-07
 
 ### Added

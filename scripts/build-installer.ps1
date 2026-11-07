@@ -231,7 +231,7 @@ Write-Host "Building Inno Setup installer"
 if ($isSlim -and -not $NoAi) {
     Write-Warning 'Slim variant implies no-AI; ignoring missing -NoAi switch.'
 }
-$variantSuffix = if ($isSlim) { '-slim-db2' } elseif ($NoAi) { '-noai' } else { '' }
+$variantSuffix = if ($isSlim) { '-slim' } elseif ($NoAi) { '-noai' } else { '' }
 if (-not $SelfContained) {
     $variantSuffix += '-framework-dependent'
 }

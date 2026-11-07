@@ -47,7 +47,7 @@ Get the latest **Windows x64** build from [GitHub Releases](https://github.com/j
 Release assets:
 - **Self-contained full** — includes the .NET runtime, no prerequisites.
 - **Framework-dependent full** (`-framework-dependent`) — smaller download; requires the [.NET 10 Windows Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0).
-- **Slim (Netezza + DB2, no-AI)** (`-slim-db2-framework-dependent`) — framework-dependent, without MS SQL Server / PostgreSQL / AI features; installs side-by-side with full as `JustyBaseLegacy Slim`.
+- **Slim (Netezza + DB2, no-AI)** (`-slim-framework-dependent`) — framework-dependent, without MS SQL Server / PostgreSQL / AI features; installs side-by-side with full as `JustyBaseLegacy Slim`.
 
 ---
 

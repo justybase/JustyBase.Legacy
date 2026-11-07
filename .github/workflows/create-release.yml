@@ -251,17 +251,17 @@ jobs:
 
     - name: Create slim framework-dependent ZIP package
       run: |
-        Compress-Archive -Path "./${{ env.SETUP_FILES_PATH }}/*" -DestinationPath "./JustyBaseLegacy-${{ steps.get_version.outputs.version }}-slim-db2-framework-dependent.zip"
+        Compress-Archive -Path "./${{ env.SETUP_FILES_PATH }}/*" -DestinationPath "./JustyBaseLegacy-${{ steps.get_version.outputs.version }}-slim-framework-dependent.zip"
 
     - name: Verify and stage slim framework-dependent release assets
       shell: pwsh
       run: |
         $version = "${{ steps.get_version.outputs.version }}"
-        $zip = Join-Path $pwd "JustyBaseLegacy-$version-slim-db2-framework-dependent.zip"
+        $zip = Join-Path $pwd "JustyBaseLegacy-$version-slim-framework-dependent.zip"
         if (-not (Test-Path -LiteralPath $zip)) {
           throw "Slim framework-dependent ZIP package was not produced: $zip"
         }
-        $installers = @(Get-ChildItem -Path "./JustData/Installers/Offline/Output" -Filter "*-slim-db2-framework-dependent.exe" -File)
+        $installers = @(Get-ChildItem -Path "./JustData/Installers/Offline/Output" -Filter "*-slim-framework-dependent.exe" -File)
         if ($installers.Count -ne 1) {
           throw "Expected exactly one slim framework-dependent installer, found $($installers.Count)."
         }
@@ -288,7 +288,7 @@ jobs:
           "### Downloads",
           "- **Self-contained** (`JustyBaseLegacy-$version.exe` / `.zip`): includes the .NET runtime, no prerequisites.",
           "- **Framework-dependent** (`JustyBaseLegacy-$version-framework-dependent.exe` / `.zip`): smaller download; requires the [.NET 10 Windows Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0).",
-          "- **Slim (Netezza + DB2, no-AI)** (`JustyBaseLegacy-$version-slim-db2-framework-dependent.exe` / `.zip`): framework-dependent, no MS SQL Server / PostgreSQL / AI features; installs side-by-side with full as `JustyBaseLegacy Slim`."
+          "- **Slim (Netezza + DB2, no-AI)** (`JustyBaseLegacy-$version-slim-framework-dependent.exe` / `.zip`): framework-dependent, no MS SQL Server / PostgreSQL / AI features; installs side-by-side with full as `JustyBaseLegacy Slim`."
         ) -join "`n"
         "$body`n$packages" | Out-File -FilePath release-notes.md -Encoding utf8
 
