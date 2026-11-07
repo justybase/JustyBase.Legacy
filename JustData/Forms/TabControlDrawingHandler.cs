@@ -22,6 +22,7 @@ public class TabControlDrawingHandler
     private readonly Image _normalPinImageSelected;
     private readonly Image _activePinImage;
     private readonly Image _activePinImageSelected;
+    private int _mainTabHoverIndex = -1;
 
     private readonly StringFormat _stringFormatLeftTabs = new StringFormat
     {
@@ -102,32 +103,43 @@ public class TabControlDrawingHandler
         {
             graphics.DrawLine(borderPen, tabRect.Left, tabRect.Bottom - 1, tabRect.Right, tabRect.Bottom - 1);
             graphics.DrawLine(borderPen, tabRect.Right - 1, tabRect.Top, tabRect.Right - 1, tabRect.Bottom);
+            if (selected)
+            {
+                using var accentPen = new Pen(
+                    Color.FromArgb(86, 156, 214),
+                    Math.Max(2f, DpiScale.Factor(dpi) * 2));
+                graphics.DrawLine(
+                    accentPen,
+                    tabRect.Left + DpiScale.Scale(2, dpi),
+                    tabRect.Bottom - 1,
+                    tabRect.Right - DpiScale.Scale(2, dpi),
+                    tabRect.Bottom - 1);
+            }
         }
     }
 
     private static void DrawModernCloseButton(Graphics graphics, Rectangle iconBounds, int dpi, bool darkTheme, bool hovered)
     {
-        Color buttonBack = hovered
-            ? Color.FromArgb(198, 76, 82)
-            : darkTheme ? Color.FromArgb(78, 88, 103) : Color.FromArgb(232, 236, 242);
-        Color buttonBorder = hovered
-            ? Color.FromArgb(224, 113, 117)
-            : darkTheme ? Color.FromArgb(123, 135, 153) : Color.FromArgb(198, 206, 218);
+        int centerX = iconBounds.Left + iconBounds.Width / 2;
+        int centerY = iconBounds.Top + iconBounds.Height / 2;
+        int arm = DpiScale.Scale(4, dpi);
+
+        if (hovered)
+        {
+            Color buttonBack = Color.FromArgb(198, 76, 82);
+            Color buttonBorder = Color.FromArgb(224, 113, 117);
+
+            using var buttonPath = CreateRoundedTabPath(iconBounds, DpiScale.Scale(5, dpi));
+            using var buttonBrush = new SolidBrush(buttonBack);
+            using var buttonPen = new Pen(buttonBorder, Math.Max(1f, DpiScale.Factor(dpi)));
+            graphics.FillPath(buttonBrush, buttonPath);
+            graphics.DrawPath(buttonPen, buttonPath);
+        }
+
         Color signColor = hovered
             ? Color.White
-            : darkTheme ? Color.FromArgb(225, 231, 239) : Color.FromArgb(82, 91, 104);
+            : darkTheme ? Color.FromArgb(176, 184, 196) : Color.FromArgb(126, 134, 146);
 
-        Rectangle buttonBounds = iconBounds;
-        int radius = DpiScale.Scale(5, dpi);
-        using var buttonPath = CreateRoundedTabPath(buttonBounds, radius);
-        using var buttonBrush = new SolidBrush(buttonBack);
-        using var buttonPen = new Pen(buttonBorder, Math.Max(1f, DpiScale.Factor(dpi)));
-        graphics.FillPath(buttonBrush, buttonPath);
-        graphics.DrawPath(buttonPen, buttonPath);
-
-        int centerX = buttonBounds.Left + buttonBounds.Width / 2;
-        int centerY = buttonBounds.Top + buttonBounds.Height / 2;
-        int arm = DpiScale.Scale(4, dpi);
         using var signPen = new Pen(signColor, Math.Max(1.25f, DpiScale.Factor(dpi)));
         signPen.StartCap = LineCap.Round;
         signPen.EndCap = LineCap.Round;
@@ -205,15 +217,16 @@ public class TabControlDrawingHandler
     {
         var tabControl = sender as TabControl;
         int dpi = tabControl.DeviceDpi;
-        TabPagePicture actualTab = tabControl.TabPages[e.Index] as TabPagePicture;
-        bool closeHovered = actualTab.CloseImage == _hoverXimage;
+        TabPage page = tabControl.TabPages[e.Index];
+        TabPagePicture? actualTab = page as TabPagePicture;
+        bool closeHovered = _mainTabHoverIndex == e.Index;
         bool darkTheme = _colorTheme.IsDark(_colorTheme.MainBack);
 
-        if (actualTab == tabControl.SelectedTab)
+        if (actualTab is not null && actualTab == tabControl.SelectedTab)
         {
             actualTab.FinishedInBackground = false;
         }
-        bool finishedInBackground = actualTab.FinishedInBackground;
+        bool finishedInBackground = actualTab?.FinishedInBackground == true;
         Rectangle tabRect = tabControl.GetTabRect(e.Index);
 
         BufferedGraphicsContext currentContext;
@@ -402,40 +415,90 @@ public class TabControlDrawingHandler
         DrawModernTabSurface(myBuffer.Graphics, r, dpi, e.Index == leftTabs.SelectedIndex, tabBrush, vertical: true);
         if (leftTabs.SelectedIndex == e.Index)
         {
-            using var underlinedFont = new Font(tabFont, FontStyle.Underline);
-            myBuffer.Graphics.DrawString(
-                leftTabs.TabPages[e.Index].Text,
-                underlinedFont,
-                _colorTheme.TitleBrush,
-                r,
-                _stringFormatLeftTabs);
+            using var accentPen = new Pen(
+                Color.FromArgb(86, 156, 214),
+                Math.Max(2f, DpiScale.Factor(dpi) * 2));
+            myBuffer.Graphics.DrawLine(
+                accentPen,
+                r.Left + 1,
+                r.Top + DpiScale.Scale(2, dpi),
+                r.Left + 1,
+                r.Bottom - DpiScale.Scale(2, dpi));
         }
-        else
-        {
-            myBuffer.Graphics.DrawString(
-                leftTabs.TabPages[e.Index].Text,
-                tabFont,
-                _colorTheme.TitleBrush,
-                r,
-                _stringFormatLeftTabs);
-        }
+
+        myBuffer.Graphics.DrawString(
+            leftTabs.TabPages[e.Index].Text,
+            tabFont,
+            _colorTheme.TitleBrush,
+            r,
+            _stringFormatLeftTabs);
         myBuffer.Render();
         myBuffer.Dispose();
     }
 
     public void TabControlMain_MouseLeave(object sender, EventArgs e)
     {
-        var tabControl = sender as TabControl;
+        if (sender is not TabControl tabControl)
+        {
+            return;
+        }
+
         int dpi = tabControl.DeviceDpi;
+        int previous = _mainTabHoverIndex;
+        _mainTabHoverIndex = -1;
+        if (previous >= 0 && previous < tabControl.TabCount)
+        {
+            tabControl.Invalidate(TabIconLayout.HitRect(
+                TabIconLayout.CloseIconRect(tabControl.GetTabRect(previous), dpi), dpi));
+        }
+
         for (var i = 0; i < tabControl.TabPages.Count; i++)
         {
-            Rectangle hitRect = TabIconLayout.HitRect(TabIconLayout.CloseIconRect(tabControl.GetTabRect(i), dpi), dpi);
-
-            if ((tabControl.TabPages[i] as TabPagePicture).CloseImage != _normalXimage)
+            if (tabControl.TabPages[i] is TabPagePicture pic && pic.CloseImage != _normalXimage)
             {
-                (tabControl.TabPages[i] as TabPagePicture).CloseImage = _normalXimage;
-                tabControl.Invalidate(hitRect);
+                pic.CloseImage = _normalXimage;
             }
+        }
+    }
+
+    public void TabControlMain_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (sender is not TabControl tabControl)
+        {
+            return;
+        }
+
+        int dpi = tabControl.DeviceDpi;
+        int hoverIndex = -1;
+        for (var i = 0; i < tabControl.TabCount; i++)
+        {
+            Rectangle hitRect = TabIconLayout.HitRect(
+                TabIconLayout.CloseIconRect(tabControl.GetTabRect(i), dpi), dpi);
+            if (hitRect.Contains(e.Location))
+            {
+                hoverIndex = i;
+                break;
+            }
+        }
+
+        if (hoverIndex == _mainTabHoverIndex)
+        {
+            return;
+        }
+
+        int previous = _mainTabHoverIndex;
+        _mainTabHoverIndex = hoverIndex;
+
+        if (previous >= 0 && previous < tabControl.TabCount)
+        {
+            tabControl.Invalidate(TabIconLayout.HitRect(
+                TabIconLayout.CloseIconRect(tabControl.GetTabRect(previous), dpi), dpi));
+        }
+
+        if (hoverIndex >= 0)
+        {
+            tabControl.Invalidate(TabIconLayout.HitRect(
+                TabIconLayout.CloseIconRect(tabControl.GetTabRect(hoverIndex), dpi), dpi));
         }
     }
 
@@ -506,25 +569,6 @@ public class TabControlDrawingHandler
                     pic.PinImage = imageToDraw2;
                     tcCurrent.Invalidate(pinHit);
                 }
-            }
-        }
-    }
-
-    public void TabControlMain_MouseMove(object sender, MouseEventArgs e)
-    {
-        var tabControl = sender as TabControl;
-        int dpi = tabControl.DeviceDpi;
-        for (var i = 0; i < tabControl.TabPages.Count; i++)
-        {
-            Point p = e.Location;
-            Rectangle hitRect = TabIconLayout.HitRect(TabIconLayout.CloseIconRect(tabControl.GetTabRect(i), dpi), dpi);
-
-            Image imageToDraw = hitRect.Contains(p) ? _hoverXimage : _normalXimage;
-
-            if ((tabControl.TabPages[i] as TabPagePicture).CloseImage != imageToDraw)
-            {
-                (tabControl.TabPages[i] as TabPagePicture).CloseImage = imageToDraw;
-                tabControl.Invalidate(hitRect);
             }
         }
     }

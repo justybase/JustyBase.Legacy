@@ -4,7 +4,7 @@ namespace AppBase.Common.Interfaces;
 
 /// <summary>
 /// Abstracts the SQL editor panel (currently SQLUpperPanel).
-/// Enables swapping TabPage+SplitContainer layout for DockSuite DockContent later.
+/// Keeps the editor contract independent from the concrete tab host.
 /// </summary>
 public interface IEditorPanel
 {

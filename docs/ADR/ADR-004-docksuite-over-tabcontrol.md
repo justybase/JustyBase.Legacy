@@ -1,6 +1,6 @@
 # ADR-004: DockSuite Over Embedded TabControl
 
-**Status:** Accepted (2026)
+**Status:** Superseded by [ADR-008](ADR-008-static-shell-over-docking.md) (2026)
 
 ## Context
 WinForms `TabControl` lacks: drag-out float, document groups, persisted layout, per-document tool windows. Early prototype used a custom tab strip with manual docking — brittle, 400+ lines of layout code.

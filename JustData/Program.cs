@@ -125,7 +125,7 @@ public static class Program
             try
             {
                 // Once the main message loop has started the app was running — an exception
-                // escaping it (e.g. a DockPanelSuite splitter-drag NRE) is a runtime crash,
+                // escaping it (e.g. a splitter-drag NRE) is a runtime crash,
                 // not a startup failure. Report it accurately for easier diagnosis.
                 bool runtimeCrash = MessageLoopStarted;
                 MessageBox.Show(
@@ -150,7 +150,7 @@ public static class Program
             AppDomain.CurrentDomain.UnhandledException -= OnUnhandledException;
 
             // Synchronous disposal on the STA thread avoids cross-thread
-            // OLE/STA errors from DockPanel Suite and other WinForms controls.
+            // OLE/STA errors from WinForms controls.
             if (provider is not null)
             {
                 try { provider.Dispose(); }
@@ -285,7 +285,7 @@ public static class Program
         services.AddSingleton<AppBase.Data.Completion.LegacySqlAuthoringServices>();
         services.AddSingleton<ISqlDbWordListProvider, AppBase.Data.Completion.LegacyDbWordListProvider>();
 
-        services.AddScoped<ITabManager, DockSuiteTabManager>();
+        services.AddScoped<ITabManager, TabManagerService>();
         services.AddScoped<EditorCatalogProjection>();
         services.AddSingleton<IHistoryStore, HistoryFileStore>();
         services.AddSingleton<JustData.Application.QueryWatch.IQueryWatchService, JustyBaseLegacy.UI.Services.LegacyQueryWatchService>();

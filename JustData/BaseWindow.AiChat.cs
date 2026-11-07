@@ -1,8 +1,10 @@
+using AppBase.Common;
 using JustyBase.Ai.Models;
 using JustyBase.Ai.Ports;
 using JustyBaseLegacy.UI.Ai;
 using JustData.ViewModels.Ai;
-using WeifenLuo.WinFormsUI.Docking;
+using JustyBaseLegacy.UI.Helpers;
+using System.Windows.Forms;
 
 namespace JustyBaseLegacy.UI;
 
@@ -14,7 +16,7 @@ public partial class BaseWindow
     private readonly JustyBase.Ai.Embedded.Download.EmbeddedChatModelCatalog? _chatCatalog;
     private readonly JustyBase.Ai.Chat.IEmbeddedChatModelBootstrapService? _chatBootstrap;
 
-    private void InitializeAiChat(DockSuiteTabManager dsm)
+    private void InitializeAiChat()
     {
         if (_chatViewModel is null)
             return;
@@ -35,15 +37,19 @@ public partial class BaseWindow
         // during DI construction can re-enter the in-flight BaseWindow resolution.
         Shown += StartAiChatAfterFirstShow;
 
-        // "AI Chat" entry in the Dock windows menu.
-        var windowsMenu = optionsToolStripMenuItem.DropDownItems
+        // "AI Chat" entry in the Panels menu.
+        var panelsMenu = optionsToolStripMenuItem.DropDownItems
             .OfType<ToolStripMenuItem>()
-            .FirstOrDefault(item => item.Text == "Dock windows");
-        if (windowsMenu is not null)
+            .FirstOrDefault(item => item.Text == "Panels");
+        if (panelsMenu is not null)
         {
             var item = new ToolStripMenuItem("AI Chat");
             item.Click += (_, _) => ShowAiChat();
-            windowsMenu.DropDownItems.Add(item);
+            panelsMenu.DropDownItems.Add(item);
+
+            var hideItem = new ToolStripMenuItem("Hide AI Chat");
+            hideItem.Click += (_, _) => HideAiChat();
+            panelsMenu.DropDownItems.Add(hideItem);
         }
         else
         {
@@ -61,6 +67,10 @@ public partial class BaseWindow
         _chatViewModel?.AutoConnectIfEnabled();
     }
 
+    private SplitContainer? _rightPanelSplit;
+    private TabControl? _rightTabs;
+    private TabPage? _aiChatTab;
+
     private void EnsureAiChatPanel()
     {
         if (_aiChatPanel is not null || _chatViewModel is null)
@@ -68,21 +78,99 @@ public partial class BaseWindow
 
         _aiChatPanel = new AiChatPanel(_chatViewModel)
         {
-            BorderStyle = BorderStyle.FixedSingle
+            Dock = DockStyle.Fill,
+            BorderStyle = BorderStyle.None
         };
 
-        if (_tabManager is DockSuiteTabManager dsm)
+        SplitContainer rightSplit = EnsureRightPanel();
+        _aiChatTab = new TabPage("AI Chat")
         {
-            dsm.RegisterPersistentTool("AI Chat", _aiChatPanel, DockState.DockRight);
-        }
+            Name = "tabAiChat",
+            Padding = new Padding(0)
+        };
+        _aiChatTab.Controls.Add(_aiChatPanel);
+        _rightTabs!.TabPages.Add(_aiChatTab);
+        rightSplit.Panel2Collapsed = false;
+    }
+
+    private SplitContainer EnsureRightPanel()
+    {
+        if (_rightPanelSplit is not null)
+            return _rightPanelSplit;
+
+        _rightPanelSplit = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            Orientation = Orientation.Vertical,
+            Panel2Collapsed = true,
+            SplitterWidth = Math.Max(3, DpiScale.Scale(4, DeviceDpi)),
+            FixedPanel = FixedPanel.Panel2
+        };
+
+        splitContainer1.Panel2.Controls.Remove(_tabControlMain);
+        _rightPanelSplit.Panel1.Controls.Add(_tabControlMain);
+
+        _rightTabs = new TabControl
+        {
+            Dock = DockStyle.Fill,
+            Name = "tabControlRight",
+            Multiline = false
+        };
+        _rightPanelSplit.Panel2.Controls.Add(_rightTabs);
+        splitContainer1.Panel2.Controls.Add(_rightPanelSplit);
+        return _rightPanelSplit;
     }
 
     public void ShowAiChat()
     {
         EnsureAiChatPanel();
-        if (_tabManager is DockSuiteTabManager dsm && _aiChatPanel is not null)
+        if (_rightPanelSplit is null || _aiChatTab is null)
+            return;
+
+        _rightPanelSplit.Panel2Collapsed = false;
+        _rightTabs!.SelectedTab = _aiChatTab;
+
+        ApplyAiChatWidth();
+        if (IsHandleCreated)
         {
-            dsm.ShowToolWindow("AI Chat", _aiChatPanel, DockState.DockRight);
+            BeginInvoke(new Action(ApplyAiChatWidth));
+        }
+    }
+
+    /// <summary>Collapses the right-hand AI Chat panel.</summary>
+    public void HideAiChat()
+    {
+        if (_rightPanelSplit is not null && !_rightPanelSplit.IsDisposed)
+        {
+            _rightPanelSplit.Panel2Collapsed = true;
+        }
+    }
+
+    private void ApplyAiChatWidth()
+    {
+        if (_rightPanelSplit is null || _rightPanelSplit.IsDisposed || _rightPanelSplit.Panel2Collapsed)
+            return;
+
+        int width = _rightPanelSplit.Width;
+        if (width <= 0)
+            return;
+
+        int desiredWidth = Math.Min(
+            DpiScale.Scale(420, DeviceDpi),
+            Math.Max(DpiScale.Scale(280, DeviceDpi), width / 3));
+        try
+        {
+            _rightPanelSplit.SplitterDistance = Math.Max(
+                DpiScale.Scale(320, DeviceDpi),
+                width - desiredWidth - _rightPanelSplit.SplitterWidth);
+        }
+        catch (InvalidOperationException)
+        {
+            // The splitter is laid out asynchronously on first show.
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // Same as above: clamp to the available width once layout settles.
         }
     }
 

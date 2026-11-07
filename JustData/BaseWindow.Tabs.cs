@@ -164,6 +164,12 @@ namespace JustyBaseLegacy.UI
 
         private async Task DoClosingOfTabAsync(TabControl tpc, TabPage tabPage)
         {
+            if (IsDocumentTab(tabPage))
+            {
+                CloseDocumentTab(tabPage);
+                return;
+            }
+
             if (tabPage is null || !_tabCloseOperations.Add(tabPage))
                 return;
 
@@ -245,6 +251,13 @@ namespace JustyBaseLegacy.UI
         }
         private void TabControlMain_SelectedIndexChanged(object sender, EventArgs e)
         {
+            if (IsDocumentTab(_tabControlMain.SelectedTab))
+            {
+                _sessionVariableRuntimeContext.ActualTabTitleText = _tabControlMain.SelectedTab!.Text;
+                UpdateGitTimelineForActiveDocument();
+                return;
+            }
+
             if (ActiveEditorTabPage is not TabPage selectedTab)
                 return;
 
@@ -558,6 +571,9 @@ namespace JustyBaseLegacy.UI
 
         private void tabControlMain_ControlRemoved(object sender, ControlEventArgs e)
         {
+            if (_suppressMainTabRemovedCleanup)
+                return;
+
             if (e.Control is not TabPage removedTab)
                 return;
 

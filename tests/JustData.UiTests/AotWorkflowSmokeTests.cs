@@ -182,19 +182,19 @@ public sealed class AotWorkflowSmokeTests
     }
 
     // ──────────────────────────────────────────────
-    //  DockPanel Suite stability
+    //  Static shell stability
     // ──────────────────────────────────────────────
 
     [Fact]
     [Trait("Category", "SelfContained")]
-    public void Aot_DockPanel_stable_after_login()
+    public void Aot_main_tab_strip_stable_after_login()
     {
         AssertSkipIfAotExeMissing();
         using var session = LaunchAndLogin();
 
-        AutomationElement? dockPanel = session.MainWindow.FindFirstDescendant(
-            cf => cf.ByAutomationId("dockPanel"));
-        Assert.NotNull(dockPanel);
+        AutomationElement? mainTabs = session.MainWindow.FindFirstDescendant(
+            cf => cf.ByAutomationId("tabControlMain"));
+        Assert.NotNull(mainTabs);
     }
 
     // ──────────────────────────────────────────────

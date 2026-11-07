@@ -13,14 +13,13 @@ using JustyBaseLegacy.UI.Helpers;
 using JustyBaseLegacy.UI.Models;
 using System.Drawing;
 using System.Windows.Forms;
-using WeifenLuo.WinFormsUI.Docking;
 
 namespace JustyBaseLegacy.UI.Sql;
 
 /// <summary>
-/// WinForms capabilities used by the results UI factory. This preserves the
-/// DockSuite-specific rendering boundary without coupling the factory to the
-/// shell form that hosts it.
+/// WinForms capabilities used by the results UI factory. This keeps the
+/// shell-specific rendering boundary without coupling the factory to the
+/// form that hosts it.
 /// </summary>
 internal interface ISqlResultsUiView
 {
@@ -45,7 +44,7 @@ internal interface ISqlResultsUiView
     void EnableSqlLintRuleHighlight(string ruleId);
     SplitContainer? GetSqlResultsSplitContainerForTab(TabPage tabPage);
     TabPage? FindSqlResultsTabForDocument(EditorDocumentId documentId);
-    DockContent? EnsureSqlResultsToolWindow();
+    void EnsureSqlResultsToolWindow();
     TabControl? GetSqlResultsTabControl(TabPage tabPage);
     TabPage? FindSqlResultsTabForSplitContainer(SplitContainer splitter);
     void AttachTabPage(TabPage page, TabControl tabControl);
@@ -78,7 +77,14 @@ internal sealed class SqlResultsUiFactory
             throw new InvalidOperationException("The editor tab must be registered before its results are initialized.");
 
         var perTabTc = _window.GetSqlResultsTabControl(tabPage);
+        if (perTabTc is null)
+            throw new InvalidOperationException("The editor tab must expose a results TabControl.");
+
         containerX.Tag ??= new ResultData { TabControlSQLResults = perTabTc };
+        if (containerX.Tag is ResultData existingData)
+        {
+            existingData.TabControlSQLResults = perTabTc;
+        }
 
         if (containerX.Tag is ResultData rd && rd.DiagnosticsGrid is null)
         {
@@ -101,8 +107,8 @@ internal sealed class SqlResultsUiFactory
             EnableTabReorder(perTabTc);
         }
 
-        // Collapse the per-tab Panel2 — results live in the shared dock window.
-        containerX.Panel2Collapsed = true;
+        // Results live below the editor in the document's own split container.
+        containerX.Panel2Collapsed = false;
         return perTabTc;
     }
 
@@ -129,66 +135,93 @@ internal sealed class SqlResultsUiFactory
     {
         tc.AllowDrop = true;
         tc.MouseDown += TabReorder_MouseDown;
+        tc.MouseMove += TabReorder_MouseMove;
         tc.DragOver += TabReorder_DragOver;
         tc.DragDrop += TabReorder_DragDrop;
+        tc.DragLeave += (_, _) => _dragCandidate = null;
     }
 
-    private TabPage? _dragTab;
+    private TabPage? _dragCandidate;
+    private TabPage? _draggingTab;
+    private Point _dragStart;
 
     private void TabReorder_MouseDown(object? sender, MouseEventArgs e)
     {
         if (sender is not TabControl tc || e.Button != MouseButtons.Left)
             return;
 
-        _dragTab = null;
+        _dragCandidate = null;
         int dpi = tc.DeviceDpi;
+        int index = -1;
         for (int i = 0; i < tc.TabCount; i++)
         {
             if (tc.GetTabRect(i).Contains(e.Location))
             {
-                _dragTab = tc.TabPages[i];
+                index = i;
                 break;
             }
         }
 
-        if (_dragTab is null)
+        if (index < 0)
             return;
 
-        if (_dragTab.Tag is TabPageResultsTag { IsPermanentDiagnostics: true })
-        {
-            _dragTab = null;
-            return;
-        }
-
-        int idx = tc.TabPages.IndexOf(_dragTab);
-        if (idx < 0)
+        TabPage page = tc.TabPages[index];
+        if (page.Tag is TabPageResultsTag { IsPermanentDiagnostics: true })
             return;
 
-        Rectangle tabRect = tc.GetTabRect(idx);
+        Rectangle tabRect = tc.GetTabRect(index);
         Rectangle closeHit = TabIconLayout.HitRect(TabIconLayout.CloseIconRect(tabRect, dpi), dpi);
         Rectangle pinHit = TabIconLayout.HitRect(TabIconLayout.PinIconRect(tabRect, dpi), dpi);
         Point p = e.Location;
 
         if (closeHit.Contains(p))
         {
-            _dragTab = null;
-            _window.RemoveTabData(tc, idx);
+            _window.RemoveTabData(tc, index);
             return;
         }
 
         if (pinHit.Contains(p))
         {
-            _window.AttachTabPage(_dragTab, tc);
-            _dragTab = null;
+            _window.AttachTabPage(page, tc);
             return;
         }
 
-        tc.DoDragDrop(_dragTab, DragDropEffects.Move);
+        _dragCandidate = page;
+        _dragStart = e.Location;
+    }
+
+    private void TabReorder_MouseMove(object? sender, MouseEventArgs e)
+    {
+        if (sender is not TabControl tc || _dragCandidate is null || e.Button != MouseButtons.Left)
+            return;
+
+        Size dragSize = SystemInformation.DragSize;
+        if (Math.Abs(e.X - _dragStart.X) < dragSize.Width
+            && Math.Abs(e.Y - _dragStart.Y) < dragSize.Height)
+        {
+            return;
+        }
+
+        TabPage page = _dragCandidate;
+        _dragCandidate = null;
+        _draggingTab = page;
+        try
+        {
+            tc.DoDragDrop(page, DragDropEffects.Move);
+        }
+        catch (InvalidOperationException)
+        {
+            // A drag can already be in progress.
+        }
+        finally
+        {
+            _draggingTab = null;
+        }
     }
 
     private void TabReorder_DragOver(object? sender, DragEventArgs e)
     {
-        if (sender is not TabControl tc || _dragTab is null)
+        if (sender is not TabControl tc || _draggingTab is null)
         {
             e.Effect = DragDropEffects.None;
             return;
@@ -207,7 +240,7 @@ internal sealed class SqlResultsUiFactory
         {
             if (tc.GetTabRect(i).Contains(pt))
             {
-                int dragIdx = tc.TabPages.IndexOf(_dragTab);
+                int dragIdx = tc.TabPages.IndexOf(_draggingTab);
                 if (dragIdx >= 0 && dragIdx != i)
                 {
                     SuspendLayoutReorder(tc, dragIdx, i);
@@ -219,7 +252,8 @@ internal sealed class SqlResultsUiFactory
 
     private void TabReorder_DragDrop(object? sender, DragEventArgs e)
     {
-        _dragTab = null;
+        _dragCandidate = null;
+        _draggingTab = null;
     }
 
     private static void SuspendLayoutReorder(TabControl tc, int fromIdx, int toIdx)
@@ -282,9 +316,20 @@ internal sealed class SqlResultsUiFactory
 
         var diagnosticsGrid = PrepareDiagnosticsGrid(diagnosticsTab);
         var toolbar = CreateDiagnosticsToolbar(diagnosticsGrid);
-        var container = new Panel { Dock = DockStyle.Fill };
-        container.Controls.Add(toolbar);
-        container.Controls.Add(diagnosticsGrid);
+        var container = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        container.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        container.RowStyles.Add(new RowStyle(SizeType.Absolute, toolbar.Height));
+        container.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        toolbar.Dock = DockStyle.Fill;
+        container.Controls.Add(toolbar, 0, 0);
+        container.Controls.Add(diagnosticsGrid, 0, 1);
         diagnosticsTab.Controls.Add(container);
         tc.TabPages.Insert(0, diagnosticsTab);
         resultData.DiagnosticsGrid = diagnosticsGrid;

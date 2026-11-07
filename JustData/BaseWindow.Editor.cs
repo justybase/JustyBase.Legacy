@@ -215,27 +215,9 @@ namespace JustyBaseLegacy.UI
                 SchemaRefreshOptionEnable(true);
             }
         }
-        private History _history;
         private void HistoryToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            if (_tabManager is DockSuiteTabManager dockSuite)
-            {
-                dockSuite.ShowHistory(
-                    o => _colorTheme.ColorForm(o),
-                    f => _uiHelperService.DoubleBufDateGridView(f),
-                    (a, b, c) => AddMainTab(a, b, c),
-                    HistoryDatFile,
-                    _applicationSettingsContext.Config.UseSpecialColoring,
-                    _historyStore);
-                return;
-            }
-
-            if (_history == null || _history.IsDisposed)
-            {
-                _history = new History(o => _colorTheme.ColorForm(o), f => _uiHelperService.DoubleBufDateGridView(f), (a, b, c) => AddMainTab(a, b, c), HistoryDatFile, _applicationSettingsContext.Config.UseSpecialColoring);
-            }
-            _history.Show();
-            _history.Focus();
+            ShowHistoryDocument();
         }
 
         public void FctbSelectionChangedDelayed(object sender, EventArgs e)
@@ -611,46 +593,7 @@ namespace JustyBaseLegacy.UI
 
         private void Ustaw_Click(object sender, EventArgs e)
         {
-            if (_tabManager is DockSuiteTabManager dockSuite)
-            {
-                dockSuite.ShowPreferences(
-                    RepaintPreferences,
-                    SaveManySqlToDisk,
-                    _applicationSettingsContext,
-                    _snippetInitializationContext,
-                    _settingsPersistence.SaveConfig,
-                    _recentFileRuntimeContext.SaveRecentFiles,
-                    _uiHelperService,
-                    _colorTheme,
-                    _netezzaAutocompleteState
-#if AI
-                    , _fimModelCatalog
-                    , _fimModelBootstrap
-                    , _chatCatalog
-                    , _chatBootstrap
-#endif
-                    );
-                return;
-            }
-
-            using var pr = new PreferencesForm(
-                RepaintPreferences,
-                SaveManySqlToDisk,
-                _applicationSettingsContext,
-                _snippetInitializationContext,
-                _settingsPersistence.SaveConfig,
-                _recentFileRuntimeContext.SaveRecentFiles,
-                _uiHelperService,
-                _colorTheme,
-                _netezzaAutocompleteState
-#if AI
-                , fimCatalog: _fimModelCatalog
-                , fimBootstrap: _fimModelBootstrap
-                , chatCatalog: _chatCatalog
-                , chatBootstrap: _chatBootstrap
-#endif
-                );
-            pr.ShowDialog();
+            ShowPreferencesDocument();
         }
 
 
@@ -715,7 +658,7 @@ namespace JustyBaseLegacy.UI
                 _leftTabs.Visible = true;
 
                 spl.SplitterDistance = (int)Math.Round(spl.Parent.Height * 0.8);
-                splitContainer1.SplitterDistance = (101 * this.splitContainer1.Width) / 867;
+                LayoutMainSplitter();
             }
             nr++;
         }

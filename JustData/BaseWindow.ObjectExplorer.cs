@@ -85,35 +85,19 @@ namespace JustyBaseLegacy.UI
             if (_mvvmObjectExplorerControl is not null)
                 return;
 
-            if (_tabManager is UI.DockSuiteTabManager dsm)
+            _mvvmObjectExplorerControl = new Controls.MvvmObjectExplorerControl(_objectExplorerViewModel)
             {
-                _mvvmObjectExplorerControl = new Controls.MvvmObjectExplorerControl(_objectExplorerViewModel);
-                _mvvmObjectExplorerControl.ReferenceActivated += NavigateToOutlineReference;
-                dsm.RegisterPersistentTool("Outline", _mvvmObjectExplorerControl, WeifenLuo.WinFormsUI.Docking.DockState.DockLeft);
-                if (dsm.GetToolWindow("Outline") is { } outlineTool)
-                {
-                    outlineTool.Activated += OnOutlineToolActivated;
-                    outlineTool.VisibleChanged += OnOutlineToolVisibleChanged;
-                }
-                tabPageLegend.Tag = "initialized";
-            }
+                Dock = DockStyle.Fill
+            };
+            _mvvmObjectExplorerControl.ReferenceActivated += NavigateToOutlineReference;
+
+            tabPageLegend.Controls.Clear();
+            tabPageLegend.Controls.Add(_mvvmObjectExplorerControl);
+            tabPageLegend.Tag = "initialized";
         }
 
-        private bool IsOutlineVisible()
-        {
-            if (_tabManager is UI.DockSuiteTabManager dsm)
-                return dsm.IsToolWindowVisible("Outline");
-
-            return _leftTabs.SelectedTab?.Text == "Outline";
-        }
-
-        private void OnOutlineToolActivated(object? sender, EventArgs e) => RefreshVisibleOutline();
-
-        private void OnOutlineToolVisibleChanged(object? sender, EventArgs e)
-        {
-            if (IsOutlineVisible())
-                RefreshVisibleOutline();
-        }
+        private bool IsOutlineVisible() =>
+            !splitContainer1.Panel1Collapsed && _leftTabs.SelectedTab == tabPageLegend;
 
         private void RefreshVisibleOutline()
         {
@@ -1030,11 +1014,11 @@ _generalDbService.DriverName(SelectedConnectionName) == "DB2"
 
         private void RevealDatabaseExplorer()
         {
-            if (_tabManager is UI.DockSuiteTabManager dsm && _mvvmDatabaseExplorerControl is not null)
-            {
-                dsm.ShowToolWindow("Database", _mvvmDatabaseExplorerControl,
-                    WeifenLuo.WinFormsUI.Docking.DockState.DockLeft);
-            }
+            if (_mvvmDatabaseExplorerControl is null)
+                return;
+
+            splitContainer1.Panel1Collapsed = false;
+            _leftTabs.SelectedTab = databaseTabPage;
         }
 
         public void GoToObjectNotNetezza(string clickedWord, string objectType = null)

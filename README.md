@@ -162,12 +162,16 @@ dotnet publish JustData/JustData.csproj -c Release -r win-x64 --self-contained t
 
 To build without the optional AI features and their heavy NuGet dependencies
 (Copilot SDK, Microsoft.Extensions.AI, WebView2/Markdig, embedded llama.cpp),
-set `EnableAi=false`. The dependency-free `JustyBase.Ai.Contracts` project is
-still referenced for shared chat models and git contracts.
+build `JustData.NoAi.slnx`. It sets `EnableAi=false` automatically for both CLI
+and IDE builds. The dependency-free `JustyBase.Ai.Contracts` project is still
+referenced for shared chat models and git contracts.
 
 ```powershell
-dotnet build JustData.NoAi.slnx -c Release -p:EnableAi=false
+dotnet build JustData.NoAi.slnx -c Release
 ```
+
+Building `JustData/JustData.csproj` on its own still requires the explicit
+`-p:EnableAi=false` switch.
 
 See [docs/NO_AI_BUILD.md](docs/NO_AI_BUILD.md) for the excluded components and
 verification commands.

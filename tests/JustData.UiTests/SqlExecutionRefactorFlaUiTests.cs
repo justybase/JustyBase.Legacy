@@ -22,7 +22,7 @@ public sealed class SqlExecutionRefactorFlaUiTests
     {
         UiTestHelpers.EnsureTestoweProfile();
         using UiSession session = UiTestHelpers.LaunchAndLogin();
-        OpenResultsDockWindow(session);
+        EnsureResultsPaneVisible(session);
         AutomationElement editor = FindSqlEditor(session.MainWindow);
 
         UiTestHelpers.SetSqlEditorText(editor, "select 1 as id;");
@@ -42,7 +42,7 @@ public sealed class SqlExecutionRefactorFlaUiTests
     {
         UiTestHelpers.EnsureTestoweProfile();
         using UiSession session = UiTestHelpers.LaunchAndLogin();
-        OpenResultsDockWindow(session);
+        EnsureResultsPaneVisible(session);
         Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_N);
         Thread.Sleep(300);
         AutomationElement editor = FindSqlEditor(session.MainWindow);
@@ -62,7 +62,7 @@ public sealed class SqlExecutionRefactorFlaUiTests
     {
         UiTestHelpers.EnsureTestoweProfile();
         using UiSession session = UiTestHelpers.LaunchAndLogin();
-        OpenResultsDockWindow(session);
+        EnsureResultsPaneVisible(session);
         AutomationElement editor = FindSqlEditor(session.MainWindow);
 
         UiTestHelpers.SetSqlEditorText(editor, "select 1 as id;\r\nthis is invalid SQL;");
@@ -87,7 +87,7 @@ public sealed class SqlExecutionRefactorFlaUiTests
     {
         UiTestHelpers.EnsureTestoweProfile();
         using UiSession session = UiTestHelpers.LaunchAndLogin();
-        OpenResultsDockWindow(session);
+        EnsureResultsPaneVisible(session);
         AutomationElement editor = FindSqlEditor(session.MainWindow);
         const string script = "select 1 as id;\r\nthis is invalid SQL;";
 
@@ -198,7 +198,7 @@ public sealed class SqlExecutionRefactorFlaUiTests
     {
         UiTestHelpers.EnsureTestoweProfile();
         using UiSession session = UiTestHelpers.LaunchAndLogin();
-        OpenResultsDockWindow(session);
+        EnsureResultsPaneVisible(session);
 
         Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_N);
         Thread.Sleep(300);
@@ -400,7 +400,7 @@ public sealed class SqlExecutionRefactorFlaUiTests
         }
         catch (System.Runtime.InteropServices.COMException)
         {
-            // DockSuite can recreate log handles while an execution completes.
+            // The results tab strip can recreate log handles while an execution completes.
         }
 
         return string.Empty;
@@ -465,7 +465,7 @@ public sealed class SqlExecutionRefactorFlaUiTests
         }
         catch (System.Runtime.InteropServices.COMException)
         {
-            // DockSuite can dispose and recreate tab handles while an execution
+            // The results tab strip can dispose and recreate tab handles while an execution
             // completes. A stale UIA element is transient, so let WaitFor retry.
             return [];
         }
@@ -481,7 +481,7 @@ public sealed class SqlExecutionRefactorFlaUiTests
         Thread.Sleep(100);
     }
 
-    private static void OpenResultsDockWindow(UiSession session)
+    private static void EnsureResultsPaneVisible(UiSession session)
     {
         DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
         while (DateTime.UtcNow < deadline)
@@ -495,14 +495,14 @@ public sealed class SqlExecutionRefactorFlaUiTests
             settings?.Click();
             Thread.Sleep(150);
 
-            AutomationElement? dockWindows = FindDockWindowsMenu(session);
-            if (dockWindows is null)
+            AutomationElement? panelsMenu = FindPanelsMenu(session);
+            if (panelsMenu is null)
             {
                 Thread.Sleep(250);
                 continue;
             }
 
-            dockWindows.Click();
+            panelsMenu.Click();
             Thread.Sleep(150);
             AutomationElement? results = FindResultsMenu(session);
             if (results is null)
@@ -516,13 +516,13 @@ public sealed class SqlExecutionRefactorFlaUiTests
             return;
         }
 
-        throw new TimeoutException("Timed out opening the Results dock window.");
+        throw new TimeoutException("Timed out focusing the Results pane.");
     }
 
-    private static AutomationElement? FindDockWindowsMenu(UiSession session) =>
+    private static AutomationElement? FindPanelsMenu(UiSession session) =>
         session.Application.GetAllTopLevelWindows(session.Automation)
             .Select(window => window.FindFirstDescendant(cf =>
-                cf.ByControlType(ControlType.MenuItem).And(cf.ByName("Dock windows"))))
+                cf.ByControlType(ControlType.MenuItem).And(cf.ByName("Panels"))))
             .FirstOrDefault(element => element is not null);
 
     private static AutomationElement? FindResultsMenu(UiSession session) =>

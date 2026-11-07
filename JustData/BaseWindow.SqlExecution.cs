@@ -592,8 +592,8 @@ namespace JustyBaseLegacy.UI
         }
 
         /// <summary>
-        /// Creates a workspace document and mirrors its id onto panel + DockSuite
-        /// projections. Workspace + <c>_documentIdsByEditor</c> remain the SSOT.
+        /// Creates a workspace document and mirrors its id onto the editor
+        /// panel projection. Workspace + <c>_documentIdsByEditor</c> remain the SSOT.
         /// </summary>
         private EditorDocumentViewModel? CreateAndAttachWorkspaceDocument(FastColoredTextBox editor)
         {
@@ -620,8 +620,6 @@ namespace JustyBaseLegacy.UI
             _documentIdsByTab[ownerTab] = editorDocument.Id;
             _documentIdsByEditor[editor] = editorDocument.Id;
             panel.SetDocumentId(editorDocument.Id);
-            if (_tabManager is DockSuiteTabManager dockSuiteTabManager)
-                dockSuiteTabManager.SetDocumentId(ownerTab, editorDocument.Id);
             if (_tabManager.GetSplitContainerForTab(ownerTab) is { } splitContainer)
                 EnsureResultsTabControl(splitContainer);
             RegisterDiagnosticsTarget(editorDocument.Id, editor);

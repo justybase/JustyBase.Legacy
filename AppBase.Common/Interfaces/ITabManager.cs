@@ -6,7 +6,7 @@ namespace AppBase.Common;
 /// <summary>
 /// Manages the lifecycle of editor tabs and their associated controls.
 /// Decouples tab-map bookkeeping from BaseWindow so the layout
-/// (TabPage+SplitContainer vs. DockSuite DockContent) can be swapped later.
+/// (TabPage+SplitContainer) can be replaced without touching BaseWindow bookkeeping.
 /// </summary>
 public interface ITabManager
 {

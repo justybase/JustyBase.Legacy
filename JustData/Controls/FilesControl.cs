@@ -1493,6 +1493,9 @@ namespace JustyBaseLegacy.UI.Controls
 
         public void ExpandLastKnown(TreeView treeView, List<TreeNode>? expandedItems)
         {
+            if (treeView is null || expandedItems is null || expandedItems.Count == 0)
+                return;
+
             foreach (TreeNode item in expandedItems)
             {
                 var tn = treeView.Nodes.Find(item.Name, true);

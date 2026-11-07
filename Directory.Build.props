@@ -28,7 +28,12 @@
       Microsoft.Extensions.AI, OpenAI, WebView2/Markdig, and embedded
       llama.cpp model management). The no-AI build keeps the lightweight,
       dependency-free JustyBase.Ai.Contracts project only.
+
+      JustData.NoAi.slnx selects the no-AI build automatically (both for CLI
+      and IDE builds) so every project in that solution is compiled with the
+      same switch. An explicit -p:EnableAi=true/false still wins.
     -->
+    <EnableAi Condition="'$(EnableAi)' == '' and '$(SolutionFileName)' == 'JustData.NoAi.slnx'">false</EnableAi>
     <EnableAi Condition="'$(EnableAi)' == ''">true</EnableAi>
 
   </PropertyGroup>

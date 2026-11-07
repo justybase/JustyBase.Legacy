@@ -552,13 +552,28 @@ namespace JustyBaseLegacy.UI
                 return;
             }
 
-            // Narrow schema panel, wide SQL area (reference layout at 96 DPI: 101px of 867px).
-            const int designLeftWidth = 101;
-            const int designTotalWidth = 867;
+            // Explorer panel: wide enough for the schema tree and filter row.
+            int dpi = DeviceDpi;
+            int width = splitContainer1.Width;
+            int panel2Min = Math.Max(splitContainer1.Panel2MinSize, DpiScale.Scale(320, dpi));
+            int maxDistance = width - splitContainer1.SplitterWidth - panel2Min;
+            int minDistance = DpiScale.Scale(240, dpi);
+            if (maxDistance <= minDistance)
+            {
+                return;
+            }
 
-            int distance = (designLeftWidth * splitContainer1.Width) / designTotalWidth;
-            int minDistance = DpiScale.Scale(designLeftWidth, DeviceDpi);
-            splitContainer1.SplitterDistance = Math.Max(distance, minDistance);
+            int desired = Math.Clamp((int)Math.Round(width * 0.24), minDistance, maxDistance);
+            try
+            {
+                splitContainer1.SplitterDistance = desired;
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+            }
         }
 
         protected override void OnDpiChanged(DpiChangedEventArgs e)
@@ -870,9 +885,22 @@ namespace JustyBaseLegacy.UI
 
         public void InvalidateTabs()
         {
-            // _tabControlMain is hidden in DockSuite mode — invalidate the form instead.
-            this.Invalidate();
+            _tabControlMain.Invalidate();
             _leftTabs.Invalidate();
+            foreach (TabPage page in EditorTabPages)
+            {
+                if (_tabManager.GetSplitContainerForTab(page) is { Tag: ResultData resultData }
+                    && resultData.TabControlSQLResults is { IsDisposed: false } results)
+                {
+                    results.Invalidate();
+                }
+            }
+        }
+
+        private void InvalidateMainTabs()
+        {
+            InvalidateTabs();
+            this.Invalidate(true);
         }
     }
 }

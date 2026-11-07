@@ -278,10 +278,8 @@ namespace JustyBaseLegacy.UI
             try
             {
                 SynchronizeEditorDocumentState();
-                IReadOnlyList<EditorDocumentId>? documentOrder = _tabManager is DockSuiteTabManager dockSuiteTabManager
-                    ? dockSuiteTabManager.GetEditorDocumentOrder()
-                    : null;
-                if (documentOrder is { Count: > 0 })
+                IReadOnlyList<EditorDocumentId> documentOrder = GetEditorDocumentOrder();
+                if (documentOrder.Count > 0)
                     _editorWorkspaceViewModel.Reorder(documentOrder);
                 await _editorWorkspaceViewModel.SaveManySqlAsync(
                     filePath,
@@ -535,6 +533,12 @@ namespace JustyBaseLegacy.UI
 
         public void tabControlMainDragOver(object sender, System.Windows.Forms.DragEventArgs e)
         {
+            if (e.Data.GetDataPresent(typeof(TabDragData)))
+            {
+                e.Effect = DragDropEffects.Move;
+                return;
+            }
+
             if (e.Data.GetDataPresent(DataFormats.FileDrop) || e.Data.GetDataPresent("FileContents"))
             {
                 e.Effect = DragDropEffects.Link;
@@ -543,6 +547,12 @@ namespace JustyBaseLegacy.UI
 
         public void tabControlMain_DragDrop(object sender, System.Windows.Forms.DragEventArgs e)
         {
+            if (e.Data.GetData(typeof(TabDragData)) is TabDragData drag)
+            {
+                ApplyMainTabReorder(drag.Page, e);
+                return;
+            }
+
             _ = RunUiEventAsync(nameof(tabControlMain_DragDrop), () => HandleTabControlMainDragDropAsync(e));
         }
 

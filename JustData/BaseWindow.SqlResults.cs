@@ -8,7 +8,6 @@ using JustyBase.NetezzaSqlParser.Linter;
 using JustyBaseLegacy.UI.Controls;
 using JustyBaseLegacy.UI.Helpers;
 using JustyBaseLegacy.UI.Forms;
-using WeifenLuo.WinFormsUI.Docking;
 using JustyBaseLegacy.UI.Models;
 using JustyBaseLegacy.UI.Sql;
 using JustData.ViewModels.Editor;
@@ -77,7 +76,7 @@ namespace JustyBaseLegacy.UI
             GetSqlResultsSplitContainerForTab(tabPage);
         TabPage? ISqlResultsUiView.FindSqlResultsTabForDocument(EditorDocumentId documentId) =>
             FindSqlResultsTabForDocument(documentId);
-        DockContent? ISqlResultsUiView.EnsureSqlResultsToolWindow() => EnsureSqlResultsToolWindow();
+        void ISqlResultsUiView.EnsureSqlResultsToolWindow() => EnsureSqlResultsToolWindow();
         TabControl? ISqlResultsUiView.GetSqlResultsTabControl(TabPage tabPage) => GetSqlResultsTabControl(tabPage);
         TabPage? ISqlResultsUiView.FindSqlResultsTabForSplitContainer(SplitContainer splitter) =>
             FindSqlResultsTabForSplitContainer(splitter);
@@ -259,19 +258,199 @@ namespace JustyBaseLegacy.UI
             _tabManager.GetSplitContainerForTab(tabPage);
         internal TabPage? FindSqlResultsTabForDocument(EditorDocumentId documentId) =>
             _documentIdsByTab.FirstOrDefault(item => item.Value == documentId).Key;
-        internal DockContent EnsureSqlResultsToolWindow(TabPage? documentTab = null)
-        {
-            if (_tabManager is not DockSuiteTabManager dsm)
-                return null;
 
-            return documentTab is null
-                ? dsm.EnsureResultsToolWindow()
-                : dsm.ShowResultsForTab(documentTab);
+        /// <summary>
+        /// Ensures the active (or given) document owns its results container.
+        /// Results are hosted in the document SplitContainer's Panel2, so this
+        /// no longer creates a shared tool window.
+        /// </summary>
+        internal void EnsureSqlResultsToolWindow(TabPage? documentTab = null)
+        {
+            TabPage? tab = documentTab ?? ActiveEditorTabPage;
+            if (tab is not null)
+            {
+                _ = GetSqlResultsTabControl(tab);
+            }
         }
-        internal TabControl? GetSqlResultsTabControl(TabPage tabPage) =>
-            _tabManager is DockSuiteTabManager dsm ? dsm.GetOrCreateResultsTabControl(tabPage) : null;
-        internal TabPage? FindSqlResultsTabForSplitContainer(SplitContainer splitter) =>
-            _tabManager is DockSuiteTabManager dsm ? dsm.FindTabForSplitContainer(splitter) : null;
+
+        /// <summary>
+        /// Returns — creating on first use — the results TabControl docked in
+        /// the document splitter's lower panel.
+        /// </summary>
+        internal TabControl? GetSqlResultsTabControl(TabPage tabPage)
+        {
+            if (tabPage is null || _tabManager.GetSplitContainerForTab(tabPage) is not { } container)
+            {
+                return null;
+            }
+
+            if (container.Tag is ResultData existing
+                && existing.TabControlSQLResults is { IsDisposed: false } existingResults)
+            {
+                return existingResults;
+            }
+
+            var results = new TabControl
+            {
+                Dock = DockStyle.Fill,
+                Name = "tabControlResults",
+                Multiline = true,
+                AllowDrop = true
+            };
+
+            container.Panel2.SuspendLayout();
+            container.Panel2.Controls.Clear();
+            container.Panel2.Controls.Add(results);
+            container.Panel2.ResumeLayout();
+
+            if (container.Tag is ResultData data)
+            {
+                data.TabControlSQLResults = results;
+            }
+            else
+            {
+                container.Tag = new ResultData { TabControlSQLResults = results };
+            }
+
+            container.Panel2Collapsed = false;
+            ApplyInitialResultsSplitter(container);
+            return results;
+        }
+
+        /// <summary>
+        /// Splits the document vertically (68% editor / 32% results) once the
+        /// splitter has a usable height. Layout can run before the tab page is
+        /// sized, so retry on resize until the distance sticks.
+        /// </summary>
+        private static void ApplyInitialResultsSplitter(SplitContainer container)
+        {
+            const double editorShare = 0.68;
+
+            bool TryApply()
+            {
+                if (container.IsDisposed || container.Panel1Collapsed || container.Panel2Collapsed)
+                {
+                    return false;
+                }
+
+                int total = container.Height - container.SplitterWidth;
+                int min = Math.Max(
+                    DpiScale.Scale(80, container.DeviceDpi),
+                    Math.Max(container.Panel1MinSize, container.Panel2MinSize));
+                if (total <= 2 * min)
+                {
+                    return false;
+                }
+
+                int distance = Math.Clamp((int)Math.Round(total * editorShare), min, total - min);
+                try
+                {
+                    container.SplitterDistance = distance;
+                    return true;
+                }
+                catch (InvalidOperationException)
+                {
+                    return false;
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    return false;
+                }
+            }
+
+            void OnResize(object? sender, EventArgs e)
+            {
+                if (TryApply())
+                {
+                    container.SizeChanged -= OnResize;
+                }
+            }
+
+            container.SizeChanged += OnResize;
+            if (container.IsHandleCreated)
+            {
+                container.BeginInvoke(new Action(() =>
+                {
+                    if (TryApply())
+                    {
+                        container.SizeChanged -= OnResize;
+                    }
+                }));
+            }
+        }
+
+        private static void SetResultsSplitterRatio(SplitContainer container, double editorShare)
+        {
+            void Apply()
+            {
+                if (container.IsDisposed || container.Panel1Collapsed || container.Panel2Collapsed)
+                {
+                    return;
+                }
+
+                int total = container.Height - container.SplitterWidth;
+                int min = Math.Max(
+                    DpiScale.Scale(80, container.DeviceDpi),
+                    Math.Max(container.Panel1MinSize, container.Panel2MinSize));
+                if (total <= 2 * min)
+                {
+                    return;
+                }
+
+                try
+                {
+                    container.SplitterDistance = Math.Clamp(
+                        (int)Math.Round(total * editorShare), min, total - min);
+                }
+                catch (InvalidOperationException)
+                {
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                }
+            }
+
+            if (container.IsHandleCreated)
+            {
+                container.BeginInvoke(new Action(Apply));
+            }
+            else
+            {
+                Apply();
+            }
+        }
+
+        internal TabPage? FindSqlResultsTabForSplitContainer(SplitContainer splitter)
+        {
+            if (splitter is null)
+            {
+                return null;
+            }
+
+            foreach (TabPage tab in EditorTabPages)
+            {
+                if (ReferenceEquals(_tabManager.GetSplitContainerForTab(tab), splitter))
+                {
+                    return tab;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Current editor documents in visible tab order. Used to persist the
+        /// session bundle and to mirror drag/drop reordering into the workspace.
+        /// </summary>
+        internal IReadOnlyList<EditorDocumentId> GetEditorDocumentOrder() =>
+            EditorTabPages
+                .Select(tab => _documentIdsByTab.TryGetValue(tab, out EditorDocumentId documentId)
+                    ? (EditorDocumentId?)documentId
+                    : null)
+                .Where(id => id is not null)
+                .Select(id => id!.Value)
+                .ToArray();
+
         internal bool CanPresentSqlResult(EditorDocumentId documentId) =>
             _editorWorkspaceViewModel.Documents.Any(document => document.Id == documentId);
 
@@ -357,10 +536,10 @@ namespace JustyBaseLegacy.UI
 
             _documentationShowcasePrepared = true;
 
-            if (_tabManager is DockSuiteTabManager dockSuite)
+            if (CurrentSplitContainer is { } showcaseSplitter)
             {
                 // Keep results tall enough that the data grid is clearly visible in docs shots.
-                dockSuite.ForceResultsBelowSqlDocuments(0.56);
+                SetResultsSplitterRatio(showcaseSplitter, 0.44);
             }
 
             if (StartupArguments.IsDocumentationNavigateDimDate(Environment.GetCommandLineArgs()))

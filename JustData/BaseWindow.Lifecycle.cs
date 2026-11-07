@@ -144,12 +144,6 @@ namespace JustyBaseLegacy.UI
         {
             _notifyIcon1.Dispose();
 
-            if (_tabManager is DockSuiteTabManager dsm)
-            {
-                string layoutPath = Path.Combine(_applicationSettingsContext.ConfigDirectory, "dockLayout.xml");
-                dsm.SaveLayout(layoutPath);
-            }
-
             NetezzaLegacyCompletionHelpers.SaveSnipets(_applicationSettingsContext, _netezzaAutocompleteState);
             _connectionSessions.Clear();
 

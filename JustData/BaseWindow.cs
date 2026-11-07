@@ -85,7 +85,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml;
-using WeifenLuo.WinFormsUI.Docking;
 
 namespace JustyBaseLegacy.UI
 {
@@ -165,12 +164,12 @@ namespace JustyBaseLegacy.UI
                 {
                     this.Invoke(() =>
                     {
-                        fctb = _tabManager.CurrentEditor;
+                        fctb = _tabManager.GetEditor(ActiveEditorTabPage);
                     });
                 }
                 else
                 {
-                    fctb = _tabManager.CurrentEditor;
+                    fctb = _tabManager.GetEditor(ActiveEditorTabPage);
                 }
                 return fctb;
             }
@@ -186,12 +185,12 @@ namespace JustyBaseLegacy.UI
                 {
                     this.Invoke(() =>
                     {
-                        upper = _tabManager.CurrentEditorPanel as SQLUpperPanel;
+                        upper = _tabManager.GetEditorPanel(ActiveEditorTabPage) as SQLUpperPanel;
                     });
                 }
                 else
                 {
-                    upper = _tabManager.CurrentEditorPanel as SQLUpperPanel;
+                    upper = _tabManager.GetEditorPanel(ActiveEditorTabPage) as SQLUpperPanel;
                 }
                 return upper;
             }
@@ -234,11 +233,9 @@ namespace JustyBaseLegacy.UI
                 if (_tabManager.CurrentSplitContainer is { } current)
                     return current;
 
-                // DockSuite can temporarily have the Results tool as the active
-                // content while the SQL editor still owns keyboard focus.  The
-                // detached compatibility TabPage then is not the inner
-                // TabControl's SelectedTab, so resolve the splitter through the
-                // stable document identity captured for the focused editor.
+                // Keyboard focus can sit in the results grid while the main
+                // tab strip still shows the owning editor. Resolve through the
+                // focused editor's stable document identity.
                 if (CurrentTB is { } editor
                     && _documentIdsByEditor.TryGetValue(editor, out EditorDocumentId documentId))
                 {
@@ -258,13 +255,42 @@ namespace JustyBaseLegacy.UI
             }
         }
 
-        private IReadOnlyList<TabPage> EditorTabPages => _tabManager is DockSuiteTabManager dockSuite
-            ? dockSuite.GetEditorTabPages()
-            : _tabControlMain.TabPages.Cast<TabPage>().ToArray();
+        private TabPage? _lastActiveEditorTabPage;
 
-        private TabPage? ActiveEditorTabPage => _tabManager is DockSuiteTabManager dockSuite
-            ? dockSuite.GetActiveEditorTabPage()
-            : _tabControlMain.SelectedTab;
+        private IReadOnlyList<TabPage> EditorTabPages => _tabControlMain.TabPages
+            .Cast<TabPage>()
+            .Where(tab => _tabManager.GetEditorPanel(tab) is not null)
+            .ToArray();
+
+        private TabPage? ActiveEditorTabPage
+        {
+            get
+            {
+                TabPage? selected = _tabControlMain.SelectedTab;
+                if (selected is not null)
+                {
+                    if (_tabManager.GetEditorPanel(selected) is not null)
+                    {
+                        _lastActiveEditorTabPage = selected;
+                        return selected;
+                    }
+
+                    if (IsDocumentTab(selected))
+                    {
+                        return null;
+                    }
+                }
+
+                if (_lastActiveEditorTabPage is not null
+                    && !_lastActiveEditorTabPage.IsDisposed
+                    && _tabControlMain.TabPages.Contains(_lastActiveEditorTabPage))
+                {
+                    return _lastActiveEditorTabPage;
+                }
+
+                return null;
+            }
+        }
 
 
 
@@ -327,7 +353,6 @@ namespace JustyBaseLegacy.UI
         private readonly IHistoryStore _historyStore;
         private readonly IQueryWatchService _queryWatchService;
         private readonly IUiDispatcher _uiDispatcher;
-        private QueryWatch? _queryWatch;
         private readonly Dictionary<EditorDocumentId, (FastColoredTextBox Editor, DataGridView Grid)> _lintDiagnosticsTargets = new();
         private readonly SqlResultsUiFactory _sqlResultsUiFactory;
         private readonly WinFormsSqlResultPresenter _sqlResultPresenter;
@@ -566,58 +591,18 @@ namespace JustyBaseLegacy.UI
             _tabManager.Initialize(_tabControlMain);
             Program.LogStartup("BaseWindow ctor: after tabManager.Initialize");
 
-            if (_tabManager is DockSuiteTabManager dsm)
-            {
-                dsm.SetDocumentTabContextMenu(tabContextMenuStrip);
-                dsm.TabCloseRequested = tabPage => _ = DoClosingOfTabAsync(_tabControlMain, tabPage);
-                dsm.ActiveDocumentChanged = documentId =>
-                {
-                    if (_editorWorkspaceViewModel.Documents.Any(document => document.Id == documentId))
-                    {
-                        _editorWorkspaceViewModel.Activate(documentId);
-                        TabControlMain_SelectedIndexChanged(this, EventArgs.Empty);
-                        UpdateGitTimelineForActiveDocument();
-                    }
-                };
-                dsm.DocumentOrderChanged = order => _editorWorkspaceViewModel.Reorder(order);
-                dsm.ApplyTheme(_applicationSettingsContext.Config.UseSpecialColoring);
-                RegisterLeftPanelTools(dsm);
-
-                // Results live in the DockBottom Results tool (EnsureSqlResultsToolWindow /
-                // ShowResultsForTab / WinFormsSqlResultPresenter) — the only results path.
-                dsm.EnsureResultsToolWindow();
-
-                // ── DockSuite layout fixes ────────────────────────────
-                // 1. Hide the legacy _leftTabs (empty TabPages) so they don't
-                //    leave a vertical empty strip. Collapse Panel1 fully.
-                _leftTabs.Visible = false;
-                splitContainer1.Panel1Collapsed = true;
-
-                // 2. Eagerly initialize all left panels (they were lazy via
-                //    _leftTabsSelectedIndexChanged in legacy mode).
-                InitializeVariablesControl();
-                InitializeFilesControl();
-                InitializeGitControl();
-                InitializeObjectExplorerControl();
-                InitializeDockWindowMenu(dsm);
+            // Static shell: the legacy TabControl/SplitContainer layout in the
+            // designer is the only editor host. Left tool panels are plain
+            // TabPages again; results live in each document's SplitContainer.
+            WireMainTabStrip();
+            InitializeDatabaseExplorerControl();
+            InitializeGitControl();
+            InitializeWindowMenu();
 #if AI
-                InitializeAiChat(dsm);
+            InitializeAiChat();
 #endif
-                UpdateGitTimelineForActiveDocument();
-
-                // 3. The last registered tool (Legend) becomes the active
-                //    tab in the DockLeft panel group. Re-activate Database.
-                if (dsm.TryGetTool("Database", out var dbTool))
-                {
-                    dbTool.DockHandler.Activate();
-                }
-
-                // 4. Wire keyboard shortcuts to the form (KeyPreview=true).
-                //    In DockSuite mode _tabControlMain is hidden and never
-                //    receives focus, so F5/Ctrl+Enter/etc. would be dead.
-                this.KeyDown += tabControlMain_KeyDown;
-                Program.LogStartup("BaseWindow ctor: after dock suite init");
-            }
+            UpdateGitTimelineForActiveDocument();
+            Program.LogStartup("BaseWindow ctor: after static shell init");
 
             ControlBox = false;
             _titleBarCaptionButtons = new TitleBarCaptionButtonsControl(this)
@@ -732,26 +717,7 @@ namespace JustyBaseLegacy.UI
 
         private void OpenPreferencesFromShell()
         {
-            if (_tabManager is DockSuiteTabManager dockSuite)
-            {
-                dockSuite.ShowPreferences(
-                    RepaintPreferences,
-                    SaveManySqlToDisk,
-                    _applicationSettingsContext,
-                    _snippetInitializationContext,
-                    _settingsPersistence.SaveConfig,
-                    _recentFileRuntimeContext.SaveRecentFiles,
-                    _uiHelperService,
-                    _colorTheme,
-                    _netezzaAutocompleteState
-#if AI
-                    , _fimModelCatalog
-                    , _fimModelBootstrap
-                    , _chatCatalog
-                    , _chatBootstrap
-#endif
-                    );
-            }
+            ShowPreferencesDocument();
         }
 
         private void RepaintPreferences()
@@ -803,13 +769,13 @@ namespace JustyBaseLegacy.UI
                     _variablesViewModel,
                     () => _sessionVariableRuntimeContext.ActualTabTitleText,
                     _uiHelperService,
-                    _colorTheme);
-
-                // Register as persistent DockPanel tool window
-                if (_tabManager is DockSuiteTabManager dsm)
+                    _colorTheme)
                 {
-                    dsm.RegisterPersistentTool("Variables", _variablesControl, DockState.DockLeft);
-                }
+                    Dock = DockStyle.Fill
+                };
+
+                tabPageVariables.Controls.Clear();
+                tabPageVariables.Controls.Add(_variablesControl);
                 tabPageVariables.Tag = "initialized";
             }
         }
@@ -932,74 +898,57 @@ namespace JustyBaseLegacy.UI
 
             Enabled = true;
 
-            // ── Check if DockSuite layout file exists (authoritative session restore) ──
-            bool hasDockLayout = File.Exists(Path.Combine(_applicationSettingsContext.ConfigDirectory, "dockLayout.xml"));
+            // ── Session restore comes from the ManySql startup bundle ──
+            // The static shell no longer persists a docking layout. Editor tab
+            // order and per-document connection state live in
+            // simpleStartup.manysql(.enc).
+            bool encryptedStartupExists = File.Exists(
+                Path.Combine(_applicationSettingsContext.ConfigDirectory, "simpleStartup.manysql.enc"));
+            bool plainStartupExists = File.Exists(
+                Path.Combine(_applicationSettingsContext.ConfigDirectory, "simpleStartup.manysql"));
+            bool shouldRestoreLayout = StartupArguments.ShouldRestoreStartupFiles(
+                _applicationSettingsContext.Config.SimpleStartupRestore,
+                encryptedStartupExists,
+                plainStartupExists);
 
-            // Layout restore (like the bundle restore below) is gated by the
-            // "Restore previous tabs state" preference so the toggle disables
-            // session restore no matter which mechanism would serve it.
-            bool shouldRestoreLayout = _applicationSettingsContext.Config.SimpleStartupRestore && hasDockLayout;
-
-            // This block runs whenever a previous session will NOT be restored
-            // (no layout, or the user disabled restore). When a layout exists
-            // but restore is disabled, skip the bundle and start fresh from the
-            // configured startup files.
-            if (!shouldRestoreLayout)
+            if (shouldRestoreLayout)
             {
-                bool encryptedStartupExists = File.Exists(_applicationSettingsContext.ConfigDirectory + @"\simpleStartup.manysql.enc");
-                bool plainStartupExists = File.Exists(_applicationSettingsContext.ConfigDirectory + @"\simpleStartup.manysql");
-                if (!hasDockLayout
-                    && StartupArguments.ShouldRestoreStartupFiles(
-                        _applicationSettingsContext.Config.SimpleStartupRestore,
-                        encryptedStartupExists,
-                        plainStartupExists)
-                    && encryptedStartupExists)
+                _ = OpenManySQLhAsync(_applicationSettingsContext.ConfigDirectory + @"\simpleStartup.manysql");
+            }
+            else if (_applicationSettingsContext.Config.StartFilesExtra is null
+                || _applicationSettingsContext.Config.StartFilesExtra.Count == 0)
+            {
+                AddMainTab(null);
+            }
+            else
+            {
+                bool added = false;
+                foreach (var item in _applicationSettingsContext.Config.StartFilesExtra)
                 {
-                    _ = OpenManySQLhAsync(_applicationSettingsContext.ConfigDirectory + @"\simpleStartup.manysql");
+                    if (!item.Value)
+                    {
+                        continue;
+                    }
+                    string path = item.Key;
+                    if (string.IsNullOrWhiteSpace(item.Key) || !File.Exists(path))
+                    {
+                        continue;
+                    }
+
+                    if (path.EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _ = OpenSqlFileAsync(item.Key);
+                        added = true;
+                    }
+                    else if ((path.EndsWith(".manysql", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".manysql.enc", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        _ = OpenManySQLhAsync(path);
+                        added = true;
+                    }
                 }
-                else if (!hasDockLayout
-                    && StartupArguments.ShouldRestoreStartupFiles(
-                        _applicationSettingsContext.Config.SimpleStartupRestore,
-                        encryptedStartupExists,
-                        plainStartupExists)
-                    && plainStartupExists)
-                {
-                    _ = OpenManySQLhAsync(_applicationSettingsContext.ConfigDirectory + @"\simpleStartup.manysql");
-                }
-                else if (_applicationSettingsContext.Config.StartFilesExtra is null || _applicationSettingsContext.Config.StartFilesExtra.Count == 0)
+                if (!added)
                 {
                     AddMainTab(null);
-                }
-                else
-                {
-                    bool added = false;
-                    foreach (var item in _applicationSettingsContext.Config.StartFilesExtra)
-                    {
-                        if (!item.Value)
-                        {
-                            continue;
-                        }
-                        string path = item.Key;
-                        if (string.IsNullOrWhiteSpace(item.Key) || !File.Exists(path))
-                        {
-                            continue;
-                        }
-
-                        if (path.EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
-                        {
-                            _ = OpenSqlFileAsync(item.Key);
-                            added = true;
-                        }
-                        else if ((path.EndsWith(".manysql", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".manysql.enc", StringComparison.OrdinalIgnoreCase)))
-                        {
-                            _ = OpenManySQLhAsync(path);
-                            added = true;
-                        }
-                    }
-                    if (!added)
-                    {
-                        AddMainTab(null);
-                    }
                 }
             }
 
@@ -1034,134 +983,6 @@ namespace JustyBaseLegacy.UI
                     temp1.Click += new System.EventHandler(this.ExportToXlsx_Click);
                 }
             }
-
-            // ── Restore DockPanel layout from previous session ──
-            if (shouldRestoreLayout && _tabManager is DockSuiteTabManager dsm)
-            {
-                string layoutPath = Path.Combine(_applicationSettingsContext.ConfigDirectory, "dockLayout.xml");
-                _ = RestoreDockLayoutAsync(dsm, layoutPath);
-            }
-
-        }
-
-        private async Task RestoreDockLayoutAsync(
-            DockSuiteTabManager dockSuiteTabManager,
-            string layoutPath)
-        {
-            try
-            {
-                // DockSuite persists file paths and layout, while the Many
-                // SQL startup bundle carries per-document editor state such
-                // as the selected connection. Read that metadata alongside
-                // the layout so each restored tab gets its own connection.
-                ManySqlBundle? startupBundle = null;
-                string startupBundlePath = Path.Combine(
-                    _applicationSettingsContext.ConfigDirectory,
-                    "simpleStartup.manysql");
-                if (File.Exists(startupBundlePath))
-                {
-                    try
-                    {
-                        startupBundle = await LoadManySqlBundleWithRecoveryAsync(
-                            startupBundlePath,
-                            CancellationToken.None);
-                    }
-                    catch (Exception exception)
-                    {
-                        Trace.WriteLine($"Could not load startup tab metadata: {exception.Message}");
-                    }
-                }
-
-                var loadedDocuments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                foreach (string path in dockSuiteTabManager.GetPersistedFilePaths(layoutPath))
-                {
-                    if (IsDisposed || Disposing)
-                        return;
-
-                    if (!File.Exists(path))
-                        continue;
-
-                    try
-                    {
-                        loadedDocuments[path] = await File.ReadAllTextAsync(path);
-                    }
-                    catch (Exception exception)
-                    {
-                        Trace.WriteLine($"Could not preload dock document '{path}': {exception.Message}");
-                    }
-                }
-
-                if (IsDisposed || Disposing)
-                    return;
-
-                dockSuiteTabManager.LoadLayout(layoutPath, persistString =>
-                {
-                    if (persistString.StartsWith("tool:", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string title = persistString["tool:".Length..];
-                        if (title.Equals("Results", StringComparison.OrdinalIgnoreCase))
-                            return dockSuiteTabManager.EnsureResultsToolWindow();
-
-                        return dockSuiteTabManager.GetToolWindow(title);
-                    }
-
-                    if (persistString.StartsWith("unsaved://", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string title = persistString["unsaved://".Length..];
-                        ManySqlContent? content = startupBundle?.SqlContentList
-                            .FirstOrDefault(item => string.Equals(item.Title, title, StringComparison.OrdinalIgnoreCase));
-                        if (content is null)
-                            return null;
-
-                        ManySqlDocumentState? unsavedState = FindManySqlDocumentState(startupBundle, title);
-                        int beforeCount = EditorTabPages.Count;
-                        AddMainTabCore(
-                            null,
-                            title,
-                            content.Text,
-                            unsavedState?.ConnectionName,
-                            unsavedState?.DatabaseName);
-                        for (int index = beforeCount; index < EditorTabPages.Count; index++)
-                        {
-                            if (string.Equals(EditorTabPages[index].Text, title, StringComparison.OrdinalIgnoreCase))
-                                return dockSuiteTabManager.GetDockContentForTab(EditorTabPages[index]);
-                        }
-                        return null;
-                    }
-
-                    if (string.IsNullOrEmpty(persistString)
-                        || !loadedDocuments.TryGetValue(persistString, out string? documentText))
-                    {
-                        return null;
-                    }
-
-                    ManySqlDocumentState? state = startupBundle is null
-                        ? null
-                        : FindManySqlDocumentState(startupBundle, persistString);
-                    AddMainTabCore(
-                        persistString,
-                        title: "",
-                        trescSQL: documentText,
-                        state?.ConnectionName,
-                        state?.DatabaseName);
-
-                    foreach (TabPage tab in EditorTabPages)
-                    {
-                        if (tab.Tag is TabPageMainTag mainTag && mainTag.Filename == persistString)
-                            return dockSuiteTabManager.GetDockContentForTab(tab);
-                    }
-                    return null;
-                });
-
-                if (EditorTabPages.Count == 0)
-                    AddMainTab(null);
-            }
-            catch (Exception exception)
-            {
-                Trace.WriteLine($"Asynchronous dock layout restore failed: {exception}");
-                if (!IsDisposed && !Disposing && EditorTabPages.Count == 0)
-                    AddMainTab(null);
-            }
         }
 
         private FilesControl? _filesControl;
@@ -1180,15 +1001,33 @@ namespace JustyBaseLegacy.UI
                 return;
 
             _filesControl = new FilesControl(_uiHelperService, _colorTheme,
-                this, _applicationSettingsContext, this.imageListFiles, _filesViewModel, _fileSearchEngine);
-            _filesControl.BorderStyle = BorderStyle.FixedSingle;
-
-            // Register as persistent DockPanel tool window
-            if (_tabManager is DockSuiteTabManager dsm)
+                this, _applicationSettingsContext, this.imageListFiles, _filesViewModel, _fileSearchEngine)
             {
-                dsm.RegisterPersistentTool("Files", _filesControl, DockState.DockLeft);
-            }
+                Dock = DockStyle.Fill
+            };
+            _filesControl.BorderStyle = BorderStyle.None;
+
+            tabPageFiles.Controls.Clear();
+            tabPageFiles.Controls.Add(_filesControl);
             tabPageFiles.Tag = "initialized";
+        }
+
+        private TabPage? _tabPageGit;
+
+        private TabPage EnsureGitTab()
+        {
+            if (_tabPageGit is not null && !_tabPageGit.IsDisposed)
+                return _tabPageGit;
+
+            _tabPageGit = new TabPage("Git")
+            {
+                Name = "tabPageGit",
+                Padding = new Padding(0),
+                UseVisualStyleBackColor = true
+            };
+            _leftTabs.TabPages.Add(_tabPageGit);
+            _leftTabs.ItemSize = TabIconLayout.LeftTabItemSize(_leftTabs, Font, DeviceDpi);
+            return _tabPageGit;
         }
 
         private void InitializeGitControl()
@@ -1196,13 +1035,16 @@ namespace JustyBaseLegacy.UI
             if (_gitControl != null)
                 return;
 
-            _gitControl = new GitControl(_gitViewModel, this, _colorTheme);
-            _gitControl.BorderStyle = BorderStyle.FixedSingle;
-
-            if (_tabManager is DockSuiteTabManager dsm)
+            _gitControl = new GitControl(_gitViewModel, this, _colorTheme)
             {
-                dsm.RegisterPersistentTool("Git", _gitControl, DockState.DockLeft);
-            }
+                Dock = DockStyle.Fill,
+                BorderStyle = BorderStyle.None
+            };
+
+            TabPage gitTab = EnsureGitTab();
+            gitTab.Controls.Clear();
+            gitTab.Controls.Add(_gitControl);
+            gitTab.Tag = "initialized";
         }
 
         private void UpdateGitTimelineForActiveDocument()
@@ -1213,7 +1055,6 @@ namespace JustyBaseLegacy.UI
         }
 
         private EditorDocumentViewModel? _gitTimelineDocument;
-        private GitDiffDockContent? _gitDiffDockContent;
         private GitDiffControl? _gitDiffControl;
 
         public void ShowOrUpdateGitDiff(GitFileContents contents)
@@ -1226,39 +1067,21 @@ namespace JustyBaseLegacy.UI
 
             if (isClear)
             {
-                if (_gitDiffControl is null || _gitDiffDockContent is null || _gitDiffDockContent.IsDisposed)
+                if (_gitDiffControl is null || FindDocumentTab("gitDiffDocument") is not { } existing)
                     return;
 
-                _gitDiffDockContent.SetTitle($"diff: {contents.Title}");
+                existing.Text = $"diff: {contents.Title}";
                 _gitDiffControl.LoadDiff(contents.Title, contents.OldText, contents.NewText);
                 return;
             }
 
             string title = $"diff: {contents.Title}";
-            if (_gitDiffControl is null || _gitDiffDockContent is null || _gitDiffDockContent.IsDisposed)
+            if (_gitDiffControl is null || _gitDiffControl.IsDisposed)
             {
                 _gitDiffControl = new GitDiffControl();
-                _gitDiffDockContent = new GitDiffDockContent(_gitDiffControl, title);
-                _gitDiffDockContent.FormClosed += (_, _) =>
-                {
-                    _gitDiffDockContent = null;
-                    _gitDiffControl = null;
-                };
-
-                if (_tabManager is DockSuiteTabManager dsm)
-                    dsm.ShowGitDiffDocument(_gitDiffDockContent);
-                else
-                    _gitDiffDockContent.Show();
-            }
-            else
-            {
-                _gitDiffDockContent.SetTitle(title);
-                if (_tabManager is DockSuiteTabManager dsm)
-                    dsm.ShowGitDiffDocument(_gitDiffDockContent);
-                else
-                    _gitDiffDockContent.Activate();
             }
 
+            ShowDocumentTab("gitDiffDocument", title, () => _gitDiffControl);
             _gitDiffControl.LoadDiff(contents.Title, contents.OldText, contents.NewText);
         }
 
@@ -1292,53 +1115,85 @@ namespace JustyBaseLegacy.UI
             }
         }
 
-        // ── DockSuite tool windows (left-side panels as DockContent) ──
+        // ── Static left-side tool panels ─────────────────────────────
 
-        /// <summary>
-        /// Registers the left-side panels (Database Explorer, Variables, etc.)
-        /// as DockPanel tool windows. Called only when DockSuiteTabManager is active.
-        /// Controls are moved from _leftTabs TabPages into ToolDockContent windows
-        /// docked to the left side of the DockPanel. _leftTabs TabPages remain
-        /// for backward-compatible index-based lookups but become empty.
-        /// </summary>
-        private void RegisterLeftPanelTools(DockSuiteTabManager dsm)
+        private void InitializeDatabaseExplorerControl()
         {
-            // ── Database Explorer ──────────────────────────────────────
-            // MVVM Database Explorer — replaces the old Designer-created control
-            _mvvmDatabaseExplorerControl ??= new Controls.MvvmDatabaseExplorerControl(_databaseExplorerViewModel);
+            if (_mvvmDatabaseExplorerControl is not null)
+            {
+                return;
+            }
+
+            _mvvmDatabaseExplorerControl = new Controls.MvvmDatabaseExplorerControl(_databaseExplorerViewModel)
+            {
+                Dock = DockStyle.Fill
+            };
             _mvvmDatabaseExplorerControl.TreeViewImageList = imageList1;
             _mvvmDatabaseExplorerControl.ContextMenuFactory = CreateMvvmSchemaContextMenu;
             _mvvmDatabaseExplorerControl.AddConnectionRequested += (_, _) => ShowLoginForm();
             _mvvmDatabaseExplorerControl.EditConnectionRequested += (_, _) => ShowLoginForm();
-            dsm.RegisterPersistentTool("Database", _mvvmDatabaseExplorerControl, DockState.DockLeft);
 
-            // Ensure the tree is populated even if the control's Load event
-            // does not fire in the DockSuite lifecycle.
+            databaseTabPage.Controls.Add(_mvvmDatabaseExplorerControl);
+            databaseTabPage.Tag ??= "initialized";
             _ = _mvvmDatabaseExplorerControl.InitializeAsync();
         }
 
-        private void InitializeDockWindowMenu(DockSuiteTabManager dsm)
+        private void InitializeWindowMenu()
         {
-            var windowsMenu = new ToolStripMenuItem("Dock windows");
-            foreach (string title in new[] { "Database", "Files", "Git", "Variables", "Outline", "Results" })
+            var panelsMenu = new ToolStripMenuItem("Panels");
+            AddPanelMenuItem(panelsMenu, "Database", () => ShowLeftPanel(databaseTabPage));
+            AddPanelMenuItem(panelsMenu, "Files", () =>
             {
-                var item = new ToolStripMenuItem(title);
-                item.Click += (_, _) =>
-                {
-                    if (title.Equals("Results", StringComparison.OrdinalIgnoreCase))
-                    {
-                        dsm.EnsureResultsToolWindow().Activate();
-                    }
-                    else if (dsm.GetToolWindow(title) is { } tool)
-                    {
-                        dsm.ShowToolWindow(title, tool.Content);
-                    }
-                };
-                windowsMenu.DropDownItems.Add(item);
-            }
+                InitializeFilesControl();
+                ShowLeftPanel(tabPageFiles);
+            });
+            AddPanelMenuItem(panelsMenu, "Git", () =>
+            {
+                InitializeGitControl();
+                ShowLeftPanel(EnsureGitTab());
+            });
+            AddPanelMenuItem(panelsMenu, "Variables", () =>
+            {
+                InitializeVariablesControl();
+                ShowLeftPanel(tabPageVariables);
+            });
+            AddPanelMenuItem(panelsMenu, "Outline", () =>
+            {
+                InitializeObjectExplorerControl();
+                ShowLeftPanel(tabPageLegend);
+            });
+            AddPanelMenuItem(panelsMenu, "Results", FocusCurrentResults);
 
             optionsToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
-            optionsToolStripMenuItem.DropDownItems.Add(windowsMenu);
+            optionsToolStripMenuItem.DropDownItems.Add(panelsMenu);
+        }
+
+        private static void AddPanelMenuItem(ToolStripMenuItem parent, string title, Action action)
+        {
+            var item = new ToolStripMenuItem(title);
+            item.Click += (_, _) => action();
+            parent.DropDownItems.Add(item);
+        }
+
+        private void ShowLeftPanel(TabPage page)
+        {
+            if (page is null || !_leftTabs.TabPages.Contains(page))
+            {
+                return;
+            }
+
+            splitContainer1.Panel1Collapsed = false;
+            _leftTabs.SelectedTab = page;
+        }
+
+        private void FocusCurrentResults()
+        {
+            EnsureSqlResultsToolWindow();
+            if (CurrentSplitContainer?.Tag is ResultData resultData
+                && resultData.TabControlSQLResults is { IsDisposed: false } results)
+            {
+                results.Focus();
+            }
         }
 
 
@@ -1402,16 +1257,29 @@ namespace JustyBaseLegacy.UI
 
         private void tabControlMain_MouseDown(object sender, MouseEventArgs e)
         {
-            if (e.Button == MouseButtons.Right)
+            int index = TabIndexAt(e.Location);
+            if (e.Button == MouseButtons.Left)
             {
-                for (int ix = 0; ix < EditorTabPages.Count; ++ix)
+                if (index >= 0 && IsMainTabCloseHit(index, e.Location))
                 {
-                    if (_tabControlMain.GetTabRect(ix).Contains(e.Location))
-                    {
-                        _tabManager.SelectTab(EditorTabPages[ix]);
-                        break;
-                    }
+                    _tabDragSource = null;
+                    TabPage page = _tabControlMain.TabPages[index];
+                    _ = RunUiEventAsync(nameof(CloseMainTabAsync), () => CloseMainTabAsync(page));
+                    return;
                 }
+
+                if (index >= 0)
+                {
+                    _tabDragSource = _tabControlMain.TabPages[index];
+                    _tabDragStart = e.Location;
+                }
+
+                return;
+            }
+
+            if (e.Button == MouseButtons.Right && index >= 0)
+            {
+                _tabControlMain.SelectedTab = _tabControlMain.TabPages[index];
             }
         }
 
@@ -1566,9 +1434,7 @@ namespace JustyBaseLegacy.UI
             string tabName = tabPageDaneSQLNowe.Text;
             _sessionVariableRuntimeContext.EnsureSessionVariables(tabName);
 
-            if (_tabManager is not DockSuiteTabManager)
-                this._tabControlMain.Controls.Add(tabPageDaneSQLNowe);
-            //tabControlMain.TabPages.Add(tabPageDaneSQLNowe);
+            this._tabControlMain.Controls.Add(tabPageDaneSQLNowe);
 
             tabPageDaneSQLNowe.ContextMenuStrip = cmMain;
             SplitContainer splitContainerNowy = new SplitContainer();
@@ -1593,7 +1459,8 @@ namespace JustyBaseLegacy.UI
             }
             //splitContainerNowy.Orientation = Orientation.Horizontal;
 
-            splitContainerNowy.SplitterDistance = (int)Math.Round(splitContainerNowy.Parent.Height * 0.8);
+            // SplitterDistance is applied after the splitter is laid out; setting
+            // it here would throw while the tab still has a zero height.
             tabPageDaneSQLNowe.Controls.Add(splitContainerNowy);
 
             if (fileName != null)
@@ -1619,8 +1486,6 @@ namespace JustyBaseLegacy.UI
             _documentIdsByTab[tabPageDaneSQLNowe] = editorDocument.Id;
             _documentIdsByEditor[sqlUpper.CurrentTb] = editorDocument.Id;
             sqlUpper.SetDocumentId(editorDocument.Id);
-            if (_tabManager is DockSuiteTabManager dockSuiteTabManager)
-                dockSuiteTabManager.SetDocumentId(tabPageDaneSQLNowe, editorDocument.Id);
             EnsureResultsTabControl(splitContainerNowy);
 
             _tabManager.SelectTab(tabPageDaneSQLNowe);
@@ -1894,8 +1759,7 @@ namespace JustyBaseLegacy.UI
                     r.ShowDialog();
 
                     VariablesAfterChangeTabName(prevName, tp.Text);
-                    if (_tabManager is DockSuiteTabManager dsm)
-                        dsm.UpdateEditorTab(tp);
+                    _tabControlMain.Invalidate();
                 }
             }
         }
@@ -1950,8 +1814,8 @@ namespace JustyBaseLegacy.UI
             }
             else if (e.KeyCode == Keys.W && ModifierKeys == Keys.Control)
             {
-                if (ActiveEditorTabPage is TabPage activeTab)
-                    await DoClosingOfTabAsync(_tabControlMain, activeTab);
+                if (_tabControlMain.SelectedTab is TabPage selectedTab)
+                    await CloseMainTabAsync(selectedTab);
             }
             else if (e.KeyCode == Keys.S && ModifierKeys == Keys.Control)
             {
@@ -2059,38 +1923,7 @@ namespace JustyBaseLegacy.UI
                 return;
             }
 
-            QueryWatchContext ContextFactory() => new(
-                SelectedConnectionName,
-                SelectedDatabase,
-                (int)_generalDbService.RelatedDatabaseType);
-
-            if (_tabManager is DockSuiteTabManager dockSuite)
-            {
-                dockSuite.ShowQueryWatch(
-                    _queryWatchService,
-                    ContextFactory,
-                    o => _colorTheme.ColorForm(o),
-                    f => _uiHelperService.DoubleBufDateGridView(f),
-                    _loggerLoud);
-                return;
-            }
-
-            if (_queryWatch is null || _queryWatch.IsDisposed)
-            {
-                var viewModel = new QueryWatchViewModel(
-                    _queryWatchService,
-                    ContextFactory,
-                    _uiDispatcher);
-                _queryWatch = new QueryWatch(
-                    viewModel,
-                    o => _colorTheme.ColorForm(o),
-                    f => _uiHelperService.DoubleBufDateGridView(f),
-                    _loggerLoud);
-            }
-
-            _queryWatch.Show();
-            _queryWatch.Focus();
-            _ = _queryWatch.RefreshNowAsync();
+            ShowQueryWatchDocument();
         }
 
 
@@ -2100,8 +1933,7 @@ namespace JustyBaseLegacy.UI
             ApplyApplicationColorMode();
             try
             {
-                if (_tabManager is DockSuiteTabManager dsm)
-                    dsm.ApplyTheme(_applicationSettingsContext.Config.UseSpecialColoring);
+                InvalidateMainTabs();
             }
             catch (Exception ex)
             {

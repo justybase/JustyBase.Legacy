@@ -1,8 +1,11 @@
 # No-AI build
 
-JustyBase.Legacy ships its AI features as optional components. Set
-`EnableAi=false` to build the WinForms application without the AI UI and
-without restoring the heavy AI NuGet dependencies.
+JustyBase.Legacy ships its AI features as optional components. Build
+`JustData.NoAi.slnx` to get a WinForms application without the AI UI and
+without restoring the heavy AI NuGet dependencies. The solution sets
+`EnableAi=false` automatically for both CLI and IDE builds; passing
+`-p:EnableAi=false` explicitly is still supported and remains the way to build
+the application project on its own.
 
 ## What is excluded
 
@@ -24,8 +27,8 @@ excluded from the test projects when `EnableAi=false`.
 ## Build
 
 ```powershell
-# Whole solution (JustData.NoAi.slnx excludes the AI projects)
-dotnet build JustData.NoAi.slnx -c Release -p:EnableAi=false
+# Whole solution (JustData.NoAi.slnx excludes the AI projects and sets EnableAi=false)
+dotnet build JustData.NoAi.slnx -c Release
 
 # Application only
 dotnet build .\JustData\JustData.csproj -c Release -p:EnableAi=false
@@ -35,8 +38,12 @@ dotnet publish .\JustData\JustData.csproj -r win-x64 -c Release `
   -p:EnableAi=false --self-contained true
 ```
 
-`EnableAi` defaults to `true`; omit the property for the standard AI-enabled
-build. The `AI` preprocessor constant is defined only when `EnableAi=true`.
+`EnableAi` defaults to `true` for every other solution and for standalone
+project builds, and `JustData.NoAi.slnx` switches it to `false` automatically.
+Keep the value consistent across a restore+build pair; mixing an AI restore
+with a no-AI build (or the reverse) in the same `bin`/`obj` folders can leave
+stale assemblies. If that happens, delete the affected `bin`/`obj` folders and
+rebuild. The `AI` preprocessor constant is defined only when `EnableAi=true`.
 
 ## Verification
 

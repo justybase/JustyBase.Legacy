@@ -401,7 +401,7 @@ public sealed class GeneralSqlExecutionEngine : ISqlExecutionEngine, IStatementL
 
     /// <summary>
     /// Provider-only reader loop used by the General DB slice. It deliberately
-    /// knows nothing about grids, dialogs or DockSuite; callers decide how a
+    /// knows nothing about grids or dialogs; callers decide how a
     /// row is presented and whether streaming should continue.
     /// </summary>
     public static Task<long> StreamRowsAsync(

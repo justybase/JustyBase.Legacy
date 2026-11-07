@@ -71,10 +71,11 @@ Do not add new `public static` mutable fields in `App.Data.Netezza` or `AppBase.
 | [ADR-001](docs/ADR/ADR-001-clean-layers.md) | Clean layers: `net10.0` without `-windows` |
 | [ADR-002](docs/ADR/ADR-002-engine-first-completion.md) | Engine-first SQL completion (NzCompletionEngine) |
 | [ADR-003](docs/ADR/ADR-003-no-command-messages.md) | No command-style messages — explicit interfaces |
-| [ADR-004](docs/ADR/ADR-004-docksuite-over-tabcontrol.md) | DockSuite over embedded TabControl |
+| [ADR-004](docs/ADR/ADR-004-docksuite-over-tabcontrol.md) | ~~DockSuite over embedded TabControl~~ (superseded by ADR-008) |
 | [ADR-005](docs/ADR/ADR-005-credential-encryption.md) | Credential encryption: AES-GCM + DPAPI |
 | [ADR-006](docs/ADR/ADR-006-flaui-automationids.md) | FlaUI UI tests with stable AutomationIds |
 | [ADR-007](docs/ADR/ADR-007-testability-ports-over-global-state.md) | Testability through ports, not global state |
+| [ADR-008](docs/ADR/ADR-008-static-shell-over-docking.md) | Static WinForms shell over docking (TabControl + SplitContainer) |
 
 ---
 

@@ -165,7 +165,7 @@ public sealed class DocumentationScreenshotsTests
             timeout: TimeSpan.FromSeconds(30),
             condition: grid => grid.BoundingRectangle.Height >= 120);
 
-        // Nudge layout: focus results so DockSuite does not leave them collapsed.
+        // Nudge layout: focus results so the editor/results splitter keeps them visible.
         try
         {
             resultGrid.Focus();

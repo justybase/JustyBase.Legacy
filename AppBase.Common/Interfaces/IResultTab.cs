@@ -4,7 +4,7 @@ namespace AppBase.Common;
 
 /// <summary>
 /// Abstracts the tag data attached to result tab pages.
-/// Enables swapping TabPage+SplitContainer for DockSuite DockContent later.
+/// Keeps the result-tab contract independent from the concrete tab host.
 /// </summary>
 public interface IResultTab
 {
@@ -18,7 +18,7 @@ public interface IResultTab
     bool CommandCanceled { get; set; }
 
     /// <summary>Reference to the parent tab control (results tab strip).
-    /// In DockSuite mode, this may be null since the ResultsDockContent
-    /// manages its own tab pages without a DraggableTabControl.</summary>
+    /// Results always live in the document's own tab strip; this is null only
+    /// for synthetic tabs that have not been attached yet.</summary>
     TabControl? ParentControl { get; set; }
 }

@@ -224,7 +224,7 @@ public sealed class MvvmDatabaseExplorerControl : UserControl
             FullRowSelect = true,
             ShowNodeToolTips = true,
             ShowPlusMinus = true,
-            ShowLines = true,
+            ShowLines = false,
             ShowRootLines = true,
             Indent = 16,
             ItemHeight = 22
@@ -626,7 +626,13 @@ public sealed class MvvmDatabaseExplorerControl : UserControl
     {
         try
         {
-            await ExpandTreeNodeAsync(treeNode);
+            // BeforeExpand path: the TreeView is already expanding this node,
+            // so only ensure children are loaded. Calling treeNode.Expand()
+            // here re-fires BeforeExpand synchronously once ExpandAsync
+            // completes synchronously (already-loaded node) and overflows the
+            // stack.
+            if (treeNode.Tag is not ExplorerNodeViewModel node) return;
+            await _viewModel.ExpandAsync(node).ConfigureAwait(true);
         }
         catch (OperationCanceledException)
         {
@@ -647,7 +653,11 @@ public sealed class MvvmDatabaseExplorerControl : UserControl
     {
         if (treeNode.Tag is not ExplorerNodeViewModel node) return;
         await _viewModel.ExpandAsync(node, cancellationToken).ConfigureAwait(true);
-        treeNode.Expand();
+        // Programmatic path only (SelectObjectAsync). The BeforeExpand
+        // handler above loads without re-expanding, so this single Expand()
+        // terminates after one nested BeforeExpand for the already-loaded node.
+        if (!treeNode.IsExpanded)
+            treeNode.Expand();
     }
 
     private void RenderRoots()

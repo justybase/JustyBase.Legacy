@@ -7,7 +7,7 @@ namespace JustyBaseLegacy.UI.Sql;
 /// <summary>
 /// Owns the short lived ADO resources used by an SQL document.  The registry is
 /// deliberately keyed by document id, rather than a WinForms tab or a
-/// connection hash: a tab can be re-parented by DockSuite while a command is
+/// connection hash: a tab can be re-parented while a command is
 /// still running.
 /// </summary>
 public interface ISqlExecutionSessionRegistry

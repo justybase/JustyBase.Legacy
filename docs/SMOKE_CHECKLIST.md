@@ -17,7 +17,7 @@ Run these checks manually before pushing a release tag (`vMAJOR.MINOR.PATCH.REVI
 - [ ] Open SQL editor, run a simple `SELECT` against a test database
 - [ ] Confirm results grid renders and export to CSV works on a small result set
 - [ ] Open Preferences, change a setting, save and cancel paths behave correctly
-- [ ] Close app and reopen — dock layout and recent files behave as expected
+- [ ] Close app and reopen - tab session and recent files behave as expected
 
 ## Artifacts
 

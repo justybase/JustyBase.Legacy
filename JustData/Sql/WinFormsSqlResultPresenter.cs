@@ -10,7 +10,7 @@ namespace JustyBaseLegacy.UI.Sql;
 /// <summary>
 /// Minimal WinForms surface needed by the document result presenter. Keeping
 /// this boundary small prevents the SQL event consumer from owning the main
-/// form or reaching into its document and DockSuite state.
+/// form or reaching into its document state.
 /// </summary>
 internal interface IWinFormsSqlResultView
 {

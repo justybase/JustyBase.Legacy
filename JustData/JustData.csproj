@@ -68,8 +68,6 @@
 	<ItemGroup>
 		<PackageReference Include="DiffPlex" />
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" />
-		<PackageReference Include="DockPanelSuite" />
-		<PackageReference Include="DockPanelSuite.ThemeVS2015" />
 		<!-- Used only by the AI chat panel (WebView2 + Markdig markdown rendering). -->
 		<PackageReference Include="Microsoft.Web.WebView2" Condition="'$(EnableAi)' == 'true'" />
 		<PackageReference Include="Markdig" Condition="'$(EnableAi)' == 'true'" />
