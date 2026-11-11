@@ -25,6 +25,15 @@
 
 ---
 
+> [!IMPORTANT]
+> ## ⚠️ This repository is archived
+>
+> **JustyBase.Legacy** is no longer maintained. It is kept read-only for historical reference.
+>
+> **Program users:** please migrate to the actively developed successor — **[github.com/justybase/JustyBase](https://github.com/justybase/JustyBase)**. Download current builds from the [JustyBase releases](https://github.com/justybase/JustyBase/releases) page. No further updates, fixes, or releases will be published here.
+
+---
+
 <p align="center">
   <img src="docs/images/explorer-dark.png" alt="SQL editor with results — dark theme" width="920"/>
 </p>
@@ -38,6 +47,8 @@ Netezza, DB2, MS SQL Server, and PostgreSQL are included in the default shipped 
 ---
 
 ## Download
+
+> **This project is archived — use [JustyBase](https://github.com/justybase/JustyBase/releases/latest) instead.** Existing Legacy releases below remain available for reference only.
 
 Get the latest **Windows x64** build from [GitHub Releases](https://github.com/justybase/JustyBase.Legacy/releases/latest):
 
